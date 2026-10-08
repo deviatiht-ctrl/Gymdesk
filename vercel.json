@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "outputDirectory": "web_deploy",
   "rewrites": [
     {
       "source": "/(.*)",
