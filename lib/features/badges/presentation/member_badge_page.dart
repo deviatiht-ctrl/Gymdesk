@@ -1,4 +1,5 @@
-﻿import 'dart:typed_data';
+import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -383,22 +384,66 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
 
                 // Bouton Reyajiste Pozisyon
                 if (_positions.isNotEmpty)
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      setState(() => _positions = {});
-                      Navigator.pop(context);
-                      _toast('Pozisyon yo reyajiste pa defo !');
-                    },
-                    icon: const Icon(LucideIcons.rotateCcw),
-                    label: Text(s.text('badge_reset_positions')),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() => _positions = {});
+                        Navigator.pop(context);
+                        _toast(s.text('badge_reset_positions'));
+                      },
+                      icon: const Icon(LucideIcons.rotateCcw),
+                      label: Text(s.text('badge_reset_positions')),
+                    ),
                   ),
 
-                const SizedBox(height: 16),
+                // Bouton Enregistre kòm modèl defo pou tout sal la
                 SizedBox(
                   width: double.infinity,
-                  child: FilledButton(
+                  child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                    ),
+                    icon: const Icon(LucideIcons.save, size: 18),
+                    label: Text(s.text('save_default_badge')),
+                    onPressed: () async {
+                      try {
+                        final updated = gym.copy(
+                          settings: {
+                            ...gym.settings,
+                            'badge_theme': tempTheme,
+                            'badge_qr_style': tempQr,
+                            if (_positions.isNotEmpty) 'badge_positions': _positions,
+                          },
+                        );
+                        final runtime = ref.read(appRuntimeProvider);
+                        await _settings.save(
+                          updated,
+                          changedAt: runtime.sync?.clock.correctedNow ?? DateTime.now().toUtc(),
+                        );
+                        runtime.applyLocalGym(updated.row);
+                        unawaited(runtime.sync?.synchronize());
+                        if (context.mounted) Navigator.pop(context);
+                        _toast(s.text('badge_design_saved'));
+                      } catch (e, stack) {
+                        debugPrint('Error saving default badge layout: $e\n$stack');
+                        if (context.mounted) {
+                          if (e is SettingsFailure) {
+                            _toast(s.text(e.code));
+                          } else {
+                            _toast(s.text('error'));
+                          }
+                        }
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('FÃ¨men & Aplike'),
+                    child: Text(s.text('close')),
                   ),
                 ),
               ],

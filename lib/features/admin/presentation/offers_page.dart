@@ -20,6 +20,7 @@ class OffersPage extends ConsumerStatefulWidget {
 
 class _OffersPageState extends ConsumerState<OffersPage> {
   late Future<List<PlatformOffer>> _offers;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -30,6 +31,31 @@ class _OffersPageState extends ConsumerState<OffersPage> {
   void _reload() => setState(() {
     _offers = GymsRepository(ref.read(appRuntimeProvider).client).loadOffers();
   });
+
+  Future<void> _seedOfficialPlans() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final repo = GymsRepository(ref.read(appRuntimeProvider).client);
+      await repo.seedDefaultAnnualPlans();
+      _reload();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('4 Plan Anyèl yo anrejistre nan baz la avèk siksè !'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erè : $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   Future<void> _openEditDialog([PlatformOffer? existing]) async {
     final s = AppStrings.of(context);
@@ -42,16 +68,28 @@ class _OffersPageState extends ConsumerState<OffersPage> {
     final priceController = TextEditingController(
       text: existing != null
           ? (existing.price % 1 == 0 ? existing.price.toStringAsFixed(0) : existing.price.toStringAsFixed(2))
-          : '100',
+          : '350',
     );
     final currencyController = TextEditingController(text: existing?.currency ?? 'USD');
     final badgeQuotaController = TextEditingController(
-      text: existing != null ? '${existing.badgeQuota}' : '50',
+      text: existing != null ? '${existing.badgeQuota}' : '0',
+    );
+    final maxMembersController = TextEditingController(
+      text: existing != null ? '${existing.maxMembers}' : '50',
+    );
+    final overageMemberFeeController = TextEditingController(
+      text: existing != null ? '${existing.overageMemberFee}' : '2.0',
+    );
+    final tabletCountController = TextEditingController(
+      text: existing != null ? '${existing.tabletCount}' : '0',
+    );
+    final tabletOptionalPriceController = TextEditingController(
+      text: existing != null ? '${existing.tabletOptionalPrice}' : '180.0',
     );
     final featuresController = TextEditingController(
       text: existing != null && existing.features.isNotEmpty
           ? existing.features.join('\n')
-          : 'Tablèt Android enkli\n50 Badges koutim enprime gratis\nSipò teknik priyoritè',
+          : 'Jiska 50 manb aktif\nDepasman : +2.00 USD / manb extra\nBadj QR fizik sou kòmand\nOpsyon Tablèt Android : +180 USD',
     );
 
     String billingPeriod = existing?.billingPeriod ?? 'annual';
@@ -153,11 +191,63 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                       },
                     ),
                     const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: maxMembersController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Max Manb (0 = Ilimite)',
+                              prefixIcon: Icon(LucideIcons.users),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: overageMemberFeeController,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Frè Depasman / manb',
+                              prefixIcon: Icon(LucideIcons.userPlus),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: tabletCountController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Tablèt Gratis',
+                              prefixIcon: Icon(LucideIcons.tablet),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: tabletOptionalPriceController,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Pri Opsyon Tablèt',
+                              prefixIcon: Icon(LucideIcons.dollarSign),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     TextField(
                       controller: badgeQuotaController,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: s.text('badge_quota_count'),
+                        labelText: '${s.text('badge_quota_count')} (Gratis)',
                         prefixIcon: const Icon(LucideIcons.idCard),
                       ),
                     ),
@@ -201,7 +291,11 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                   final id = isNew ? idController.text.trim() : existing.id;
                   final name = nameController.text.trim();
                   final price = double.tryParse(priceController.text.replaceAll(',', '.')) ?? 0;
-                  final quota = int.tryParse(badgeQuotaController.text) ?? 50;
+                  final quota = int.tryParse(badgeQuotaController.text) ?? 0;
+                  final maxMembers = int.tryParse(maxMembersController.text) ?? 50;
+                  final overageFee = double.tryParse(overageMemberFeeController.text.replaceAll(',', '.')) ?? 0.0;
+                  final tabletCount = int.tryParse(tabletCountController.text) ?? (includesTablet ? 1 : 0);
+                  final tabletOptionalPrice = double.tryParse(tabletOptionalPriceController.text.replaceAll(',', '.')) ?? 0.0;
                   if (id.isEmpty || name.isEmpty) return;
 
                   final rawFeatures = featuresController.text
@@ -212,7 +306,11 @@ class _OffersPageState extends ConsumerState<OffersPage> {
 
                   final Map<String, dynamic> config = Map<String, dynamic>.from(existing?.config ?? {});
                   config['badge_quota'] = quota;
-                  config['includes_tablet'] = includesTablet;
+                  config['max_members'] = maxMembers;
+                  config['overage_member_fee'] = overageFee;
+                  config['tablet_count'] = tabletCount;
+                  config['tablet_optional_price'] = tabletOptionalPrice;
+                  config['includes_tablet'] = includesTablet || tabletCount > 0;
                   config['is_hot'] = isHot;
                   config['features'] = rawFeatures;
 
@@ -314,10 +412,22 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                 ),
                 if (isSuperAdmin) ...[
                   const SizedBox(width: 8),
+                  FilledButton.tonalIcon(
+                    icon: _busy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(LucideIcons.sparkles, size: 18),
+                    label: const Text('Inisyalize 4 Plan Anyèl yo'),
+                    onPressed: _busy ? null : _seedOfficialPlans,
+                  ),
+                  const SizedBox(width: 8),
                   FilledButton.icon(
                     icon: const Icon(LucideIcons.plus, size: 18),
                     label: Text(s.text('add_offer')),
-                    onPressed: () => _openEditDialog(),
+                    onPressed: _busy ? null : () => _openEditDialog(),
                   ),
                 ],
               ],
@@ -492,19 +602,40 @@ class _OfferCard extends StatelessWidget {
                 const SizedBox(height: 8),
 
                 // Karakteristik & Avantaj founi
-                if (offer.includesTablet) ...[
+                _FeatureRow(
+                  icon: LucideIcons.users,
+                  text: offer.maxMembers == 0
+                      ? 'Manb Ilimite (San limit) 🚀'
+                      : 'Jiska ${offer.maxMembers} manb aktif',
+                  highlight: offer.maxMembers == 0,
+                ),
+                const SizedBox(height: 8),
+                if (offer.overageMemberFee > 0) ...[
                   _FeatureRow(
-                    icon: LucideIcons.tablet,
-                    text: 'Tablette tactile fournie (Scan & Accueil)',
-                    highlight: true,
+                    icon: LucideIcons.userPlus,
+                    text: 'Depasman : +${offer.overageMemberFee.toStringAsFixed(2)} USD / manb extra',
                   ),
                   const SizedBox(height: 8),
                 ],
-                if (offer.badgeQuota > 0) ...[
+                _FeatureRow(
+                  icon: LucideIcons.idCard,
+                  text: offer.badgeQuota > 0
+                      ? '${offer.badgeQuota} Badj QR GRATIS enkli 🪪'
+                      : 'Badj QR fizik sou kòmand (frais impression)',
+                  highlight: offer.badgeQuota > 0,
+                ),
+                const SizedBox(height: 8),
+                if (offer.tabletCount > 0) ...[
                   _FeatureRow(
-                    icon: LucideIcons.idCard,
-                    text: '${offer.badgeQuota} Badges PVC CR80 imprimés inclus',
+                    icon: LucideIcons.tablet,
+                    text: '${offer.tabletCount} Tablèt Android GRATIS enkli 📱',
                     highlight: true,
+                  ),
+                  const SizedBox(height: 8),
+                ] else if (offer.tabletOptionalPrice > 0) ...[
+                  _FeatureRow(
+                    icon: LucideIcons.tablet,
+                    text: 'Opsyon Tablèt Android : +${offer.tabletOptionalPrice.toStringAsFixed(0)} USD',
                   ),
                   const SizedBox(height: 8),
                 ],

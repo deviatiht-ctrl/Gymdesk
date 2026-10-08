@@ -67,7 +67,7 @@ class GymSettingsRepository {
 
   Future<void> save(GymSettings value, {required DateTime changedAt}) async {
     try {
-      if (session.role != 'owner' || value.id != session.gymId) {
+      if (!{'owner', 'supervisor'}.contains(session.role) || value.id != session.gymId) {
         throw const SettingsFailure('access_denied');
       }
       _validate(value);
@@ -158,8 +158,17 @@ class GymSettingsRepository {
         'scan_sound',
         'scan_vibrate',
       };
-      if (entry.key == 'doc_footer') {
+      const strings = {
+        'doc_footer',
+        'badge_theme',
+        'badge_qr_style',
+      };
+      if (strings.contains(entry.key)) {
         if (entry.value is! String || (entry.value as String).length > 500) {
+          throw const SettingsFailure('invalid_record');
+        }
+      } else if (entry.key == 'badge_positions' || entry.key == 'qr_defaults') {
+        if (entry.value is! Map || jsonEncode(entry.value).length > 16384) {
           throw const SettingsFailure('invalid_record');
         }
       } else if (numeric.contains(entry.key)) {
@@ -176,12 +185,10 @@ class GymSettingsRepository {
         }
       } else if (boolean.contains(entry.key)) {
         if (entry.value is! bool) throw const SettingsFailure('invalid_record');
-      } else if (entry.key == 'qr_defaults') {
-        if (entry.value is! Map || jsonEncode(entry.value).length > 4096) {
+      } else {
+        if (entry.value is String && (entry.value as String).length > 2000) {
           throw const SettingsFailure('invalid_record');
         }
-      } else {
-        throw const SettingsFailure('invalid_record');
       }
     }
   }

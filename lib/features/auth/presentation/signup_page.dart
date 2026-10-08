@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../l10n/app_strings.dart';
+import '../../gyms/data/gyms_repository.dart';
 
 /// Assistant d'inscription self-service : la salle démarre avec un essai
 /// de 7 jours contrôlé par le serveur (edge function create_gym_with_owner).
@@ -41,15 +42,14 @@ class _SignupPageState extends ConsumerState<SignupPage> {
 
   Future<void> _loadOffers() async {
     try {
-      final rows = await Supabase.instance.client
-          .from('platform_offers')
-          .select()
-          .eq('active', true)
-          .order('price');
+      final offers = await GymsRepository(Supabase.instance.client).loadOffers();
       if (mounted) {
         setState(() {
-          _offers = List<Map<String, dynamic>>.from(rows);
-          if (_offers.isNotEmpty) _offerId = _offers.first['id'] as String;
+          _offers = offers.map((o) => o.toJson()).toList();
+          if (_offers.isNotEmpty) {
+            final hot = offers.firstWhere((o) => o.isHot, orElse: () => offers.first);
+            _offerId = hot.id;
+          }
         });
       }
     } catch (_) {}

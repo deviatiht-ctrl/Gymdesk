@@ -2122,6 +2122,21 @@ class AppStrings {
       'Veuillez renseigner un numéro WhatsApp pour ce membre.',
       'Please enter a WhatsApp number for this member.',
     ],
+    'saved': [
+      'Chanjman yo anrejistre avèk siksè !',
+      'Modifications enregistrées avec succès !',
+      'Changes saved successfully!',
+    ],
+    'badge_design_saved': [
+      'Konsepsyon badj la anrejistre avèk siksè !',
+      'Design du badge enregistré avec succès !',
+      'Badge design saved successfully!',
+    ],
+    'save_default_badge': [
+      'Enrejistre kòm modèl defo pou tout badj',
+      'Enregistrer comme modèle par défaut',
+      'Save as gym default badge',
+    ],
   };
 }
 

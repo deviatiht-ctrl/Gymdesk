@@ -59,7 +59,7 @@ class SettingsPage extends ConsumerWidget {
           ),
           const Divider(height: 1),
         ],
-        if (platform) ...[
+        if (platform || session?.canManageGym == true) ...[
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(LucideIcons.tag),
@@ -69,6 +69,8 @@ class SettingsPage extends ConsumerWidget {
             onTap: () => context.push('/admin/offers'),
           ),
           const Divider(height: 1),
+        ],
+        if (platform) ...[
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(LucideIcons.clipboardCheck),

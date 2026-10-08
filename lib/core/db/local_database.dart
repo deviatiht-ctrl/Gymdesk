@@ -149,10 +149,10 @@ class LocalDatabase extends _$LocalDatabase {
   }) => transaction(() async {
     if (data['id'] != gymId) throw const SyncRejected('tenant_mismatch');
     final previous = await record(SyncEntity.gyms, gymId);
-    final serverVersion = previous?.serverVersion ?? baseVersion;
-    if (serverVersion == null || data['updated_at'] is! String) {
-      throw const SyncRejected('missing_dependency');
-    }
+    final serverVersion = previous?.serverVersion ??
+        baseVersion ??
+        (data['updated_at'] as String?) ??
+        changedAt.toUtc().toIso8601String();
     final timestamp = changedAt.toUtc().toIso8601String();
     final row = {...data, 'updated_at': timestamp};
     await into(records).insertOnConflictUpdate(

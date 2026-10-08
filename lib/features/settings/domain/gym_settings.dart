@@ -14,7 +14,8 @@ class GymSettings {
   String get phone => row['phone'] as String? ?? '';
   String get email => row['email'] as String? ?? '';
   String? get logoUrl => row['logo_url'] as String?;
-  String get updatedAt => row['updated_at'] as String;
+  String get updatedAt =>
+      row['updated_at'] as String? ?? DateTime.now().toUtc().toIso8601String();
   Json get settings => Map<String, dynamic>.from(row['settings'] as Map? ?? {});
 
   GymSettings copy({

@@ -96,18 +96,37 @@ class GymsRepository {
       });
 
   Future<List<PlatformOffer>> loadOffers({bool includeInactive = false}) => _request(() async {
-    var query = client.from('platform_offers').select();
-    if (!includeInactive) {
-      query = query.eq('active', true);
-    }
-    final rows = await query.order('price');
-    if ((rows as List).isEmpty) {
+    try {
+      var query = client.from('platform_offers').select();
+      if (!includeInactive) {
+        query = query.eq('active', true);
+      }
+      final rows = await query.order('price');
+      final loaded = [
+        for (final e in (rows as List))
+          PlatformOffer.fromJson(Map<String, dynamic>.from(e as Map)),
+      ];
+      final officialPlanIds = {'plan_basic', 'plan_medium', 'plan_pro', 'plan_enterprise'};
+      final hasOfficial = loaded.any((o) => officialPlanIds.contains(o.id));
+      if (!hasOfficial) {
+        return PlatformOffer.defaultAnnualPlans;
+      }
+      return loaded;
+    } catch (_) {
       return PlatformOffer.defaultAnnualPlans;
     }
-    return [
-      for (final e in rows)
-        PlatformOffer.fromJson(Map<String, dynamic>.from(e as Map)),
-    ];
+  });
+
+  /// Inisyalize 4 plan ofisyèl yo nan baz Supabase la (Super Admin)
+  Future<void> seedDefaultAnnualPlans() => _request(() async {
+    for (final plan in PlatformOffer.defaultAnnualPlans) {
+      await saveOffer(plan);
+    }
+    for (final oldId in ['per_member', 'tiered', 'unlimited_annual']) {
+      try {
+        await deleteOffer(oldId);
+      } catch (_) {}
+    }
   });
 
   /// Kreye oswa modifye yon plan nan katalòg la (Super Admin)

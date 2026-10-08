@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,7 @@ import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../settings/data/settings_repository.dart';
+import '../../settings/domain/gym_settings.dart';
 import '../data/badge_pdf.dart';
 import '../data/badges_repository.dart';
 import '../domain/badge.dart';
@@ -340,7 +342,7 @@ class _BadgesPageState extends ConsumerState<BadgesPage> {
                           onTap: () {
                             setModalState(() {
                               selectedTheme = th.id;
-                              currentAccent = '#${th.accentColor.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+                              currentAccent = '#${(th.accentColor.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
                             });
                           },
                           child: Container(
@@ -443,11 +445,17 @@ class _BadgesPageState extends ConsumerState<BadgesPage> {
                             updated,
                             changedAt: runtime.sync?.clock.correctedNow ?? DateTime.now().toUtc(),
                           );
-                          await runtime.sync?.synchronize();
+                          runtime.applyLocalGym(updated.row);
+                          unawaited(runtime.sync?.synchronize());
                           if (context.mounted) Navigator.pop(context);
-                          _toast('saved');
-                        } catch (_) {
-                          _toast('error');
+                          _toast('badge_design_saved');
+                        } catch (e, stack) {
+                          debugPrint('Error saving badge design: $e\n$stack');
+                          if (e is SettingsFailure) {
+                            _toast(e.code);
+                          } else {
+                            _toast('error');
+                          }
                         }
                       },
                     ),

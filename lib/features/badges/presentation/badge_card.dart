@@ -1,4 +1,4 @@
-﻿import 'dart:typed_data';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -63,12 +63,16 @@ class _BadgeCardState extends State<BadgeCard> {
   }
 
   void _initPositions() {
+    final gymPositions = widget.gym.settings['badge_positions'] is Map
+        ? widget.gym.settings['badge_positions'] as Map
+        : const {};
+    final combined = {...gymPositions, ...widget.customPositions};
     _positions = {
-      'brand': _parseOffset(widget.customPositions['brand'], const Offset(0.06, 0.08)),
-      'number': _parseOffset(widget.customPositions['number'], const Offset(0.06, 0.44)),
-      'qr': _parseOffset(widget.customPositions['qr'], const Offset(0.66, 0.14)),
-      'footer': _parseOffset(widget.customPositions['footer'], const Offset(0.06, 0.82)),
-      'status': _parseOffset(widget.customPositions['status'], const Offset(0.66, 0.82)),
+      'brand': _parseOffset(combined['brand'], const Offset(0.06, 0.08)),
+      'number': _parseOffset(combined['number'], const Offset(0.06, 0.44)),
+      'qr': _parseOffset(combined['qr'], const Offset(0.66, 0.14)),
+      'footer': _parseOffset(combined['footer'], const Offset(0.06, 0.82)),
+      'status': _parseOffset(combined['status'], const Offset(0.66, 0.82)),
     };
   }
 
@@ -340,8 +344,11 @@ class _BadgeCardState extends State<BadgeCard> {
     final qrSize = (cardH * 0.52).clamp(70.0, 115.0);
     final fg = widget.qrFgColor ?? theme.qrFgColor;
     final bg = widget.qrBgColor ?? theme.qrBgColor;
-    final isRound = widget.qrStyle == 'rounded' || widget.qrStyle == 'circle';
-    final isCircle = widget.qrStyle == 'circle';
+    final effectiveQr = widget.qrStyle.isNotEmpty
+        ? widget.qrStyle
+        : ((widget.gym.settings['badge_qr_style'] as String?) ?? 'rounded');
+    final isRound = effectiveQr == 'rounded' || effectiveQr == 'circle';
+    final isCircle = effectiveQr == 'circle';
 
     return Container(
       width: qrSize,
