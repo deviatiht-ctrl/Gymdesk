@@ -99,11 +99,26 @@ class PlatformOffer {
   int get badgeQuota => (config['badge_quota'] as num?)?.toInt() ?? 0;
   double get minMonthly => (config['min_monthly'] as num?)?.toDouble() ?? 0;
   double get setupFee => (config['setup_fee'] as num?)?.toDouble() ?? 0;
+  bool get isHot => config['is_hot'] == true;
+  bool get includesTablet => config['includes_tablet'] == true;
+  List<String> get features => [
+    for (final f in (config['features'] as List? ?? const [])) '$f',
+  ];
   List<Json> get tiers => [
     for (final t in (config['tiers'] as List? ?? const []))
       Map<String, dynamic>.from(t as Map),
   ];
   bool get isAnnual => billingPeriod == 'annual';
+
+  Json toJson() => {
+    'id': id,
+    'name': name,
+    'description': description,
+    'billing_period': billingPeriod,
+    'price': price,
+    'currency': currency,
+    'config': config,
+  };
 
   factory PlatformOffer.fromJson(Json json) => PlatformOffer(
     id: json['id'] as String,

@@ -95,16 +95,35 @@ class GymsRepository {
         );
       });
 
-  Future<List<PlatformOffer>> loadOffers() => _request(() async {
-    final rows = await client
-        .from('platform_offers')
-        .select()
-        .eq('active', true)
-        .order('price');
+  Future<List<PlatformOffer>> loadOffers({bool includeInactive = false}) => _request(() async {
+    var query = client.from('platform_offers').select();
+    if (!includeInactive) {
+      query = query.eq('active', true);
+    }
+    final rows = await query.order('price');
     return [
       for (final e in rows as List)
         PlatformOffer.fromJson(Map<String, dynamic>.from(e as Map)),
     ];
+  });
+
+  /// Kreye oswa modifye yon plan nan katalòg la (Super Admin)
+  Future<void> saveOffer(PlatformOffer offer) => _request(() async {
+    await client.from('platform_offers').upsert({
+      'id': offer.id,
+      'name': offer.name,
+      'description': offer.description,
+      'billing_period': offer.billingPeriod,
+      'price': offer.price,
+      'currency': offer.currency,
+      'config': offer.config,
+      'active': true,
+    });
+  });
+
+  /// Dezaktive oswa efase yon plan nan katalòg la
+  Future<void> deleteOffer(String offerId) => _request(() async {
+    await client.from('platform_offers').update({'active': false}).eq('id', offerId);
   });
 
   /// Encaissement caisse (super admin) : crée le contrat lié à
