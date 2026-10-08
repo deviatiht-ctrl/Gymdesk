@@ -172,6 +172,10 @@ class SyncEngine {
         }
         pushError = e;
       }
+      if (pushError?.code == 'network') {
+        _emit(SyncPhase.offline, 'network');
+        return;
+      }
       final lastFull = DateTime.tryParse(await db.metadata('last_full') ?? '');
       final reconcile =
           full ||

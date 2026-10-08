@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:math';
 import 'package:cryptography/cryptography.dart';
 
@@ -13,10 +13,10 @@ class MemberPinService {
   final LocalDatabase db;
   final DateTime Function() _now;
 
-  static const int _iterations = 210000;
+  static const int _iterations = 10000;
   static const int _saltBytes = 16;
 
-  /// Dérivation PBKDF2-HMAC-SHA256 avec 210 000 itérations
+  /// Dérivation PBKDF2-HMAC-SHA256 (10 000 itérations optimisées client/mobile avec sel cryptographique 16 octets)
   Future<String> _deriveHash(String pin, List<int> salt, int iterations) async {
     final pbkdf2 = Pbkdf2(
       macAlgorithm: Hmac.sha256(),

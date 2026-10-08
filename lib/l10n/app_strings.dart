@@ -1955,6 +1955,16 @@ class AppStrings {
       'Imprimer le ticket de bienvenue',
       'Print welcome slip',
     ],
+    'share_whatsapp': [
+      'Voye sou WhatsApp',
+      'Envoyer sur WhatsApp',
+      'Send via WhatsApp',
+    ],
+    'no_whatsapp_number': [
+      'Nimewo WhatsApp la pa valide.',
+      'Aucun numéro WhatsApp valide.',
+      'No valid WhatsApp number.',
+    ],
     'view_member': ['Wè manm nan', 'Voir le membre', 'View member'],
     'pending_renewals_title': [
       'Renouvèlman an atant',

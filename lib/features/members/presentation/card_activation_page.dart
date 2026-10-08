@@ -11,6 +11,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
@@ -330,114 +331,111 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
       final paidAmount = terms.paymentAmount;
       final endDate = terms.end;
 
-      await db.transaction(() async {
-        // 1. Membre
-        final memberRow = <String, dynamic>{
-          'id': memberId,
+      // 1. Membre
+      final memberRow = <String, dynamic>{
+        'id': memberId,
+        'gym_id': session.gymId,
+        'badge_id': badge.id,
+        'member_number': badge.formattedNumber,
+        'qr_token': badge.qrToken,
+        'first_name': _fields['first_name']!.text.trim(),
+        'last_name': _fields['last_name']!.text.trim(),
+        'sex': _sex,
+        'birth_date': _birthDate == null ? null : ymd(dateOnly(_birthDate!)),
+        'phone': normalizePhone(_fields['phone']!.text),
+        'whatsapp': normalizePhone(_fields['whatsapp']!.text),
+        'email': _fields['email']!.text.trim().toLowerCase(),
+        'enrollment_origin': _existingMember ? 'existing' : 'new',
+        'address': _fields['address']!.text.trim(),
+        'nif': normalizeNif(_fields['nif']!.text),
+        'cin': _fields['cin']!.text.trim(),
+        'emergency_contact_name': _fields['emergency_name']!.text.trim(),
+        'emergency_contact_phone': normalizePhone(
+          _fields['emergency_phone']!.text,
+        ),
+        'guardian_name': _fields['guardian_name']!.text.trim(),
+        'photo_url': null,
+        'notes': _fields['notes']!.text.trim(),
+        'status': 'active',
+        'is_test': false,
+        'created_by': session.staffId,
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      };
+
+      // 2. Abonnement
+      final subRow = <String, dynamic>{
+        'id': subscriptionId,
+        'gym_id': session.gymId,
+        'member_id': memberId,
+        'plan_id': _selectedPlan!.id,
+        'start_date': ymd(_startDate),
+        'end_date': ymd(endDate),
+        'price': terms.price,
+        'opening_credit': terms.openingCredit,
+        'enrollment_kind': terms.kind,
+        'status': terms.status,
+        'created_by': session.staffId,
+        'validated_by': session.staffId,
+        'validated_at': now.toIso8601String(),
+        'created_at': now.toIso8601String(),
+        'updated_at': now.toIso8601String(),
+      };
+
+      // 3. Paiement
+      Map<String, dynamic>? paymentRow;
+      if (paidAmount > 0) {
+        paymentRow = <String, dynamic>{
+          'id': paymentId,
           'gym_id': session.gymId,
-          'badge_id': badge.id,
-          'member_number': badge.formattedNumber,
-          'qr_token': badge.qrToken,
-          'first_name': _fields['first_name']!.text.trim(),
-          'last_name': _fields['last_name']!.text.trim(),
-          'sex': _sex,
-          'birth_date': _birthDate == null ? null : ymd(dateOnly(_birthDate!)),
-          'phone': normalizePhone(_fields['phone']!.text),
-          'whatsapp': normalizePhone(_fields['whatsapp']!.text),
-          'email': _fields['email']!.text.trim().toLowerCase(),
-          'enrollment_origin': _existingMember ? 'existing' : 'new',
-          'address': _fields['address']!.text.trim(),
-          'nif': normalizeNif(_fields['nif']!.text),
-          'cin': _fields['cin']!.text.trim(),
-          'emergency_contact_name': _fields['emergency_name']!.text.trim(),
-          'emergency_contact_phone': normalizePhone(
-            _fields['emergency_phone']!.text,
-          ),
-          'guardian_name': _fields['guardian_name']!.text.trim(),
-          'photo_url': null,
-          'notes': _fields['notes']!.text.trim(),
-          'status': 'active',
-          'is_test': false,
-          'created_by': session.staffId,
+          'member_id': memberId,
+          'subscription_id': subscriptionId,
+          'amount': paidAmount,
+          'currency': _selectedPlan!.currency,
+          'method': _paymentMethod,
+          'reference': _referenceController.text.trim(),
+          'paid_at': now.toIso8601String(),
+          'received_by': session.staffId,
           'created_at': now.toIso8601String(),
           'updated_at': now.toIso8601String(),
         };
-        await db.save(SyncEntity.members, memberRow, changedAt: now);
-        if (_photoBytes != null) {
-          await db.enqueuePhoto(memberId, _photoBytes!);
-        }
+      }
 
-        // 2. Abonnement
-        final subRow = <String, dynamic>{
-          'id': subscriptionId,
-          'gym_id': session.gymId,
-          'member_id': memberId,
-          'plan_id': _selectedPlan!.id,
-          'start_date': ymd(_startDate),
-          'end_date': ymd(endDate),
-          'price': terms.price,
-          'opening_credit': terms.openingCredit,
-          'enrollment_kind': terms.kind,
-          'status': terms.status,
-          'created_by': session.staffId,
-          'validated_by': session.staffId,
-          'validated_at': now.toIso8601String(),
-          'created_at': now.toIso8601String(),
-          'updated_at': now.toIso8601String(),
-        };
-        await db.save(SyncEntity.subscriptions, subRow, changedAt: now);
+      // 4. Badge
+      final badgeRow = <String, dynamic>{
+        ...badge.row,
+        'status': 'bound',
+        'member_id': memberId,
+        'bound_at': now.toIso8601String(),
+        'bound_by': session.staffId,
+        'updated_at': now.toIso8601String(),
+      };
 
-        // 3. Paiement
-        if (paidAmount > 0) {
-          final paymentRow = <String, dynamic>{
-            'id': paymentId,
-            'gym_id': session.gymId,
-            'member_id': memberId,
-            'subscription_id': subscriptionId,
-            'amount': paidAmount,
-            'currency': _selectedPlan!.currency,
-            'method': _paymentMethod,
-            'reference': _referenceController.text.trim(),
-            'paid_at': now.toIso8601String(),
-            'received_by': session.staffId,
-            'created_at': now.toIso8601String(),
-            'updated_at': now.toIso8601String(),
-          };
-          await db.save(SyncEntity.payments, paymentRow, changedAt: now);
-        }
+      // 5. PIN
+      final pinRow = pinData.toJson();
 
-        // 4. Badge
-        final badgeRow = <String, dynamic>{
-          ...badge.row,
-          'status': 'bound',
-          'member_id': memberId,
-          'bound_at': now.toIso8601String(),
-          'bound_by': session.staffId,
-          'updated_at': now.toIso8601String(),
-        };
-        await db.save(SyncEntity.badges, badgeRow, changedAt: now);
+      // 6. Historique badge
+      final historyRow = <String, dynamic>{
+        'id': historyId,
+        'gym_id': session.gymId,
+        'badge_id': badge.id,
+        'member_id': memberId,
+        'event': 'bound',
+        'actor_id': session.staffId,
+        'reason': 'Activation de carte',
+        'created_at': now.toIso8601String(),
+      };
 
-        // 5. PIN
-        await db.save(SyncEntity.memberPins, pinData.toJson(), changedAt: now);
-
-        // 6. Historique badge
-        final historyRow = <String, dynamic>{
-          'id': historyId,
-          'gym_id': session.gymId,
-          'badge_id': badge.id,
-          'member_id': memberId,
-          'event': 'bound',
-          'actor_id': session.staffId,
-          'reason': 'Activation de carte',
-          'created_at': now.toIso8601String(),
-        };
-        await db.putRemote(SyncEntity.badgeHistory, historyRow);
-      });
-
-      unawaited(
-        runtime.sync?.synchronize().catchError((e) {
-          debugPrint('Sync after activation (will retry automatically): $e');
-        }),
+      // Enregistrement atomique immédiat en base locale
+      await db.activateMemberCard(
+        member: memberRow,
+        subscription: subRow,
+        payment: paymentRow,
+        badge: badgeRow,
+        pin: pinRow,
+        history: historyRow,
+        photoBytes: _photoBytes,
+        changedAt: now,
       );
 
       if (mounted) {
@@ -447,6 +445,12 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
           _step = 4;
         });
       }
+
+      unawaited(
+        runtime.sync?.synchronize().catchError((e) {
+          debugPrint('Sync after activation (will retry automatically): $e');
+        }),
+      );
     } catch (e, st) {
       debugPrint('Error activating card: $e\n$st');
       if (mounted) {
@@ -523,6 +527,57 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
     await Printing.layoutPdf(onLayout: (_) async => doc.save());
   }
 
+  Future<void> _shareOnWhatsApp() async {
+    final rawPhone = _fields['whatsapp']!.text.trim().isNotEmpty
+        ? _fields['whatsapp']!.text.trim()
+        : _fields['phone']!.text.trim();
+    final phone = normalizePhone(rawPhone);
+    if (phone.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppStrings.of(context).text('no_whatsapp_number')),
+          ),
+        );
+      }
+      return;
+    }
+    final cleanDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    final gymName = ref.read(appRuntimeProvider).session?.name ?? 'GymDesk';
+    final firstName = _fields['first_name']!.text.trim();
+    final lastName = _fields['last_name']!.text.trim();
+    final badgeNum =
+        _createdMemberNumber ?? _selectedBadge?.formattedNumber ?? '';
+    final planName = _selectedPlan?.name ?? '';
+    final message = '''*Byenvini nan $gymName !* 🏋️‍♂️
+
+Bonjou $firstName $lastName,
+Kat manm ou an aktive avèk siksè !
+
+📋 *Enfòmasyon sou abònman ou :*
+• Nimewo manm : $badgeNum
+• Fòmil : $planName
+• Estati : Aktif
+
+🔐 *Sekirite :*
+Kòd PIN ou an se sekrè pèsonèl ou. Pa pataje l ak pèsonn pou aksè nan sal la.
+
+Mèsi pou konfyans ou, bòn antrènman !''';
+
+    final uri = Uri.parse(
+      'https://wa.me/$cleanDigits?text=${Uri.encodeComponent(message)}',
+    );
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enposib ouvri WhatsApp.')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
@@ -533,7 +588,7 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
         appBar: AppBar(title: Text(s.text('card_activated_title'))),
         body: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
+            constraints: const BoxConstraints(maxWidth: 520),
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
@@ -558,15 +613,25 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
                   const SizedBox(height: 8),
                   Text(s.text('email_after_sync'), textAlign: TextAlign.center),
                   const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 12,
+                    runSpacing: 12,
                     children: [
                       FilledButton.icon(
                         icon: const Icon(LucideIcons.printer),
                         label: Text(s.text('print_welcome_slip')),
                         onPressed: _printWelcomeSlip,
                       ),
-                      const SizedBox(width: 12),
+                      FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF25D366),
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(LucideIcons.messageCircle),
+                        label: Text(s.text('share_whatsapp')),
+                        onPressed: _shareOnWhatsApp,
+                      ),
                       OutlinedButton(
                         onPressed: () => context.go('/members'),
                         child: Text(s.text('done')),

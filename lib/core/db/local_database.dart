@@ -433,4 +433,155 @@ class LocalDatabase extends _$LocalDatabase {
       updateKind: UpdateKind.delete,
     );
   }
+
+  /// Activation atomique complète d'un membre et de sa carte en une seule transaction Drift
+  Future<void> activateMemberCard({
+    required Json member,
+    required Json subscription,
+    required Json? payment,
+    required Json badge,
+    required Json pin,
+    required Json history,
+    Uint8List? photoBytes,
+    required DateTime changedAt,
+  }) => transaction(() async {
+    final timestamp = changedAt.toUtc().toIso8601String();
+
+    // 1. Membre
+    final memberWithTs = {...member, 'updated_at': timestamp};
+    await into(records).insertOnConflictUpdate(
+      RecordsCompanion.insert(
+        entity: SyncEntity.members.table,
+        id: member['id'] as String,
+        gymId: gymId,
+        payload: jsonEncode(memberWithTs),
+      ),
+    );
+    await into(outbox).insert(
+      OutboxCompanion.insert(
+        id: _uuid.v4(),
+        entity: SyncEntity.members.table,
+        entityId: member['id'] as String,
+        operation: 'insert',
+        payload: jsonEncode(memberWithTs),
+        changedAt: timestamp,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
+
+    // Photo si présente
+    if (photoBytes != null) {
+      await (delete(photoUploads)..where((t) => t.memberId.equals(member['id'] as String))).go();
+      final photoId = _uuid.v4();
+      await into(photoUploads).insert(
+        PhotoUploadsCompanion.insert(
+          id: photoId,
+          memberId: member['id'] as String,
+          objectPath: '$gymId/${member['id']}/$photoId.jpg',
+          bytes: photoBytes,
+        ),
+      );
+    }
+
+    // 2. Abonnement
+    final subWithTs = {...subscription, 'updated_at': timestamp};
+    await into(records).insertOnConflictUpdate(
+      RecordsCompanion.insert(
+        entity: SyncEntity.subscriptions.table,
+        id: subscription['id'] as String,
+        gymId: gymId,
+        payload: jsonEncode(subWithTs),
+      ),
+    );
+    await into(outbox).insert(
+      OutboxCompanion.insert(
+        id: _uuid.v4(),
+        entity: SyncEntity.subscriptions.table,
+        entityId: subscription['id'] as String,
+        operation: 'insert',
+        payload: jsonEncode(subWithTs),
+        changedAt: timestamp,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
+
+    // 3. Paiement (optionnel)
+    if (payment != null) {
+      final payWithTs = {...payment, 'updated_at': timestamp};
+      await into(records).insertOnConflictUpdate(
+        RecordsCompanion.insert(
+          entity: SyncEntity.payments.table,
+          id: payment['id'] as String,
+          gymId: gymId,
+          payload: jsonEncode(payWithTs),
+        ),
+      );
+      await into(outbox).insert(
+        OutboxCompanion.insert(
+          id: _uuid.v4(),
+          entity: SyncEntity.payments.table,
+          entityId: payment['id'] as String,
+          operation: 'insert',
+          payload: jsonEncode(payWithTs),
+          changedAt: timestamp,
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+        ),
+      );
+    }
+
+    // 4. Badge
+    final badgeWithTs = {...badge, 'updated_at': timestamp};
+    await into(records).insertOnConflictUpdate(
+      RecordsCompanion.insert(
+        entity: SyncEntity.badges.table,
+        id: badge['id'] as String,
+        gymId: gymId,
+        payload: jsonEncode(badgeWithTs),
+      ),
+    );
+    await into(outbox).insert(
+      OutboxCompanion.insert(
+        id: _uuid.v4(),
+        entity: SyncEntity.badges.table,
+        entityId: badge['id'] as String,
+        operation: 'update',
+        payload: jsonEncode(badgeWithTs),
+        changedAt: timestamp,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
+
+    // 5. PIN
+    final pinWithTs = {...pin, 'updated_at': timestamp};
+    await into(records).insertOnConflictUpdate(
+      RecordsCompanion.insert(
+        entity: SyncEntity.memberPins.table,
+        id: pin['member_id'] as String,
+        gymId: gymId,
+        payload: jsonEncode(pinWithTs),
+      ),
+    );
+    await into(outbox).insert(
+      OutboxCompanion.insert(
+        id: _uuid.v4(),
+        entity: SyncEntity.memberPins.table,
+        entityId: pin['member_id'] as String,
+        operation: 'insert',
+        payload: jsonEncode(pinWithTs),
+        changedAt: timestamp,
+        createdAt: DateTime.now().toUtc().toIso8601String(),
+      ),
+    );
+
+    // 6. Historique badge
+    await into(records).insertOnConflictUpdate(
+      RecordsCompanion.insert(
+        entity: SyncEntity.badgeHistory.table,
+        id: history['id'] as String,
+        gymId: gymId,
+        payload: jsonEncode(history),
+      ),
+    );
+  });
 }
+

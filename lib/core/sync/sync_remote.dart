@@ -28,7 +28,7 @@ class SupabaseSyncRemote implements SyncRemote {
 
   Future<T> _request<T>(Future<T> Function() request) async {
     try {
-      return await request().timeout(const Duration(seconds: 30));
+      return await request().timeout(const Duration(seconds: 12));
     } on PostgrestException catch (e) {
       throw SyncRejected(
         switch (e.code) {
