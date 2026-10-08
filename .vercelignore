@@ -1,0 +1,10 @@
+# .vercelignore
+# Evite voye fichye android/windows lou sou Vercel pou deplwaman an pran mwens pase 1 minit!
+android/
+windows/
+.dart_tool/
+.idea/
+build/app/
+ios/
+linux/
+macos/
