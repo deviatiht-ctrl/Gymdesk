@@ -36,8 +36,8 @@ class _SplashPageState extends ConsumerState<SplashPage> with SingleTickerProvid
 
     _animController.forward();
 
-    // Attendre exactement 2 secondes puis diriger vers la sélection de langue ou l'onboarding/login
-    _timer = Timer(const Duration(seconds: 2), _navigateNext);
+    // 1.2 segonn pou animasyon an fini nèt epi pase sou pwochen ekran imedyatman
+    _timer = Timer(const Duration(milliseconds: 1200), _navigateNext);
   }
 
   void _navigateNext() {
@@ -45,12 +45,13 @@ class _SplashPageState extends ConsumerState<SplashPage> with SingleTickerProvid
     final runtime = ref.read(appRuntimeProvider);
     if (!runtime.onboardingDone) {
       context.go('/language');
+    } else if (runtime.phase == SessionPhase.ready) {
+      context.go('/');
+    } else if (runtime.phase != SessionPhase.starting) {
+      context.go('/login');
     } else {
-      if (runtime.phase == SessionPhase.ready) {
-        context.go('/');
-      } else {
-        context.go('/login');
-      }
+      // Si runtime toujou ap inisyalize, tcheke ankò nan 300ms
+      _timer = Timer(const Duration(milliseconds: 300), _navigateNext);
     }
   }
 

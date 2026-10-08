@@ -54,8 +54,11 @@ class SupabaseSyncRemote implements SyncRemote {
 
   @override
   Future<Json> context() => _request(
-    () async =>
-        Map<String, dynamic>.from(await client.rpc('sync_context') as Map),
+    () async => Map<String, dynamic>.from(
+      await client
+          .rpc('sync_context')
+          .timeout(const Duration(seconds: 4)) as Map,
+    ),
   );
 
   @override
