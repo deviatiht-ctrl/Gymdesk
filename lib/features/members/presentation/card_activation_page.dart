@@ -296,150 +296,174 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
     if (_busy || _selectedBadge == null || _selectedPlan == null) return;
     setState(() => _busy = true);
 
-    final runtime = ref.read(appRuntimeProvider);
-    final db = runtime.database!;
-    final session = runtime.session!;
-    final now = runtime.sync?.clock.correctedNow ?? DateTime.now().toUtc();
-    const uuid = Uuid();
+    try {
+      final runtime = ref.read(appRuntimeProvider);
+      final db = runtime.database!;
+      final session = runtime.session!;
+      final now = runtime.sync?.clock.correctedNow ?? DateTime.now().toUtc();
+      const uuid = Uuid();
 
-    final memberId = uuid.v4();
-    final subscriptionId = uuid.v4();
-    final paymentId = uuid.v4();
-    final badge = _selectedBadge!;
+      final memberId = uuid.v4();
+      final subscriptionId = uuid.v4();
+      final paymentId = uuid.v4();
+      final historyId = uuid.v4();
+      final badge = _selectedBadge!;
 
-    final pinService = MemberPinService(db);
-    final pinData = await pinService.createPinData(
-      memberId,
-      session.gymId!,
-      _pinFirst,
-    );
+      final pinService = MemberPinService(db);
+      final pinData = await pinService.createPinData(
+        memberId,
+        session.gymId!,
+        _pinFirst,
+      );
 
-    final terms = EnrollmentTerms.create(
-      plan: _selectedPlan!,
-      existing: _existingMember,
-      canManage: session.canManageGym,
-      start: _startDate,
-      end: _paidThrough,
-      paid: _existingMember
-          ? 0
-          : double.tryParse(_amountController.text.replaceAll(',', '.')) ??
-                double.nan,
-    );
-    final paidAmount = terms.paymentAmount;
-    final endDate = terms.end;
+      final terms = EnrollmentTerms.create(
+        plan: _selectedPlan!,
+        existing: _existingMember,
+        canManage: session.canManageGym,
+        start: _startDate,
+        end: _paidThrough,
+        paid: _existingMember
+            ? 0
+            : double.tryParse(_amountController.text.replaceAll(',', '.')) ??
+                  double.nan,
+      );
+      final paidAmount = terms.paymentAmount;
+      final endDate = terms.end;
 
-    await db.transaction(() async {
-      // 1. Membre
-      final memberRow = <String, dynamic>{
-        'id': memberId,
-        'gym_id': session.gymId,
-        'badge_id': badge.id,
-        'member_number': badge.formattedNumber,
-        'qr_token': badge.qrToken,
-        'first_name': _fields['first_name']!.text.trim(),
-        'last_name': _fields['last_name']!.text.trim(),
-        'sex': _sex,
-        'birth_date': _birthDate == null ? null : ymd(dateOnly(_birthDate!)),
-        'phone': normalizePhone(_fields['phone']!.text),
-        'whatsapp': normalizePhone(_fields['whatsapp']!.text),
-        'email': _fields['email']!.text.trim().toLowerCase(),
-        'enrollment_origin': _existingMember ? 'existing' : 'new',
-        'address': _fields['address']!.text.trim(),
-        'nif': normalizeNif(_fields['nif']!.text),
-        'cin': _fields['cin']!.text.trim(),
-        'emergency_contact_name': _fields['emergency_name']!.text.trim(),
-        'emergency_contact_phone': normalizePhone(
-          _fields['emergency_phone']!.text,
-        ),
-        'guardian_name': _fields['guardian_name']!.text.trim(),
-        'photo_url': null,
-        'notes': _fields['notes']!.text.trim(),
-        'status': 'active',
-        'is_test': false,
-        'created_by': session.staffId,
-        'created_at': now.toIso8601String(),
-        'updated_at': now.toIso8601String(),
-      };
-      await db.save(SyncEntity.members, memberRow, changedAt: now);
-      if (_photoBytes != null) {
-        await db.enqueuePhoto(memberId, _photoBytes!);
-      }
-
-      // 2. Abonnement
-      final subRow = <String, dynamic>{
-        'id': subscriptionId,
-        'gym_id': session.gymId,
-        'member_id': memberId,
-        'plan_id': _selectedPlan!.id,
-        'start_date': ymd(_startDate),
-        'end_date': ymd(endDate),
-        'price': terms.price,
-        'opening_credit': terms.openingCredit,
-        'enrollment_kind': terms.kind,
-        'status': terms.status,
-        'created_by': session.staffId,
-        'validated_by': session.staffId,
-        'validated_at': now.toIso8601String(),
-        'created_at': now.toIso8601String(),
-        'updated_at': now.toIso8601String(),
-      };
-      await db.save(SyncEntity.subscriptions, subRow, changedAt: now);
-
-      // 3. Paiement
-      if (paidAmount > 0) {
-        final paymentRow = <String, dynamic>{
-          'id': paymentId,
+      await db.transaction(() async {
+        // 1. Membre
+        final memberRow = <String, dynamic>{
+          'id': memberId,
           'gym_id': session.gymId,
-          'member_id': memberId,
-          'subscription_id': subscriptionId,
-          'amount': paidAmount,
-          'currency': _selectedPlan!.currency,
-          'method': _paymentMethod,
-          'reference': _referenceController.text.trim(),
-          'paid_at': now.toIso8601String(),
-          'received_by': session.staffId,
+          'badge_id': badge.id,
+          'member_number': badge.formattedNumber,
+          'qr_token': badge.qrToken,
+          'first_name': _fields['first_name']!.text.trim(),
+          'last_name': _fields['last_name']!.text.trim(),
+          'sex': _sex,
+          'birth_date': _birthDate == null ? null : ymd(dateOnly(_birthDate!)),
+          'phone': normalizePhone(_fields['phone']!.text),
+          'whatsapp': normalizePhone(_fields['whatsapp']!.text),
+          'email': _fields['email']!.text.trim().toLowerCase(),
+          'enrollment_origin': _existingMember ? 'existing' : 'new',
+          'address': _fields['address']!.text.trim(),
+          'nif': normalizeNif(_fields['nif']!.text),
+          'cin': _fields['cin']!.text.trim(),
+          'emergency_contact_name': _fields['emergency_name']!.text.trim(),
+          'emergency_contact_phone': normalizePhone(
+            _fields['emergency_phone']!.text,
+          ),
+          'guardian_name': _fields['guardian_name']!.text.trim(),
+          'photo_url': null,
+          'notes': _fields['notes']!.text.trim(),
+          'status': 'active',
+          'is_test': false,
+          'created_by': session.staffId,
           'created_at': now.toIso8601String(),
           'updated_at': now.toIso8601String(),
         };
-        await db.save(SyncEntity.payments, paymentRow, changedAt: now);
-      }
+        await db.save(SyncEntity.members, memberRow, changedAt: now);
+        if (_photoBytes != null) {
+          await db.enqueuePhoto(memberId, _photoBytes!);
+        }
 
-      // 4. Badge
-      final badgeRow = <String, dynamic>{
-        ...badge.row,
-        'status': 'bound',
-        'member_id': memberId,
-        'bound_at': now.toIso8601String(),
-        'bound_by': session.staffId,
-        'updated_at': now.toIso8601String(),
-      };
-      await db.save(SyncEntity.badges, badgeRow, changedAt: now);
+        // 2. Abonnement
+        final subRow = <String, dynamic>{
+          'id': subscriptionId,
+          'gym_id': session.gymId,
+          'member_id': memberId,
+          'plan_id': _selectedPlan!.id,
+          'start_date': ymd(_startDate),
+          'end_date': ymd(endDate),
+          'price': terms.price,
+          'opening_credit': terms.openingCredit,
+          'enrollment_kind': terms.kind,
+          'status': terms.status,
+          'created_by': session.staffId,
+          'validated_by': session.staffId,
+          'validated_at': now.toIso8601String(),
+          'created_at': now.toIso8601String(),
+          'updated_at': now.toIso8601String(),
+        };
+        await db.save(SyncEntity.subscriptions, subRow, changedAt: now);
 
-      // 5. PIN
-      await db.save(SyncEntity.memberPins, pinData.toJson(), changedAt: now);
+        // 3. Paiement
+        if (paidAmount > 0) {
+          final paymentRow = <String, dynamic>{
+            'id': paymentId,
+            'gym_id': session.gymId,
+            'member_id': memberId,
+            'subscription_id': subscriptionId,
+            'amount': paidAmount,
+            'currency': _selectedPlan!.currency,
+            'method': _paymentMethod,
+            'reference': _referenceController.text.trim(),
+            'paid_at': now.toIso8601String(),
+            'received_by': session.staffId,
+            'created_at': now.toIso8601String(),
+            'updated_at': now.toIso8601String(),
+          };
+          await db.save(SyncEntity.payments, paymentRow, changedAt: now);
+        }
 
-      // 6. Historique badge
-      final historyRow = <String, dynamic>{
-        'id': memberId,
-        'gym_id': session.gymId,
-        'badge_id': badge.id,
-        'member_id': memberId,
-        'event': 'bound',
-        'actor_id': session.staffId,
-        'reason': 'Activation de carte',
-        'created_at': now.toIso8601String(),
-      };
-      await db.putRemote(SyncEntity.badgeHistory, historyRow);
-    });
+        // 4. Badge
+        final badgeRow = <String, dynamic>{
+          ...badge.row,
+          'status': 'bound',
+          'member_id': memberId,
+          'bound_at': now.toIso8601String(),
+          'bound_by': session.staffId,
+          'updated_at': now.toIso8601String(),
+        };
+        await db.save(SyncEntity.badges, badgeRow, changedAt: now);
 
-    unawaited(runtime.sync?.synchronize());
+        // 5. PIN
+        await db.save(SyncEntity.memberPins, pinData.toJson(), changedAt: now);
 
-    if (mounted) {
-      setState(() {
-        _busy = false;
-        _createdMemberNumber = badge.formattedNumber;
-        _step = 4;
+        // 6. Historique badge
+        final historyRow = <String, dynamic>{
+          'id': historyId,
+          'gym_id': session.gymId,
+          'badge_id': badge.id,
+          'member_id': memberId,
+          'event': 'bound',
+          'actor_id': session.staffId,
+          'reason': 'Activation de carte',
+          'created_at': now.toIso8601String(),
+        };
+        await db.putRemote(SyncEntity.badgeHistory, historyRow);
       });
+
+      unawaited(
+        runtime.sync?.synchronize().catchError((e) {
+          debugPrint('Sync after activation (will retry automatically): $e');
+        }),
+      );
+
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _createdMemberNumber = badge.formattedNumber;
+          _step = 4;
+        });
+      }
+    } catch (e, st) {
+      debugPrint('Error activating card: $e\n$st');
+      if (mounted) {
+        setState(() => _busy = false);
+        final s = AppStrings.of(context);
+        final code = e is MemberFailure
+            ? e.code
+            : e is SyncRejected
+            ? e.code
+            : 'local_storage';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(s.text(code)),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
     }
   }
 

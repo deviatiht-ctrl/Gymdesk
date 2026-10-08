@@ -228,7 +228,7 @@ class LocalDatabase extends _$LocalDatabase {
 
   Future<List<OutboxData>> pending({int limit = 50}) =>
       (select(outbox)
-            ..where((t) => t.status.isNotValue('synced'))
+            ..where((t) => t.status.equals('pending'))
             ..orderBy([(t) => OrderingTerm.asc(t.sequence)])
             ..limit(limit))
           .get();
@@ -343,13 +343,30 @@ class LocalDatabase extends _$LocalDatabase {
       );
 
   Future<int> retryFailed() =>
-      (update(outbox)..where((t) => t.status.isNotValue('synced'))).write(
+      (update(outbox)..where((t) => t.status.equals('failed'))).write(
         const OutboxCompanion(
           status: Value('pending'),
           nextAttemptAt: Value(null),
           lastError: Value(null),
+          attempts: Value(0),
         ),
       );
+
+  Future<int> retryOperation(String id) =>
+      (update(outbox)..where((t) => t.id.equals(id))).write(
+        const OutboxCompanion(
+          status: Value('pending'),
+          nextAttemptAt: Value(null),
+          lastError: Value(null),
+          attempts: Value(0),
+        ),
+      );
+
+  Future<int> deleteOutbox(String id) =>
+      (delete(outbox)..where((t) => t.id.equals(id))).go();
+
+  Future<int> clearFailedOutbox() =>
+      (delete(outbox)..where((t) => t.status.equals('failed'))).go();
 
   Future<String> nextMemberNumber() async {
     final block =

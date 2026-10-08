@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/db/local_database.dart';
@@ -61,6 +62,15 @@ class SyncPage extends ConsumerWidget {
                   onPressed: () => engine.synchronize(full: true),
                   child: Text(s.text('sync_full')),
                 ),
+                if (state.failed > 0)
+                  OutlinedButton.icon(
+                    icon: const Icon(LucideIcons.trash2, size: 16),
+                    onPressed: () async {
+                      await db.clearFailedOutbox();
+                      engine.synchronize();
+                    },
+                    label: Text(s.text('clear_failed_queue')),
+                  ),
                 if (runtime.session?.canManageGym == true)
                   OutlinedButton(
                     onPressed: () async {
@@ -151,9 +161,32 @@ class SyncPage extends ConsumerWidget {
                           subtitle: Text(
                             op.lastError == null
                                 ? s.text('pending')
-                                : s.text(op.lastError!),
+                                : '${s.text(op.lastError!)}${op.status == 'failed' ? ' (bloqué)' : ''}',
                           ),
-                          trailing: Text(op.attempts.toString()),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('${op.attempts}'),
+                              if (op.status == 'failed') ...[
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  icon: const Icon(LucideIcons.rotateCw, size: 18),
+                                  tooltip: s.text('retry'),
+                                  onPressed: () async {
+                                    await db.retryOperation(op.id);
+                                    engine.synchronize();
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(LucideIcons.trash2, size: 18, color: Colors.red),
+                                  tooltip: s.text('delete'),
+                                  onPressed: () async {
+                                    await db.deleteOutbox(op.id);
+                                  },
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       )
                       .toList(),

@@ -347,6 +347,11 @@ class AppStrings {
       'Une opération bloque la file. Vérifiez l’échec.',
       'An operation is blocking the queue. Review the failure.',
     ],
+    'clear_failed_queue': [
+      'Netwaye echèk yo',
+      'Nettoyer les échecs',
+      'Clear failed items',
+    ],
     'retry_wait': [
       'Yon lòt esè ap fèt otomatikman.',
       'Une nouvelle tentative est programmée.',

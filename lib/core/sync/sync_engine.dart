@@ -158,12 +158,12 @@ class SyncEngine {
       if (retry) await db.retryFailed();
       SyncRejected? pushError;
       try {
-        await _push();
+        pushError = await _push();
         await _uploadPhotos();
-        await _push();
+        final secondPushError = await _push();
+        pushError ??= secondPushError;
       } on SyncRejected catch (e) {
         if ({
-          'access_denied',
           'access_changed',
           'session_expired',
           'gym_suspended',
@@ -220,9 +220,7 @@ class SyncEngine {
     } on SyncRejected catch (e) {
       if (_closed) return;
       final blocked = {
-        'access_denied',
         'access_changed',
-        'session_expired',
         'gym_suspended',
       }.contains(e.code);
       if (blocked) {
@@ -242,20 +240,32 @@ class SyncEngine {
     }
   }
 
-  Future<void> _push() async {
+  Future<SyncRejected?> _push() async {
+    SyncRejected? firstError;
+    final failedEntityIds = <String>{};
+
     while (!_closed) {
       final batch = await db.pending();
-      if (batch.isEmpty) return;
+      if (batch.isEmpty) break;
+
+      var processedCount = 0;
       for (final snapshot in batch) {
-        if (_closed) return;
+        if (_closed) return firstError;
         final op = await (db.select(
           db.outbox,
-        )..where((t) => t.id.equals(snapshot.id))).getSingle();
-        if (op.status == 'failed') throw const SyncRejected('queue_blocked');
+        )..where((t) => t.id.equals(snapshot.id))).getSingleOrNull();
+
+        if (op == null || op.status != 'pending') continue;
+
+        // Si yon operasyon paran sou menm antite a te deja echwe nan pase sa a, sote li pou kounye a
+        if (failedEntityIds.contains(op.entityId)) continue;
+
         final next = DateTime.tryParse(op.nextAttemptAt ?? '');
         if (next != null && next.isAfter(DateTime.now().toUtc())) {
-          throw const SyncRejected('retry_wait', permanent: false);
+          // Nan delè backoff: pa bloke rès liy lan, sèlman sote operasyon sa a pou kounye a
+          continue;
         }
+
         try {
           final result = await remote.push({
             'p_operation': op.id,
@@ -271,12 +281,35 @@ class SyncEngine {
                 : Map<String, dynamic>.from(result['row'] as Map),
             result['outcome'] == 'conflict',
           );
+          processedCount++;
         } on SyncRejected catch (e) {
-          await db.fail(op, e.code, permanent: e.permanent);
-          rethrow;
+          if (e.code == 'network') {
+            await db.fail(op, e.code, permanent: false);
+            return e;
+          }
+          if (e.code == 'session_expired') {
+            await db.fail(op, e.code, permanent: false);
+            rethrow;
+          }
+
+          // Echèk sou yon sèl liy (doublon, fòma, pèmisyon): izole li nan Dead-Letter Queue san bloke rès la!
+          await db.fail(op, e.code, permanent: e.permanent || op.attempts >= 5);
+          failedEntityIds.add(op.entityId);
+          firstError ??= e;
+          processedCount++;
+        } catch (_) {
+          await db.fail(op, 'invalid_record', permanent: true);
+          failedEntityIds.add(op.entityId);
+          firstError ??= const SyncRejected('invalid_record');
+          processedCount++;
         }
       }
+
+      // Si okenn operasyon pa trete (tout sa ki rete yo nan backoff oswa depandans), kanpe bouk la
+      if (processedCount == 0) break;
     }
+
+    return firstError;
   }
 
   Future<void> _pull(
@@ -317,15 +350,16 @@ class SyncEngine {
       if (next != null && next.isAfter(DateTime.now().toUtc())) continue;
       try {
         final member = await db.record(SyncEntity.members, photo.memberId);
-        if (member == null) throw const SyncRejected('missing_dependency');
+        if (member == null) continue;
         await remote.uploadPhoto(photo.objectPath, photo.bytes);
         await db.transaction(() async {
           final current = await db.record(SyncEntity.members, photo.memberId);
-          if (current == null) throw const SyncRejected('missing_dependency');
-          await db.save(SyncEntity.members, {
-            ...(jsonDecode(current.payload) as Json),
-            'photo_url': photo.objectPath,
-          }, changedAt: clock.correctedNow);
+          if (current != null) {
+            await db.save(SyncEntity.members, {
+              ...(jsonDecode(current.payload) as Json),
+              'photo_url': photo.objectPath,
+            }, changedAt: clock.correctedNow);
+          }
           await (db.delete(
             db.photoUploads,
           )..where((t) => t.id.equals(photo.id))).go();
@@ -345,7 +379,9 @@ class SyncEngine {
             ),
           ),
         );
-        rethrow;
+        if (e.code == 'network') break;
+      } catch (_) {
+        // Erè inatandi sou foto a: pase sou lòt foto san crashe tout sync la
       }
     }
   }

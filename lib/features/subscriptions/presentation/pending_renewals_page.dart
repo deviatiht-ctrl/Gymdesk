@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -44,7 +45,11 @@ class _PendingRenewalsPageState extends ConsumerState<PendingRenewalsPage> {
     try {
       final now = DateTime.now().toUtc();
       await _repository.validateRenewal(subscription, changedAt: now);
-      await ref.read(appRuntimeProvider).sync?.synchronize();
+      unawaited(
+        ref.read(appRuntimeProvider).sync?.synchronize().catchError((e) {
+          debugPrint('Sync error on renewal validation: $e');
+        }),
+      );
       _toast('renewal_validated_success');
     } catch (_) {
       _toast('renewal_validation_failed');
@@ -85,7 +90,11 @@ class _PendingRenewalsPageState extends ConsumerState<PendingRenewalsPage> {
           changedAt: now,
           reason: reasonController.text.trim(),
         );
-        await ref.read(appRuntimeProvider).sync?.synchronize();
+        unawaited(
+          ref.read(appRuntimeProvider).sync?.synchronize().catchError((e) {
+            debugPrint('Sync error on renewal rejection: $e');
+          }),
+        );
         _toast('renewal_rejected');
       } catch (_) {
         _toast('error');
@@ -105,7 +114,13 @@ class _PendingRenewalsPageState extends ConsumerState<PendingRenewalsPage> {
         title: Text(s.text('pending_renewals_title')),
         leading: IconButton(
           icon: const Icon(LucideIcons.arrowLeft),
-          onPressed: () => context.go('/subscriptions'),
+          onPressed: () {
+            if (context.canPop()) {
+              context.pop();
+            } else {
+              context.go('/');
+            }
+          },
         ),
       ),
       body: SafeArea(
