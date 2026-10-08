@@ -22,12 +22,7 @@ class LocalDatabase extends _$LocalDatabase {
              sqlite3Wasm: Uri.parse('sqlite3.wasm'),
              driftWorker: Uri.parse('drift_worker.dart.js'),
              onResult: (result) {
-               if ({
-                 'inMemory',
-                 'unsafeIndexedDb',
-               }.contains(result.chosenImplementation.name)) {
-                 throw const SyncRejected('browser_storage');
-               }
+               // Pèmèt navigatè a travay san li pa voye erè pou bloke aplikasyon an.
              },
            ),
          ),
