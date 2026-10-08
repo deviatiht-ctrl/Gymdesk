@@ -1,4 +1,4 @@
-import '../../../core/sync/sync_models.dart';
+﻿import '../../../core/sync/sync_models.dart';
 
 class Gym {
   const Gym({
@@ -101,6 +101,14 @@ class PlatformOffer {
   double get setupFee => (config['setup_fee'] as num?)?.toDouble() ?? 0;
   bool get isHot => config['is_hot'] == true;
   bool get includesTablet => config['includes_tablet'] == true;
+  int get maxMembers => (config['max_members'] as num?)?.toInt() ?? 0;
+  double get overageMemberFee =>
+      (config['overage_member_fee'] as num?)?.toDouble() ?? 0.0;
+  int get tabletCount =>
+      (config['tablet_count'] as num?)?.toInt() ?? (includesTablet ? 1 : 0);
+  double get tabletOptionalPrice =>
+      (config['tablet_optional_price'] as num?)?.toDouble() ?? 0.0;
+
   List<String> get features => [
     for (final f in (config['features'] as List? ?? const [])) '$f',
   ];
@@ -109,6 +117,102 @@ class PlatformOffer {
       Map<String, dynamic>.from(t as Map),
   ];
   bool get isAnnual => billingPeriod == 'annual';
+
+  static const List<PlatformOffer> defaultAnnualPlans = [
+    PlatformOffer(
+      id: 'plan_basic',
+      name: 'PLAN 1 : BASIC (Starter)',
+      description: 'Idéal pour petites salles démarrant la gestion numérique.',
+      billingPeriod: 'annual',
+      price: 350,
+      currency: 'USD',
+      config: {
+        'max_members': 50,
+        'overage_member_fee': 2.0,
+        'badge_quota': 0,
+        'includes_tablet': false,
+        'tablet_count': 0,
+        'tablet_optional_price': 180.0,
+        'features': [
+          'Jiska 50 manb aktif',
+          'Depasman : +2.00 USD / manb extra',
+          'Badj QR fizik sou kòmand (frais impression)',
+          'Opsyon Tablèt Android : +180 USD',
+          'Sipò teknik & mizajou enkli',
+        ],
+      },
+    ),
+    PlatformOffer(
+      id: 'plan_medium',
+      name: 'PLAN 2 : MEDIUM (Growth)',
+      description: 'Pour salles en croissance cherchant un contrôle rigoureux.',
+      billingPeriod: 'annual',
+      price: 750,
+      currency: 'USD',
+      config: {
+        'max_members': 150,
+        'overage_member_fee': 5.0,
+        'badge_quota': 0,
+        'includes_tablet': false,
+        'tablet_count': 0,
+        'tablet_optional_price': 150.0,
+        'features': [
+          'Jiska 150 manb aktif',
+          'Depasman : +5.00 USD / manb extra',
+          'Badj QR fizik sou kòmand (frais impression)',
+          'Opsyon Tablèt Android : +150 USD',
+          'Jesyon peman & rapò finansye',
+        ],
+      },
+    ),
+    PlatformOffer(
+      id: 'plan_pro',
+      name: 'PLAN 3 : PRO (Expansion)',
+      description: 'Solution complète clé en main avec tablette et 300 badges offerts.',
+      billingPeriod: 'annual',
+      price: 1200,
+      currency: 'USD',
+      config: {
+        'max_members': 300,
+        'overage_member_fee': 3.0,
+        'badge_quota': 300,
+        'includes_tablet': true,
+        'tablet_count': 1,
+        'is_hot': true,
+        'features': [
+          'Jiska 300 manb aktif',
+          'Depasman : +3.00 USD / manb extra',
+          '300 Badj fizik QR GRATIS enkli 🪪',
+          '1 Tablèt Android GRATIS enkli 📱',
+          'Eskanè kamera rapid & PIN sekirize',
+          'Sipò priyoritè 24/7',
+        ],
+      },
+    ),
+    PlatformOffer(
+      id: 'plan_enterprise',
+      name: 'PLAN 4 : ENTERPRISE (Unlimited)',
+      description: 'Accompagnement illimité et haute performance avec 2 tablettes et 500 badges.',
+      billingPeriod: 'annual',
+      price: 2200,
+      currency: 'USD',
+      config: {
+        'max_members': 0,
+        'overage_member_fee': 0.0,
+        'badge_quota': 500,
+        'includes_tablet': true,
+        'tablet_count': 2,
+        'features': [
+          'MEMBRES ILLIMITÉS (San limit) 🚀',
+          'Depasman manb : 0 USD (Tout enkli)',
+          '500 Badj fizik QR GRATIS enkli 🪪',
+          '2 Tablettes Android GRATIS enkli 📱📱',
+          'Aksè API, rapò avanse & backup nwaj',
+          'Responsab kont dedye',
+        ],
+      },
+    ),
+  ];
 
   Json toJson() => {
     'id': id,

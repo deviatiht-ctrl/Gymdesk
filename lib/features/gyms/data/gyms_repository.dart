@@ -101,8 +101,11 @@ class GymsRepository {
       query = query.eq('active', true);
     }
     final rows = await query.order('price');
+    if ((rows as List).isEmpty) {
+      return PlatformOffer.defaultAnnualPlans;
+    }
     return [
-      for (final e in rows as List)
+      for (final e in rows)
         PlatformOffer.fromJson(Map<String, dynamic>.from(e as Map)),
     ];
   });

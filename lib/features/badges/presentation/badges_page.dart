@@ -11,6 +11,7 @@ import '../../settings/data/settings_repository.dart';
 import '../data/badge_pdf.dart';
 import '../data/badges_repository.dart';
 import '../domain/badge.dart';
+import '../domain/badge_background_themes.dart';
 import 'badge_card.dart';
 
 class BadgesPage extends ConsumerStatefulWidget {
@@ -245,6 +246,8 @@ class _BadgesPageState extends ConsumerState<BadgesPage> {
 
     var isBack = false;
     var currentAccent = gym.accentColor;
+    var selectedTheme = (gym.settings['badge_theme'] as String?) ?? 'dark_carbon_gold';
+    var selectedQr = (gym.settings['badge_qr_style'] as String?) ?? 'rounded';
     final footerController = TextEditingController(
       text: (gym.settings['doc_footer'] as String?) ?? 'Merci de votre visite — ${gym.name}',
     );
@@ -260,6 +263,8 @@ class _BadgesPageState extends ConsumerState<BadgesPage> {
             settings: {
               ...gym.settings,
               'doc_footer': footerController.text.trim(),
+              'badge_theme': selectedTheme,
+              'badge_qr_style': selectedQr,
             },
           );
 
@@ -310,45 +315,101 @@ class _BadgesPageState extends ConsumerState<BadgesPage> {
                         gym: customGym,
                         logo: logoBytes,
                         showBack: isBack,
+                        themeId: selectedTheme,
+                        qrStyle: selectedQr,
                       ),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // Palette de couleurs d'accent
-                  Text(s.text('badge_accent'), style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 10,
-                    children: [
-                      '#1F6F4A', // Vert GymDesk
-                      '#0D5C75', // Bleu Océan
-                      '#B84018', // Rouge Brique
-                      '#2B2D42', // Noir Ardoise
-                      '#5A3E85', // Violet Sport
-                    ].map((colorHex) {
-                      final selected = currentAccent.toUpperCase() == colorHex.toUpperCase();
-                      final colorVal = int.parse(colorHex.replaceFirst('#', ''), radix: 16);
-                      return GestureDetector(
-                        onTap: () => setModalState(() => currentAccent = colorHex),
-                        child: Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: Color(0xff000000 | colorVal),
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: selected ? Colors.white : Colors.transparent,
-                              width: 3,
-                            ),
-                            boxShadow: selected
-                                ? [BoxShadow(color: Colors.black.withAlpha(80), blurRadius: 6)]
-                                : null,
-                          ),
-                          child: selected ? const Icon(Icons.check, color: Colors.white, size: 20) : null,
-                        ),
-                      );
-                    }).toList(),
+
+                  // 10 Modèl Background Modèn
+                  Text(
+                    '${s.text('badge_background_theme')} (10 Tèm Modèn) :',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 90,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: BadgeBackgroundTheme.themes.length,
+                      itemBuilder: (context, idx) {
+                        final th = BadgeBackgroundTheme.themes[idx];
+                        final isSel = th.id == selectedTheme;
+                        return GestureDetector(
+                          onTap: () {
+                            setModalState(() {
+                              selectedTheme = th.id;
+                              currentAccent = '#${th.accentColor.toARGB32().toRadixString(16).substring(2).toUpperCase()}';
+                            });
+                          },
+                          child: Container(
+                            width: 125,
+                            margin: const EdgeInsets.only(right: 10),
+                            decoration: BoxDecoration(
+                              gradient: th.gradient,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isSel ? Colors.yellowAccent : th.borderColor,
+                                width: isSel ? 2.5 : 1,
+                              ),
+                            ),
+                            padding: const EdgeInsets.all(6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  th.category,
+                                  style: TextStyle(color: th.accentColor, fontSize: 7.5, fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  th.name,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: th.textPrimary, fontSize: 9.5, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Estil Kòd QR
+                  Text(s.text('badge_qr_style'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: Text(s.text('badge_qr_rounded')),
+                        selected: selectedQr == 'rounded',
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedQr = 'rounded');
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: Text(s.text('badge_qr_square')),
+                        selected: selectedQr == 'square',
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedQr = 'square');
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: Text(s.text('badge_qr_circle')),
+                        selected: selectedQr == 'circle',
+                        onSelected: (val) {
+                          if (val) setModalState(() => selectedQr = 'circle');
+                        },
+                      ),
+                    ],
+                  ),
+
                   const SizedBox(height: 16),
                   // Texte au verso
                   TextField(
@@ -373,6 +434,8 @@ class _BadgesPageState extends ConsumerState<BadgesPage> {
                             settings: {
                               ...gym.settings,
                               'doc_footer': footerController.text.trim(),
+                              'badge_theme': selectedTheme,
+                              'badge_qr_style': selectedQr,
                             },
                           );
                           final runtime = ref.read(appRuntimeProvider);

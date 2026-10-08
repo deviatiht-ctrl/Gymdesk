@@ -1,4 +1,4 @@
-import '../../../core/sync/sync_models.dart';
+﻿import '../../../core/sync/sync_models.dart';
 
 class BadgeTemplate {
   const BadgeTemplate(this.row);
@@ -18,6 +18,14 @@ class BadgeTemplate {
   bool get showStatus => layout['show_status'] == true;
   String get accentColor => layout['accent_color'] as String? ?? '';
 
+  String get backgroundThemeId =>
+      layout['background_theme_id'] as String? ?? 'dark_carbon_gold';
+  String get qrStyle => layout['qr_style'] as String? ?? 'rounded';
+  String get qrColor => layout['qr_color'] as String? ?? '';
+  String get qrBgColor => layout['qr_bg_color'] as String? ?? '';
+  Map<String, dynamic> get positions =>
+      Map<String, dynamic>.from(layout['positions'] as Map? ?? {});
+
   Json updated({
     String? name,
     Json? layout,
@@ -34,13 +42,15 @@ class BadgeTemplate {
   static BadgeTemplate fallback(String gymId) => BadgeTemplate({
     'id': 'fallback',
     'gym_id': gymId,
-    'name': 'GymDesk',
+    'name': 'GymDesk VIP',
     'layout': {
       'orientation': 'landscape',
-      'show_photo': true,
+      'show_photo': false,
       'show_qr': true,
       'show_gym_name': true,
       'show_status': true,
+      'background_theme_id': 'dark_carbon_gold',
+      'qr_style': 'rounded',
     },
     'is_default': true,
   });
@@ -55,6 +65,11 @@ class BadgeTemplateDraft {
     this.showGymName = true,
     this.showStatus = true,
     this.accentColor = '',
+    this.backgroundThemeId = 'dark_carbon_gold',
+    this.qrStyle = 'rounded',
+    this.qrColor = '',
+    this.qrBgColor = '',
+    this.positions = const {},
     this.isDefault = false,
   });
   final String name;
@@ -64,6 +79,11 @@ class BadgeTemplateDraft {
   final bool showGymName;
   final bool showStatus;
   final String accentColor;
+  final String backgroundThemeId;
+  final String qrStyle;
+  final String qrColor;
+  final String qrBgColor;
+  final Map<String, dynamic> positions;
   final bool isDefault;
 
   Json get layout => {
@@ -73,6 +93,11 @@ class BadgeTemplateDraft {
     'show_gym_name': showGymName,
     'show_status': showStatus,
     if (accentColor.isNotEmpty) 'accent_color': accentColor,
+    'background_theme_id': backgroundThemeId,
+    'qr_style': qrStyle,
+    if (qrColor.isNotEmpty) 'qr_color': qrColor,
+    if (qrBgColor.isNotEmpty) 'qr_bg_color': qrBgColor,
+    if (positions.isNotEmpty) 'positions': positions,
   };
 }
 

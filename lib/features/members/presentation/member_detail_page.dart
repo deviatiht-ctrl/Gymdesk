@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,10 +9,12 @@ import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../badges/data/badges_repository.dart';
+import '../../badges/data/whatsapp_service.dart';
 import '../../badges/domain/badge.dart';
 import '../../payments/domain/payment.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
+import '../../settings/data/settings_repository.dart';
 import '../../subscriptions/data/subscriptions_repository.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
@@ -33,6 +35,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
   late final SubscriptionsRepository _subscriptions;
   late final BadgesRepository _badges;
   late final MemberPinService _pins;
+  late final GymSettingsRepository _settings;
   bool _busy = false;
 
   @override
@@ -52,6 +55,11 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     _pins = MemberPinService(runtime.database!);
     _plans = PlansRepository(runtime.database!, runtime.session!);
     _subscriptions = SubscriptionsRepository(
+      runtime.database!,
+      runtime.session!,
+    );
+    _settings = GymSettingsRepository(
+      runtime.client,
       runtime.database!,
       runtime.session!,
     );
@@ -128,7 +136,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
       try {
         await _badges.resetMemberPin(member.id);
       } catch (_) {
-        // Hors ligne : marquage local synchronisé via l'outbox.
+        // Hors ligne : marquage local synchronisÃ© via l'outbox.
         await _pins.markPinResetRequired(
           member.id,
           ref.read(appRuntimeProvider).session?.gymId ?? '',
@@ -140,7 +148,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
   Future<void> _replaceBadge(Member member, BadgeItem old) async {
     final s = AppStrings.of(context);
     final available = await _badges.getAvailableBadges();
-    if (!mounted) return;
+    if (!context.mounted) return;
     if (available.isEmpty) {
       _error('no_badges_available');
       return;
@@ -196,7 +204,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     final activePlans = plans
         .where((p) => p.active && p.deletedAt == null)
         .toList();
-    if (!mounted) return;
+    if (!context.mounted) return;
     GymPlan? plan = activePlans.isEmpty ? null : activePlans.first;
     final paid = TextEditingController(
       text: plan?.price.toStringAsFixed(2) ?? '',
@@ -224,7 +232,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                           (p) => DropdownMenuItem(
                             value: p,
                             child: Text(
-                              '${p.name} · ${p.price.toStringAsFixed(2)} ${p.currency}',
+                              '${p.name} Â· ${p.price.toStringAsFixed(2)} ${p.currency}',
                             ),
                           ),
                         )
@@ -331,7 +339,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
   Future<void> _collect(Member member, GymSubscription subscription) async {
     final s = AppStrings.of(context);
     final payments = await _members.watchPayments(member.id).first;
-    if (!mounted) return;
+    if (!context.mounted) return;
     final paid = payments
         .where((payment) => payment.subscriptionId == subscription.id)
         .fold<double>(0, (total, payment) => total + payment.amount);
@@ -545,10 +553,10 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               style: Theme.of(context).textTheme.headlineMedium,
                             ),
                             Text(
-                              '${member.memberNumber} · ${s.text(member.status)}',
+                              '${member.memberNumber} Â· ${s.text(member.status)}',
                             ),
                             Text(
-                              '${s.text('validity')} : ${s.text('validity_${validity.reason}')}${validity.daysLeft == null ? '' : ' · ${validity.daysLeft} ${s.text('days')}'}',
+                              '${s.text('validity')} : ${s.text('validity_${validity.reason}')}${validity.daysLeft == null ? '' : ' Â· ${validity.daysLeft} ${s.text('days')}'}',
                               style: TextStyle(
                                 color: validity.valid
                                     ? Theme.of(context).colorScheme.primary
@@ -702,10 +710,10 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 title: Text(
-                                  '${DateFormat.yMd(locale).format(subscription.startDate)} → ${DateFormat.yMd(locale).format(subscription.endDate)} · ${subscription.price.toStringAsFixed(2)}',
+                                  '${DateFormat.yMd(locale).format(subscription.startDate)} â†’ ${DateFormat.yMd(locale).format(subscription.endDate)} Â· ${subscription.price.toStringAsFixed(2)}',
                                 ),
                                 subtitle: Text(
-                                  '${s.text(subscription.status)}${subscription.imported ? ' · ${s.text('imported_period')}' : ''}',
+                                  '${s.text(subscription.status)}${subscription.imported ? ' Â· ${s.text('imported_period')}' : ''}',
                                 ),
                                 trailing: Wrap(
                                   spacing: 4,
@@ -782,10 +790,10 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                   ListTile(
                                     contentPadding: EdgeInsets.zero,
                                     title: Text(
-                                      '${payment.amount.toStringAsFixed(2)} ${payment.currency} · ${s.text('method_${payment.method}')}',
+                                      '${payment.amount.toStringAsFixed(2)} ${payment.currency} Â· ${s.text('method_${payment.method}')}',
                                     ),
                                     subtitle: Text(
-                                      '${DateFormat.yMMMd(locale).add_Hm().format(payment.paidAt.toLocal())}${payment.reference == null ? '' : ' · ${payment.reference}'}',
+                                      '${DateFormat.yMMMd(locale).add_Hm().format(payment.paidAt.toLocal())}${payment.reference == null ? '' : ' Â· ${payment.reference}'}',
                                     ),
                                   ),
                               ],
@@ -834,7 +842,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                     size: 16,
                                   ),
                                   label: Text(
-                                    '${badge.formattedNumber} · ${s.text('badge_status_${badge.status}')}',
+                                    '${badge.formattedNumber} Â· ${s.text('badge_status_${badge.status}')}',
                                   ),
                                 ),
                                 OutlinedButton.icon(
@@ -845,6 +853,30 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                         ),
                                   icon: const Icon(LucideIcons.printer),
                                   label: Text(s.text('print_badge')),
+                                ),
+                                FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xff25D366),
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  onPressed: _busy
+                                      ? null
+                                      : () async {
+                                          final gym = await _settings.current();
+                                          final activeSub = subscriptions
+                                              .where((sub) => sub.status == 'active')
+                                              .firstOrNull;
+                                          if (!context.mounted) return;
+                                          await WhatsAppService.sendBadgeActivation(
+                                            context: context,
+                                            member: member,
+                                            badge: badge,
+                                            gym: gym,
+                                            endDate: activeSub?.endDate,
+                                          );
+                                        },
+                                  icon: const Icon(LucideIcons.messageSquare, size: 16),
+                                  label: Text(s.text('send_whatsapp')),
                                 ),
                                 if (canManage && badge.isBound)
                                   OutlinedButton.icon(
@@ -874,7 +906,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                         : () => _run(
                                             () => _badges.releaseBadge(
                                               badge,
-                                              reason: 'Libération du badge',
+                                              reason: 'LibÃ©ration du badge',
                                             ),
                                           ),
                                     icon: const Icon(LucideIcons.lockOpen),

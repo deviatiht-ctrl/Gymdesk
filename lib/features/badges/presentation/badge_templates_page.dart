@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -7,6 +7,7 @@ import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../data/badge_templates_repository.dart';
 import '../domain/badge_template.dart';
+import '../domain/badge_background_themes.dart';
 
 class BadgeTemplatesPage extends ConsumerStatefulWidget {
   const BadgeTemplatesPage({super.key});
@@ -44,6 +45,8 @@ class _BadgeTemplatesPageState extends ConsumerState<BadgeTemplatesPage> {
     var gym = template?.showGymName ?? true;
     var status = template?.showStatus ?? true;
     var isDefault = template?.isDefault ?? false;
+    var themeId = template?.backgroundThemeId ?? 'dark_carbon_gold';
+    var qrStyle = template?.qrStyle ?? 'rounded';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -81,6 +84,44 @@ class _BadgeTemplatesPageState extends ConsumerState<BadgeTemplatesPage> {
                           )
                           .toList(),
                       onChanged: (v) => orientation = v ?? 'landscape',
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: themeId,
+                      decoration: InputDecoration(
+                        labelText: s.text('badge_background_theme'),
+                      ),
+                      items: BadgeBackgroundTheme.themes
+                          .map(
+                            (th) => DropdownMenuItem(
+                              value: th.id,
+                              child: Text(' ()'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => themeId = v ?? 'dark_carbon_gold',
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: qrStyle,
+                      decoration: InputDecoration(
+                        labelText: s.text('badge_qr_style'),
+                      ),
+                      items: [
+                        DropdownMenuItem(
+                          value: 'rounded',
+                          child: Text(s.text('badge_qr_rounded')),
+                        ),
+                        DropdownMenuItem(
+                          value: 'square',
+                          child: Text(s.text('badge_qr_square')),
+                        ),
+                        DropdownMenuItem(
+                          value: 'circle',
+                          child: Text(s.text('badge_qr_circle')),
+                        ),
+                      ],
+                      onChanged: (v) => qrStyle = v ?? 'rounded',
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -163,6 +204,8 @@ class _BadgeTemplatesPageState extends ConsumerState<BadgeTemplatesPage> {
           showGymName: gym,
           showStatus: status,
           accentColor: accent.text.trim(),
+          backgroundThemeId: themeId,
+          qrStyle: qrStyle,
           isDefault: isDefault,
         ),
         existing: template,
@@ -267,7 +310,7 @@ class _BadgeTemplatesPageState extends ConsumerState<BadgeTemplatesPage> {
                     ),
                     title: Text(template.name),
                     subtitle: Text(
-                      '${s.text('orientation_${template.orientation}')} · ${template.showPhoto ? s.text('show_photo') : s.text('no_photo')} · ${template.showQr ? 'QR' : s.text('no_qr')}',
+                      '${s.text('orientation_${template.orientation}')} Â· ${template.showPhoto ? s.text('show_photo') : s.text('no_photo')} Â· ${template.showQr ? 'QR' : s.text('no_qr')}',
                     ),
                     trailing: Wrap(
                       spacing: 8,
