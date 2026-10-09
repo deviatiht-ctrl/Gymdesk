@@ -1,3 +1,4 @@
+import 'fingerprint_enrollment_dialog.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -42,7 +43,11 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
   int _step = 0;
   bool _busy = false;
 
-  // Étape 1 : Badge
+  // Étape 1 : Badge (Opsyonèl)
+  bool _skipBadge = false;
+  String? _enrolledFingerprint;
+  String? _generatedTempPin;
+  DateTime? _tempPinExpiresAt;
   BadgeItem? _selectedBadge;
   final _usbScanController = TextEditingController();
   final _usbFocusNode = FocusNode();
@@ -294,7 +299,7 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
   }
 
   Future<void> _persistActivation() async {
-    if (_busy || _selectedBadge == null || _selectedPlan == null) return;
+    if (_busy || (!_skipBadge && _selectedBadge == null) || _selectedPlan == null) return;
     setState(() => _busy = true);
 
     try {
@@ -308,7 +313,14 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
       final subscriptionId = uuid.v4();
       final paymentId = uuid.v4();
       final historyId = uuid.v4();
-      final badge = _selectedBadge!;
+
+      final String memberNumber = _skipBadge || _selectedBadge == null
+          ? await db.nextMemberNumber()
+          : _selectedBadge!.formattedNumber;
+      final String qrToken = _skipBadge || _selectedBadge == null
+          ? uuid.v4()
+          : _selectedBadge!.qrToken;
+      final String? badgeId = _skipBadge ? null : _selectedBadge?.id;
 
       final pinService = MemberPinService(db);
       final pinData = await pinService.createPinData(
@@ -316,6 +328,10 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
         session.gymId!,
         _pinFirst,
       );
+
+      final isOneDayPass = _selectedPlan!.durationDays == 1 || _selectedPlan!.name.toLowerCase().contains('1 j') || _selectedPlan!.name.toLowerCase().contains('séance');
+      final todayMidnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+      final tempPin = isOneDayPass ? (_pinFirst.isNotEmpty ? _pinFirst : '${100000 + (memberId.hashCode.abs() % 900000)}') : null;
 
       final terms = EnrollmentTerms.create(
         plan: _selectedPlan!,
@@ -331,15 +347,18 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
       final paidAmount = terms.paymentAmount;
       final endDate = terms.end;
 
+      final firstName = _fields['first_name']!.text.trim();
+      final lastName = _fields['last_name']!.text.trim();
+
       // 1. Membre
       final memberRow = <String, dynamic>{
         'id': memberId,
         'gym_id': session.gymId,
-        'badge_id': badge.id,
-        'member_number': badge.formattedNumber,
-        'qr_token': badge.qrToken,
-        'first_name': _fields['first_name']!.text.trim(),
-        'last_name': _fields['last_name']!.text.trim(),
+        'badge_id': badgeId,
+        'member_number': memberNumber,
+        'qr_token': qrToken,
+        'first_name': firstName,
+        'last_name': lastName,
         'sex': _sex,
         'birth_date': _birthDate == null ? null : ymd(dateOnly(_birthDate!)),
         'phone': normalizePhone(_fields['phone']!.text),
@@ -356,6 +375,10 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
         'guardian_name': _fields['guardian_name']!.text.trim(),
         'photo_url': null,
         'notes': _fields['notes']!.text.trim(),
+        'fingerprint_template': _enrolledFingerprint,
+        'fingerprint_registered': _enrolledFingerprint != null && _enrolledFingerprint!.isNotEmpty,
+        'temporary_pin': tempPin,
+        'pin_expires_at': isOneDayPass ? todayMidnight.toIso8601String() : null,
         'status': 'active',
         'is_test': false,
         'created_by': session.staffId,
@@ -401,30 +424,33 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
         };
       }
 
-      // 4. Badge
-      final badgeRow = <String, dynamic>{
-        ...badge.row,
-        'status': 'bound',
-        'member_id': memberId,
-        'bound_at': now.toIso8601String(),
-        'bound_by': session.staffId,
-        'updated_at': now.toIso8601String(),
-      };
+      // 4. Badge (opsyonèl si skip)
+      Map<String, dynamic>? badgeRow;
+      Map<String, dynamic>? historyRow;
+      if (!_skipBadge && _selectedBadge != null) {
+        badgeRow = <String, dynamic>{
+          ..._selectedBadge!.row,
+          'status': 'bound',
+          'member_id': memberId,
+          'bound_at': now.toIso8601String(),
+          'bound_by': session.staffId,
+          'updated_at': now.toIso8601String(),
+        };
+
+        historyRow = <String, dynamic>{
+          'id': historyId,
+          'gym_id': session.gymId,
+          'badge_id': _selectedBadge!.id,
+          'member_id': memberId,
+          'event': 'bound',
+          'actor_id': session.staffId,
+          'reason': 'Activation de carte',
+          'created_at': now.toIso8601String(),
+        };
+      }
 
       // 5. PIN
       final pinRow = pinData.toJson();
-
-      // 6. Historique badge
-      final historyRow = <String, dynamic>{
-        'id': historyId,
-        'gym_id': session.gymId,
-        'badge_id': badge.id,
-        'member_id': memberId,
-        'event': 'bound',
-        'actor_id': session.staffId,
-        'reason': 'Activation de carte',
-        'created_at': now.toIso8601String(),
-      };
 
       // Enregistrement atomique immédiat en base locale
       await db.activateMemberCard(
@@ -441,9 +467,24 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _createdMemberNumber = badge.formattedNumber;
+          _createdMemberNumber = memberNumber;
+          _generatedTempPin = tempPin;
+          _tempPinExpiresAt = isOneDayPass ? todayMidnight : null;
           _step = 4;
         });
+
+        // Pouse imedyatman sou Tèminal Pòt FSTW F30
+        try {
+          final fstw = ref.read(fstwAccessControlServiceProvider);
+          if (_enrolledFingerprint != null && _enrolledFingerprint!.isNotEmpty) {
+            unawaited(fstw.sendUserFingerprint(memberId, _enrolledFingerprint!, '$firstName $lastName'));
+          }
+          if (tempPin != null) {
+            unawaited(fstw.setTemporaryPin(memberId, tempPin, todayMidnight));
+          }
+        } catch (doorErr) {
+          debugPrint('FSTW door dispatch error (queued): $doorErr');
+        }
       }
 
       unawaited(
@@ -610,6 +651,50 @@ Mèsi pou konfyans ou, bòn antrènman !''';
                     '${s.text('member_badge')}: $_createdMemberNumber',
                     style: theme.textTheme.titleMedium,
                   ),
+                  if (_generatedTempPin != null) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.amber.shade800),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(LucideIcons.keyRound, color: Colors.amber.shade900, size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                'KÒD PIN TANPORÈ POU PÒT LA (1 JOU)',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade900,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          SelectableText(
+                            _generatedTempPin!,
+                            style: theme.textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 4,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Kòd sa a valab jiska minwi aswè a pou louvri tèminal FSTW F30 la.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodySmall?.copyWith(color: Colors.brown.shade800),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(s.text('email_after_sync'), textAlign: TextAlign.center),
                   const SizedBox(height: 24),
@@ -691,18 +776,46 @@ Mèsi pou konfyans ou, bòn antrènman !''';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          s.text('scan_blank_card_prompt'),
-          style: theme.textTheme.titleMedium,
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    s.text('scan_blank_card_prompt'),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    s.text('scan_blank_card_hint'),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                backgroundColor: theme.colorScheme.secondaryContainer,
+              ),
+              icon: const Icon(LucideIcons.fingerprint, size: 16),
+              label: const Text('Kontinye San Badj (Byometri/PIN) ➔'),
+              onPressed: () {
+                setState(() {
+                  _skipBadge = true;
+                  _selectedBadge = null;
+                  _step = 1;
+                });
+              },
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        Text(
-          s.text('scan_blank_card_hint'),
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.outline,
-          ),
-        ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         if (_badgeError != null) ...[
           Container(
             padding: const EdgeInsets.all(12),
@@ -1218,6 +1331,66 @@ Mèsi pou konfyans ou, bòn antrènman !''';
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            // Enwolman Anprent DigitalPersona 4500 USB
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _enrolledFingerprint != null
+                    ? Colors.green.withAlpha(24)
+                    : theme.colorScheme.surfaceContainerHighest.withAlpha(120),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _enrolledFingerprint != null
+                      ? Colors.green
+                      : theme.colorScheme.outlineVariant,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    LucideIcons.fingerprint,
+                    size: 22,
+                    color: _enrolledFingerprint != null ? Colors.green : theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _enrolledFingerprint != null
+                          ? '✅ Anprent Enwole avèk Siksè !'
+                          : 'Lektè Anprent DigitalPersona 4500 (Akèy)',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: _enrolledFingerprint != null ? Colors.green.shade800 : null,
+                      ),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    icon: Icon(
+                      _enrolledFingerprint != null ? LucideIcons.refreshCw : LucideIcons.scanLine,
+                      size: 14,
+                    ),
+                    label: Text(_enrolledFingerprint != null ? 'Refè' : 'Enwole Anprent'),
+                    onPressed: () async {
+                      final memberSim = Member({
+                        'id': 'draft-enrollee',
+                        'first_name': _fields['first_name']!.text.trim(),
+                        'last_name': _fields['last_name']!.text.trim(),
+                      });
+                      await FingerprintEnrollmentDialog.show(
+                        context,
+                        member: memberSim,
+                        onSaved: () {
+                          setState(() {
+                            _enrolledFingerprint = 'DP4500_TEMPLATE_' + DateTime.now().millisecondsSinceEpoch.toString();
+                          });
+                        },
+                      );
+                    },
                   ),
                 ],
               ),

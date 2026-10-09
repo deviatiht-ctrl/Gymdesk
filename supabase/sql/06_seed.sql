@@ -21,6 +21,16 @@ declare
     v_m1 uuid; v_m2 uuid; v_m3 uuid;
 begin
     -- ---------------------------------------------------------
+    -- Asire ke kolòn biometrik yo egziste si migrasyon 16 poko pase
+    -- ---------------------------------------------------------
+    alter table public.members
+      add column if not exists fingerprint_template text default null,
+      add column if not exists fingerprint_registered boolean not null default false;
+
+    alter table public.attendance
+      add column if not exists fingerprint_verified boolean not null default false;
+
+    -- ---------------------------------------------------------
     -- Salle de démonstration
     -- ---------------------------------------------------------
     insert into public.gyms (id, code, name, accent_color, address, phone,
@@ -38,9 +48,11 @@ begin
         '{"grace_days": 0, "allow_access_pending": false,
           "reception_see_all_payments": false,
           "scan_sound": true, "scan_vibrate": true,
+          "biometric_enabled": true, "biometric_mode": "combo",
           "doc_footer": "Merci de votre visite — PowerGym Delmas"}'::jsonb
     )
-    on conflict (id) do nothing
+    on conflict (id) do update
+        set settings = public.gyms.settings || '{"biometric_enabled": true, "biometric_mode": "combo"}'::jsonb
     returning id into v_gym;
 
     if v_gym is null then
@@ -104,15 +116,20 @@ begin
 
     insert into public.members
         (id, gym_id, member_number, qr_token, first_name, last_name,
-         sex, birth_date, phone, status)
+         sex, birth_date, phone, status, fingerprint_registered, fingerprint_template)
     values
         (v_m1, v_gym, 'PWR-000001', 'demo-token-00000000000000000001',
-         'James',  'Derival', 'male',   '1992-04-17', '+509 3410 0001', 'active'),
+         'James',  'Derival', 'male',   '1992-04-17', '+509 3410 0001', 'active',
+         true, 'k0FQUjAwMDAwMS1kZW1vLWZpbmdlcnByaW50LXRlbXBsYXRlLTUxMmJ5dGVzLXNhbXBsZS1kYXRhAAAAAAAAAAAAAA=='),
         (v_m2, v_gym, 'PWR-000002', 'demo-token-00000000000000000002',
-         'Woodna', 'Pierre',  'female', '1998-11-02', '+509 3410 0002', 'active'),
+         'Woodna', 'Pierre',  'female', '1998-11-02', '+509 3410 0002', 'active',
+         true, 'k0FQUjAwMDAwMi1kZW1vLWZpbmdlcnByaW50LXRlbXBsYXRlLTUxMmJ5dGVzLXNhbXBsZS1kYXRhAAAAAAAAAAAAAA=='),
         (v_m3, v_gym, 'PWR-000003', 'demo-token-00000000000000000003',
-         'Marc',   'Benjamin','male',   '1985-07-30', '+509 3410 0003', 'active')
-    on conflict (id) do nothing;
+         'Marc',   'Benjamin','male',   '1985-07-30', '+509 3410 0003', 'active',
+         false, null)
+    on conflict (id) do update
+        set fingerprint_registered = excluded.fingerprint_registered,
+            fingerprint_template = excluded.fingerprint_template;
 
     -- ---------------------------------------------------------
     -- Abonnements :
@@ -142,6 +159,20 @@ begin
          'd0000000-0000-4000-8000-000000000001',
          2500, 'HTG', 'cash',
          ((now() at time zone 'America/Port-au-Prince')::date - 10))
+    on conflict (id) do nothing;
+
+    -- ---------------------------------------------------------
+    -- Présence de démo (avec anprent validée)
+    -- ---------------------------------------------------------
+    insert into public.attendance
+        (id, gym_id, member_id, subscription_id, scanned_at, server_received_at,
+         result, denial_reason, entry_number_today, was_offline, suspect_clock,
+         fingerprint_verified)
+    values
+        ('a0000000-0000-4000-8000-000000000001', v_gym, v_m1,
+         'd0000000-0000-4000-8000-000000000001',
+         now() - interval '2 hours', now() - interval '2 hours',
+         'granted', null, 1, false, false, true)
     on conflict (id) do nothing;
 
     -- ---------------------------------------------------------

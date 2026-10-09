@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -12,10 +13,12 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/auth/kiosk_service.dart';
+import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
 import '../../../core/widgets/scanner_camera_view.dart';
 import '../../members/data/members_repository.dart';
+import '../../members/domain/member.dart';
 import '../data/attendance_repository.dart';
 import '../domain/attendance_entry.dart';
 
@@ -38,15 +41,19 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   String _lastRaw = '';
   DateTime _lastRawAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  // Étape PIN après scan
+  // Étape PIN / Biométrie après scan
   BadgeLookupResult? _activeLookup;
   Uint8List? _activeMemberPhoto;
   String _inputPin = '';
+  bool _forcePinFallback = false;
   Timer? _pinTimeout;
   bool _randomizeKeypad = false;
   List<String> _keypadDigits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 
-  // Résultat temporaire après PIN
+  // Écouteur biométrique DigitalPersona U.are.U 4500
+  StreamSubscription<BiometricEvent>? _biometricSub;
+
+  // Résultat temporaire après PIN / Anprent
   ScanOutcome? _lastOutcome;
   Timer? _outcomeDismissTimer;
 
@@ -60,6 +67,10 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     final runtime = ref.read(appRuntimeProvider);
     _repository = AttendanceRepository(runtime.database!, runtime.session!);
     _membersRepo = MembersRepository(runtime.client, runtime.database!, runtime.session!);
+
+    final bio = ref.read(biometricServiceProvider);
+    _biometricSub = bio.events.listen(_onBiometricEvent);
+    bio.startCapture();
   }
 
   @override
@@ -68,7 +79,123 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     _focus.dispose();
     _pinTimeout?.cancel();
     _outcomeDismissTimer?.cancel();
+    _biometricSub?.cancel();
+    ref.read(biometricServiceProvider).stopCapture();
     super.dispose();
+  }
+
+  void _onBiometricEvent(BiometricEvent event) {
+    if (_processing) return;
+    if (event.type == 'fingerprint_captured' && event.template != null) {
+      _processFingerprint(event.template!);
+    }
+  }
+
+  Future<void> _processFingerprint(String template) async {
+    if (_processing) return;
+    setState(() => _processing = true);
+
+    final runtime = ref.read(appRuntimeProvider);
+    final bioService = ref.read(biometricServiceProvider);
+    final state = runtime.sync?.state.value;
+    final scanTime = runtime.sync?.clock.correctedNow ?? DateTime.now().toUtc();
+    final settings = runtime.session?.settings ?? const <String, dynamic>{};
+    final isBiometricEnabled = settings['biometric_enabled'] == true;
+    final mode = settings['biometric_mode'] as String? ?? 'badge_pin';
+
+    try {
+      // 1. Si yon badge te deja scanne (_activeLookup != null) -> Combo Mode 1:1 match
+      if (_activeLookup != null) {
+        final member = _activeLookup!.member;
+        if (member == null) return;
+
+        final enrolledTemplate = member.fingerprintTemplate;
+        if (enrolledTemplate == null || enrolledTemplate.isEmpty) {
+          if (mounted) {
+            setState(() => _forcePinFallback = true);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Manm sa a pa gen anprent. Mete kòd PIN li.'),
+              ),
+            );
+          }
+          return;
+        }
+
+        final matchRes = await bioService.match1to1(
+          candidateTemplate: template,
+          enrolledTemplate: enrolledTemplate,
+        );
+
+        final outcome = await _repository.verifyFingerprintAndGrant(
+          member: member,
+          badge: _activeLookup!.badge,
+          fingerprintMatched: matchRes.isMatch,
+          scannedAt: scanTime,
+          offline: state?.phase == SyncPhase.offline,
+          suspectClock: state?.clockSuspect == true,
+        );
+
+        if (settings['scan_vibrate'] == true) await HapticFeedback.mediumImpact();
+        if (settings['scan_sound'] == true) await SystemSound.play(SystemSoundType.click);
+
+        unawaited(runtime.sync?.synchronize());
+        _showOutcome(outcome);
+
+        if (mounted) {
+          setState(() {
+            _activeLookup = null;
+            _inputPin = '';
+            _forcePinFallback = false;
+          });
+        }
+        return;
+      }
+
+      // 2. Si pa gen badge ki te scanne:
+      // Si mode se 'fingerprint_only' oswa 'combo' oswa biometrik aktive: 1:N match
+      if (isBiometricEnabled || mode == 'fingerprint_only') {
+        final membersRows = await runtime.database!
+            .watchRecords(SyncEntity.members, limit: 50000)
+            .first;
+        final members = membersRows
+            .map((r) => Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map)))
+            .where((m) => m.fingerprintRegistered && (m.fingerprintTemplate?.isNotEmpty ?? false))
+            .toList();
+
+        final matchedMember = await bioService.match1toN(
+          candidateTemplate: template,
+          members: members,
+        );
+
+        if (matchedMember != null) {
+          final outcome = await _repository.verifyFingerprintAndGrant(
+            member: matchedMember,
+            fingerprintMatched: true,
+            scannedAt: scanTime,
+            offline: state?.phase == SyncPhase.offline,
+            suspectClock: state?.clockSuspect == true,
+          );
+
+          if (settings['scan_vibrate'] == true) await HapticFeedback.mediumImpact();
+          if (settings['scan_sound'] == true) await SystemSound.play(SystemSoundType.click);
+
+          unawaited(runtime.sync?.synchronize());
+          _showOutcome(outcome);
+        } else {
+          if (settings['scan_sound'] == true) await SystemSound.play(SystemSoundType.alert);
+          _showOutcome(
+            const ScanOutcome(
+              result: 'denied_bad_fingerprint',
+              message: 'fingerprint_unrecognized',
+            ),
+          );
+        }
+      }
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
   }
 
   void _onDetect(BarcodeCapture capture) {
@@ -126,6 +253,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
           _activeLookup = lookup;
           _activeMemberPhoto = photo;
           _inputPin = '';
+          _forcePinFallback = false;
         });
 
         // Annulation automatique après 20 secondes
@@ -178,6 +306,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         setState(() {
           _activeLookup = null;
           _inputPin = '';
+          _forcePinFallback = false;
           _processing = false;
         });
       }
@@ -346,6 +475,8 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  _buildBiometricIndicator(theme, s),
+                  const SizedBox(width: 8),
                   Text(
                     DateFormat.Hm().format(DateTime.now()),
                     style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
@@ -506,7 +637,9 @@ class _ScanPageState extends ConsumerState<ScanPage> {
             Icon(LucideIcons.scanLine, size: 40, color: theme.colorScheme.outline),
             const SizedBox(height: 10),
             Text(
-              s.text('scan_badge_prompt'),
+              ref.read(appRuntimeProvider).session?.settings['biometric_enabled'] == true
+                  ? s.text('scan_or_place_finger')
+                  : s.text('scan_badge_prompt'),
               style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.outline),
               textAlign: TextAlign.center,
             ),
@@ -571,11 +704,20 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                 color: color.withAlpha(30),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(
-                isExit
-                    ? '${s.text('check_out_recorded')} • #${outcome.entry?.entryNumberToday ?? 1}'
-                    : '${s.text('check_in_recorded')} • #${outcome.entry?.entryNumberToday ?? 1}',
-                style: theme.textTheme.labelMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (outcome.entry?.fingerprintVerified == true) ...[
+                    const Icon(LucideIcons.fingerprint, size: 14),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(
+                    isExit
+                        ? '${s.text('check_out_recorded')} • #${outcome.entry?.entryNumberToday ?? 1}'
+                        : '${s.text('check_in_recorded')} • #${outcome.entry?.entryNumberToday ?? 1}',
+                    style: theme.textTheme.labelMedium?.copyWith(color: color, fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
             ),
           ],
@@ -586,6 +728,15 @@ class _ScanPageState extends ConsumerState<ScanPage> {
 
   Widget _buildPinOverlay(AppStrings s, ThemeData theme) {
     final member = _activeLookup!.member!;
+    final runtime = ref.read(appRuntimeProvider);
+    final settings = runtime.session?.settings ?? const <String, dynamic>{};
+    final isBiometricEnabled = settings['biometric_enabled'] == true;
+    final mode = settings['biometric_mode'] as String? ?? 'badge_pin';
+    final isComboPrompt = isBiometricEnabled &&
+        mode == 'combo' &&
+        !_forcePinFallback &&
+        member.fingerprintRegistered;
+
     return Container(
       color: Colors.black.withAlpha(200),
       alignment: Alignment.center,
@@ -597,89 +748,287 @@ class _ScanPageState extends ConsumerState<ScanPage> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Photo et prénom du membre pour contrôle visuel
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 28,
-                      backgroundImage: _activeMemberPhoto != null ? MemoryImage(_activeMemberPhoto!) : null,
-                      child: _activeMemberPhoto == null
-                          ? Text(member.firstName.isNotEmpty ? member.firstName[0].toUpperCase() : '?',
-                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold))
-                          : null,
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+            child: isComboPrompt
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
                         children: [
-                          Text(member.firstName, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-                          Text(s.text('enter_pin_to_access'), style: theme.textTheme.bodySmall),
+                          CircleAvatar(
+                            radius: 28,
+                            backgroundImage: _activeMemberPhoto != null
+                                ? MemoryImage(_activeMemberPhoto!)
+                                : null,
+                            child: _activeMemberPhoto == null
+                                ? Text(
+                                    member.firstName.isNotEmpty
+                                        ? member.firstName[0].toUpperCase()
+                                        : '?',
+                                    style: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  member.firstName,
+                                  style: theme.textTheme.headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  s.text('place_finger_to_verify'),
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(LucideIcons.x),
+                            onPressed: () => setState(() => _activeLookup = null),
+                          ),
                         ],
                       ),
-                    ),
-                    IconButton(
-                      icon: const Icon(LucideIcons.x),
-                      onPressed: () => setState(() => _activeLookup = null),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-
-                // Points masqués du PIN
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(6, (i) {
-                    final filled = i < _inputPin.length;
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: filled ? theme.colorScheme.primary : Colors.transparent,
-                        border: Border.all(color: theme.colorScheme.primary, width: 2),
+                      const SizedBox(height: 32),
+                      Container(
+                        padding: const EdgeInsets.all(28),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          LucideIcons.fingerprint,
+                          size: 72,
+                          color: theme.colorScheme.primary,
+                        ),
                       ),
-                    );
-                  }),
+                      const SizedBox(height: 24),
+                      Text(
+                        s.text('place_finger_to_verify'),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Poze menm dwèt ou te anrejistre a sou lektè USB a',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                      const SizedBox(height: 28),
+                      TextButton.icon(
+                        icon: const Icon(LucideIcons.keyRound, size: 16),
+                        label: Text(s.text('use_pin_instead')),
+                        onPressed: () => setState(() => _forcePinFallback = true),
+                      ),
+                    ],
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Photo et prénom du membre pour contrôle visuel
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 28,
+                            backgroundImage: _activeMemberPhoto != null
+                                ? MemoryImage(_activeMemberPhoto!)
+                                : null,
+                            child: _activeMemberPhoto == null
+                                ? Text(
+                                    member.firstName.isNotEmpty
+                                        ? member.firstName[0].toUpperCase()
+                                        : '?',
+                                    style: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  member.firstName,
+                                  style: theme.textTheme.headlineSmall
+                                      ?.copyWith(fontWeight: FontWeight.bold),
+                                ),
+                                Text(
+                                  s.text('enter_pin_to_access'),
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(LucideIcons.x),
+                            onPressed: () => setState(() => _activeLookup = null),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      // Points masqués du PIN
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(6, (i) {
+                          final filled = i < _inputPin.length;
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 6),
+                            width: 16,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: filled
+                                  ? theme.colorScheme.primary
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color: theme.colorScheme.primary,
+                                width: 2,
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                      const SizedBox(height: 24),
+                      // Pavé tactile (option disposition aléatoire)
+                      _buildKeypad(theme),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          TextButton.icon(
+                            icon: Icon(
+                              _randomizeKeypad
+                                  ? LucideIcons.shuffle
+                                  : LucideIcons.arrowDownUp,
+                              size: 16,
+                            ),
+                            label: Text(s.text('randomize_keys')),
+                            onPressed: () {
+                              setState(() {
+                                _randomizeKeypad = !_randomizeKeypad;
+                                if (_randomizeKeypad) {
+                                  _keypadDigits.shuffle(Random.secure());
+                                } else {
+                                  _keypadDigits = [
+                                    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+                                  ];
+                                }
+                              });
+                            },
+                          ),
+                          FilledButton(
+                            onPressed: _inputPin.length >= 4 ? _submitPin : null,
+                            child: Text(s.text('validate')),
+                          ),
+                        ],
+                      ),
+                      if (isBiometricEnabled && member.fingerprintRegistered) ...[
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          icon: const Icon(LucideIcons.fingerprint, size: 16),
+                          label: const Text('Sèvi ak anprent pito'),
+                          onPressed: () => setState(() => _forcePinFallback = false),
+                        ),
+                      ],
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBiometricIndicator(ThemeData theme, AppStrings s) {
+    final bio = ref.watch(biometricServiceProvider);
+    return ValueListenableBuilder<BiometricSensorState>(
+      valueListenable: bio.state,
+      builder: (context, sensorState, _) {
+        final (color, icon, label) = switch (sensorState) {
+          BiometricSensorState.ready => (
+            const Color(0xff1f6f4a),
+            LucideIcons.check,
+            s.text('biometric_reader_ready'),
+          ),
+          BiometricSensorState.waitingFinger || BiometricSensorState.capturing => (
+            Colors.amber.shade700,
+            LucideIcons.fingerprint,
+            s.text('biometric_waiting_finger'),
+          ),
+          _ => (
+            Colors.red.shade400,
+            LucideIcons.circleAlert,
+            s.text('biometric_disconnected'),
+          ),
+        };
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () async {
+            await bio.checkSensorConnection();
+            await bio.requestUsbPermission();
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  duration: const Duration(seconds: 2),
+                  content: Text(label),
                 ),
-                const SizedBox(height: 24),
-
-                // Pavé tactile (option disposition aléatoire)
-                _buildKeypad(theme),
-                const SizedBox(height: 16),
-
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    TextButton.icon(
-                      icon: Icon(_randomizeKeypad ? LucideIcons.shuffle : LucideIcons.arrowDownUp, size: 16),
-                      label: Text(s.text('randomize_keys')),
-                      onPressed: () {
-                        setState(() {
-                          _randomizeKeypad = !_randomizeKeypad;
-                          if (_randomizeKeypad) {
-                            _keypadDigits.shuffle(Random.secure());
-                          } else {
-                            _keypadDigits = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
-                          }
-                        });
-                      },
-                    ),
-                    FilledButton(
-                      onPressed: _inputPin.length >= 4 ? _submitPin : null,
-                      child: Text(s.text('validate')),
-                    ),
-                  ],
+              );
+            }
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(icon, size: 14, color: color),
+                const SizedBox(width: 4),
+                Text(
+                  sensorState == BiometricSensorState.ready
+                      ? 'Lektè Pare'
+                      : (sensorState == BiometricSensorState.waitingFinger ||
+                              sensorState == BiometricSensorState.capturing)
+                          ? 'Poze dwèt'
+                          : 'Deploge',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                  ),
                 ),
               ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

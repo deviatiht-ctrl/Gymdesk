@@ -288,9 +288,29 @@ class _CreateGymPageState extends ConsumerState<CreateGymPage> {
                 ],
                 const SizedBox(height: 8),
                 Text(
-                  '${s.text('badge_quota')} : ${offer.badgeQuota}',
+                  '${s.text('badge_quota')} : ${offer.badgeQuota} (Opsyonèl)',
                   style: theme.textTheme.bodySmall,
                 ),
+                if (offer.includesDoorAccess || offer.biometricSupported) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '✅ Sistèm Pòt Byometrik FSTW F30 Enkli',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+                if (offer.installmentsAllowed) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '💳 Peman an 3 Fwa : Akonpt ${offer.installment1.toStringAsFixed(0)} ${offer.currency}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -365,6 +385,7 @@ class _CreateGymPageState extends ConsumerState<CreateGymPage> {
                         key: _form,
                         child: LayoutBuilder(
                           builder: (context, constraints) {
+                            final theme = Theme.of(context);
                             final width = constraints.maxWidth >= 650
                                 ? (constraints.maxWidth - 20) / 2
                                 : constraints.maxWidth;
@@ -403,7 +424,59 @@ class _CreateGymPageState extends ConsumerState<CreateGymPage> {
                                     ],
                                   ),
                                 if (_selectedOffer != null) ...[
-                                  const SizedBox(height: 24),
+                                  if (_selectedOffer!.installmentsAllowed) ...[
+                                    const SizedBox(height: 12),
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.primaryContainer.withAlpha(90),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(LucideIcons.creditCard, size: 16, color: theme.colorScheme.primary),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                'Opsyon Peman an 3 Fwa (Akonpt Materyèl/Enstalasyon)',
+                                                style: theme.textTheme.labelMedium?.copyWith(
+                                                  fontWeight: FontWeight.bold,
+                                                  color: theme.colorScheme.primary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Wrap(
+                                            spacing: 8,
+                                            children: [
+                                              ActionChip(
+                                                avatar: const Icon(LucideIcons.checkCheck, size: 14),
+                                                label: Text('Tout Kòb la (100%) : ${_selectedOffer!.price.toStringAsFixed(0)} ${_selectedOffer!.currency}'),
+                                                onPressed: _busy || _draft != null ? null : () {
+                                                  setState(() {
+                                                    _amount.text = _selectedOffer!.price.toStringAsFixed(0);
+                                                  });
+                                                },
+                                              ),
+                                              ActionChip(
+                                                avatar: const Icon(LucideIcons.wrench, size: 14),
+                                                label: Text('Tranche 1 (Akonpt Materyèl) : ${_selectedOffer!.installment1.toStringAsFixed(0)} ${_selectedOffer!.currency}'),
+                                                onPressed: _busy || _draft != null ? null : () {
+                                                  setState(() {
+                                                    _amount.text = _selectedOffer!.installment1.toStringAsFixed(0);
+                                                  });
+                                                },
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 20),
                                   SwitchListTile(
                                     contentPadding: EdgeInsets.zero,
                                     title: Text(

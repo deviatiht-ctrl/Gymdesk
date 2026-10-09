@@ -2152,6 +2152,110 @@ class AppStrings {
       'Enregistrer comme modèle par défaut',
       'Save as gym default badge',
     ],
+    'biometric_reader': [
+      'Lektè Anprent HID U.are.U 4500',
+      'Lecteur d’empreintes HID U.are.U 4500',
+      'HID U.are.U 4500 Fingerprint Reader',
+    ],
+    'biometric_mode': [
+      'Mòd Kontwòl Aksè',
+      'Mode de contrôle d’accès',
+      'Access Control Mode',
+    ],
+    'biometric_mode_badge_pin': [
+      'Mòd 1 : Badj QR + PIN',
+      'Mode 1 : Badge QR + PIN',
+      'Mode 1 : QR Badge + PIN',
+    ],
+    'biometric_mode_fingerprint_only': [
+      'Mòd 2 : Anprent Sèlman (1:N)',
+      'Mode 2 : Empreinte Seule (1:N)',
+      'Mode 2 : Fingerprint Only (1:N)',
+    ],
+    'biometric_mode_combo': [
+      'Mòd 3 : Combo (Badj + Anprent 1:1, PIN sekou)',
+      'Mode 3 : Combo (Badge + Empreinte 1:1, PIN secours)',
+      'Mode 3 : Combo (Badge + Fingerprint 1:1, PIN backup)',
+    ],
+    'biometric_reader_ready': [
+      'Lektè Biometrik Pare',
+      'Lecteur Biométrique Prêt',
+      'Biometric Reader Ready',
+    ],
+    'biometric_waiting_finger': [
+      'Mete dwèt ou sou lektè a...',
+      'Posez votre doigt sur le lecteur...',
+      'Place your finger on reader...',
+    ],
+    'biometric_disconnected': [
+      'Lektè USB Deploge oswa Pa Sipòte',
+      'Lecteur USB déconnecté ou non supporté',
+      'USB Reader Disconnected or Unsupported',
+    ],
+    'enroll_fingerprint': [
+      'Anrejistre Anprent (3 Kapti)',
+      'Enregistrer empreinte (3 captures)',
+      'Enroll Fingerprint (3 captures)',
+    ],
+    'fingerprint_registered': [
+      'Anprent anrejistre',
+      'Empreinte enregistrée',
+      'Fingerprint enrolled',
+    ],
+    'fingerprint_not_registered': [
+      'Pa gen anprent',
+      'Aucune empreinte',
+      'No fingerprint',
+    ],
+    'scan_or_place_finger': [
+      'Scan badj ou oswa poze dwèt ou sou lektè a',
+      'Scannez votre badge ou posez votre doigt',
+      'Scan your badge or place your finger',
+    ],
+    'place_finger_to_verify': [
+      'Poze menm dwèt ou sou lektè a pou konfime',
+      'Posez votre doigt sur le lecteur pour confirmer',
+      'Place your finger on reader to verify',
+    ],
+    'use_pin_instead': [
+      'Sèvi ak PIN pito',
+      'Utiliser le code PIN plutôt',
+      'Use PIN code instead',
+    ],
+    'fingerprint_unrecognized': [
+      'Anprent pa rekonèt nan baz done a',
+      'Empreinte non reconnue',
+      'Fingerprint unrecognized',
+    ],
+    'scan_denied_bad_fingerprint': [
+      'Anprent pa koresponn ak manm sa a',
+      'Empreinte non correspondante',
+      'Fingerprint mismatch',
+    ],
+    'biometrics': ['Biometri', 'Biométrie', 'Biometrics'],
+    'fingerprint': ['Anprent dijital', 'Empreinte digitale', 'Fingerprint'],
+    'remove_fingerprint': ['Efase anprent', 'Supprimer l’empreinte', 'Remove fingerprint'],
+    'fingerprint_removed': ['Anprent efase.', 'Empreinte supprimée.', 'Fingerprint removed.'],
+    'fingerprint_registered_desc': [
+      'Manm sa a gen anprent li anrejistre pou antre nan sal la.',
+      'Ce membre a une empreinte enregistrée pour accéder à la salle.',
+      'This member has a registered fingerprint for gym entry.',
+    ],
+    'fingerprint_empty_desc': [
+      'Pa gen anprent dijital ki anrejistre pou manm sa a.',
+      'Aucune empreinte digitale enregistrée pour ce membre.',
+      'No registered fingerprint for this member.',
+    ],
+    'biometric_enable_label': [
+      'Aktive Lektè Anprent (HID DigitalPersona U.are.U)',
+      'Activer le lecteur d’empreinte (HID DigitalPersona U.are.U)',
+      'Enable Fingerprint Reader (HID DigitalPersona U.are.U)',
+    ],
+    'biometric_enable_desc': [
+      'Pèmèt manm yo pase anprent sou lektè USB a. (Lektè sou kòmand, se kliyan ki peye l — disponib nan plan Pro ak Enterprise).',
+      'Permet aux membres d’utiliser le lecteur USB. (Lecteur sur commande payé par le client — réservé aux plans Pro et Enterprise).',
+      'Allows members to use the USB reader. (Reader on-demand paid by client — reserved for Pro and Enterprise plans).',
+    ],
   };
 }
 

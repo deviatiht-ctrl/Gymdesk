@@ -200,8 +200,8 @@ class AttendanceRepository {
         result = 'denied_duplicate';
         reason = 'duplicate_scan';
       } else {
-        result = isEntry ? 'granted_in' : 'granted_out';
-        entryNumber = (todayGranted.length ~/ 2) + 1;
+        result = 'granted';
+        entryNumber = todayGranted.length + 1;
       }
     } else {
       result = switch (validity.reason) {
@@ -221,7 +221,7 @@ class AttendanceRepository {
       'scanned_at': scanTime.toIso8601String(),
       'server_received_at': null,
       'result': result,
-      'denial_reason': result.startsWith('granted') ? null : reason,
+      'denial_reason': result == 'granted' ? null : reason,
       'pin_verified': true,
       'entry_number_today': entryNumber,
       'direction': direction,
@@ -233,7 +233,118 @@ class AttendanceRepository {
     };
     await db.save(SyncEntity.attendance, row, changedAt: scanTime);
 
-    final outcomeMessage = result.startsWith('granted')
+    final outcomeMessage = result == 'granted'
+        ? (isEntry ? 'welcome_member' : 'goodbye_member')
+        : (result == 'denied_duplicate' ? 'duplicate_scan' : 'scan_$result');
+
+    return ScanOutcome(
+      result: result == 'denied_duplicate' ? 'duplicate' : result,
+      entry: AttendanceEntry(row),
+      member: member,
+      message: outcomeMessage,
+      direction: direction,
+    );
+  }
+
+  /// Vérification d'empreinte digitale et enregistrement de présence (Mode Biométrique)
+  Future<ScanOutcome> verifyFingerprintAndGrant({
+    required Member member,
+    BadgeItem? badge,
+    required bool fingerprintMatched,
+    required DateTime scannedAt,
+    required bool offline,
+    required bool suspectClock,
+  }) async {
+    final scanTime = scannedAt.toUtc();
+
+    if (!fingerprintMatched) {
+      const denialResult = 'denied_bad_fingerprint';
+      final row = <String, dynamic>{
+        'id': _uuid.v4(),
+        'gym_id': session.gymId,
+        'member_id': member.id,
+        'badge_id': badge?.id,
+        'subscription_id': null,
+        'scanned_at': scanTime.toIso8601String(),
+        'server_received_at': null,
+        'result': denialResult,
+        'denial_reason': 'scan_denied_bad_fingerprint',
+        'pin_verified': false,
+        'fingerprint_verified': false,
+        'entry_number_today': null,
+        'device_id': await db.deviceId(),
+        'scanned_by': session.staffId,
+        'was_offline': offline,
+        'suspect_clock': suspectClock,
+        'created_at': scanTime.toIso8601String(),
+      };
+      await db.save(SyncEntity.attendance, row, changedAt: scanTime);
+
+      return ScanOutcome(
+        result: denialResult,
+        entry: AttendanceEntry(row),
+        member: member,
+        message: 'scan_denied_bad_fingerprint',
+      );
+    }
+
+    final subscriptions = await _subscriptions(member.id);
+    final validity = memberValidity(
+      member,
+      subscriptions,
+      session.settings,
+      scanTime,
+      session.timezone,
+    );
+
+    final todayGranted = await _todayGrantedEntries(member.id, scanTime);
+    final isEntry = todayGranted.length % 2 == 0;
+    final direction = isEntry ? 'in' : 'out';
+
+    String result = 'denied_unknown';
+    String? reason = validity.reason;
+    int? entryNumber;
+
+    if (validity.valid) {
+      if (await _isDuplicate(member.id, scanTime)) {
+        result = 'denied_duplicate';
+        reason = 'duplicate_scan';
+      } else {
+        result = 'granted';
+        entryNumber = todayGranted.length + 1;
+      }
+    } else {
+      result = switch (validity.reason) {
+        'pending_payment' => 'denied_pending_renewal',
+        'expired' => 'denied_expired',
+        'no_subscription' => 'denied_no_subscription',
+        _ => 'denied_suspended',
+      };
+    }
+
+    final row = <String, dynamic>{
+      'id': _uuid.v4(),
+      'gym_id': session.gymId,
+      'member_id': member.id,
+      'badge_id': badge?.id,
+      'subscription_id': validity.subscriptionId,
+      'scanned_at': scanTime.toIso8601String(),
+      'server_received_at': null,
+      'result': result,
+      'denial_reason': result == 'granted' ? null : reason,
+      'pin_verified': false,
+      'fingerprint_verified': true,
+      'entry_number_today': entryNumber,
+      'direction': direction,
+      'device_id': await db.deviceId(),
+      'scanned_by': session.staffId,
+      'was_offline': offline,
+      'suspect_clock': suspectClock,
+      'created_at': scanTime.toIso8601String(),
+    };
+    await db.save(SyncEntity.attendance, row, changedAt: scanTime);
+
+    final outcomeMessage = result == 'granted'
         ? (isEntry ? 'welcome_member' : 'goodbye_member')
         : (result == 'denied_duplicate' ? 'duplicate_scan' : 'scan_$result');
 
@@ -306,7 +417,7 @@ class AttendanceRepository {
         .map((row) => AttendanceEntry(Map<String, dynamic>.from(jsonDecode(row.payload) as Map)))
         .where((entry) =>
             entry.memberId == memberId &&
-            entry.result.startsWith('granted') &&
+            entry.result == 'granted' &&
             gymDate(entry.scannedAt, session.timezone) == date)
         .toList();
   }
@@ -319,7 +430,7 @@ class AttendanceRepository {
         .map((row) => AttendanceEntry(Map<String, dynamic>.from(jsonDecode(row.payload) as Map)))
         .any((entry) =>
             entry.memberId == memberId &&
-            entry.result.startsWith('granted') &&
+            entry.result == 'granted' &&
             entry.scannedAt.difference(scannedAt).abs() <= Duration(seconds: seconds));
   }
 }

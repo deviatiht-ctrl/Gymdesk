@@ -158,9 +158,9 @@ class SyncEngine {
       if (retry) await db.retryFailed();
       SyncRejected? pushError;
       try {
-        pushError = await _push();
+        pushError = await _push(retry: retry);
         await _uploadPhotos();
-        final secondPushError = await _push();
+        final secondPushError = await _push(retry: retry);
         pushError ??= secondPushError;
       } on SyncRejected catch (e) {
         if ({
@@ -244,7 +244,7 @@ class SyncEngine {
     }
   }
 
-  Future<SyncRejected?> _push() async {
+  Future<SyncRejected?> _push({bool retry = false}) async {
     SyncRejected? firstError;
     final failedEntityIds = <String>{};
 
@@ -259,14 +259,18 @@ class SyncEngine {
           db.outbox,
         )..where((t) => t.id.equals(snapshot.id))).getSingleOrNull();
 
-        if (op == null || op.status != 'pending') continue;
+        if (op == null) continue;
+        if (op.status == 'failed') {
+          return const SyncRejected('queue_blocked');
+        }
+        if (op.status != 'pending') continue;
 
         // Si yon operasyon paran sou menm antite a te deja echwe nan pase sa a, sote li pou kounye a
         if (failedEntityIds.contains(op.entityId)) continue;
 
         final next = DateTime.tryParse(op.nextAttemptAt ?? '');
-        if (next != null && next.isAfter(DateTime.now().toUtc())) {
-          // Nan delè backoff: pa bloke rès liy lan, sèlman sote operasyon sa a pou kounye a
+        if (!retry && next != null && next.isAfter(DateTime.now().toUtc())) {
+          // Nan delè backoff: sote operasyon sa a pou kounye a
           continue;
         }
 

@@ -24,7 +24,7 @@ import '../domain/badge.dart';
 import '../domain/badge_background_themes.dart';
 import 'badge_card.dart';
 
-/// Paj Badj Fizik Manb lan avÃ¨k EditÃ¨ Drag & Drop, 10 Backgrounds, Zoom ak WhatsApp
+/// Paj Badj Fizik Manb lan avèk Editè Drag & Drop, 10 Backgrounds, Zoom ak WhatsApp
 class MemberBadgePage extends ConsumerStatefulWidget {
   const MemberBadgePage({super.key, required this.memberId});
   final String memberId;
@@ -224,9 +224,9 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
                 ),
                 const SizedBox(height: 16),
 
-                // 1. Chwa 10 Backgrounds ModÃ¨n yo
+                // 1. Chwa 10 Backgrounds Modèn yo
                 Text(
-                  '${s.text('badge_background_theme')} (10 TÃ¨m ModÃ¨n) :',
+                  '${s.text('badge_background_theme')} (10 Tèm Modèn) :',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 const SizedBox(height: 10),
@@ -298,7 +298,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
 
                 const SizedBox(height: 20),
 
-                // 2. Estil KÃ²d QR
+                // 2. Estil Kòd QR
                 Text(
                   '${s.text('badge_qr_style')} :',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
@@ -343,7 +343,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
 
                 const SizedBox(height: 20),
 
-                // 3. MÃ²d Deplase Eleman (Drag & Drop)
+                // 3. Mòd Deplase Eleman (Drag & Drop)
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -500,7 +500,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
             return ListView(
               padding: const EdgeInsets.all(24),
               children: [
-                // Header avÃ¨k Tit ak Bouton Aksyon
+                // Header avèk Tit ak Bouton Aksyon
                 Wrap(
                   alignment: WrapAlignment.spaceBetween,
                   spacing: 16,
@@ -514,7 +514,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
                           s.text('member_badge'),
                           style: theme.textTheme.headlineMedium,
                         ),
-                        Text('${member.fullName} Â· ${member.memberNumber}'),
+                        Text('${member.fullName} · ${member.memberNumber}'),
                       ],
                     ),
                     if (badge != null)
@@ -522,7 +522,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          // Bouton WhatsApp VÃ¨t
+                          // Bouton WhatsApp Vèt
                           FilledButton.icon(
                             style: FilledButton.styleFrom(
                               backgroundColor: const Color(0xff25D366),
@@ -533,7 +533,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
                             label: Text(s.text('send_whatsapp')),
                           ),
 
-                          // Bouton PÃ¨sonalize (10 Backgrounds, QR, Drag)
+                          // Bouton Pèsonalize (10 Backgrounds, QR, Drag)
                           OutlinedButton.icon(
                             onPressed: () => _openCustomizerModal(gym),
                             icon: const Icon(LucideIcons.palette, size: 18),
@@ -578,7 +578,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
                         : null,
                   )
                 else ...[
-                  // Ba KontwÃ²l Zoom (+, -, 100%) & MÃ²d Drag
+                  // Ba Kontwòl Zoom (+, -, 100%) & Mòd Drag
                   Center(
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -622,7 +622,7 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
                                   Icon(LucideIcons.move, size: 14, color: Colors.orange),
                                   SizedBox(width: 4),
                                   Text(
-                                    'MÃ²d Deplasman Aktif',
+                                    'Mòd Deplasman Aktif',
                                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange),
                                   ),
                                 ],
@@ -670,14 +670,14 @@ class _MemberBadgePageState extends ConsumerState<MemberBadgePage> {
 
                   const SizedBox(height: 20),
 
-                  // EnfÃ²masyon Sekirite ak Statut
+                  // Enfòmasyon Sekirite ak Statut
                   Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 560),
                       child: Column(
                         children: [
                           Text(
-                            '${s.text('badge_status_${badge.status}')} Â· ${badge.formattedNumber}',
+                            '${s.text('badge_status_${badge.status}')} · ${badge.formattedNumber}',
                             style: theme.textTheme.titleMedium,
                           ),
                           const SizedBox(height: 8),

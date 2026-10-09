@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -310,7 +310,7 @@ class _BadgeTemplatesPageState extends ConsumerState<BadgeTemplatesPage> {
                     ),
                     title: Text(template.name),
                     subtitle: Text(
-                      '${s.text('orientation_${template.orientation}')} Â· ${template.showPhoto ? s.text('show_photo') : s.text('no_photo')} Â· ${template.showQr ? 'QR' : s.text('no_qr')}',
+                      '${s.text('orientation_${template.orientation}')} · ${template.showPhoto ? s.text('show_photo') : s.text('no_photo')} · ${template.showQr ? 'QR' : s.text('no_qr')}',
                     ),
                     trailing: Wrap(
                       spacing: 8,

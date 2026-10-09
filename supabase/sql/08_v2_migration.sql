@@ -1,4 +1,4 @@
-﻿-- =============================================================
+-- =============================================================
 -- 08_v2_migration.sql — GymDesk V2 Migration
 -- Idempotent migration for V2 SaaS upgrade, pre-printed badges,
 -- 7-day trial, member PINs, kiosk scanner, supervisor role.
@@ -52,20 +52,22 @@ create table if not exists public.platform_offers (
   created_at timestamptz not null default clock_timestamp()
 );
 
-insert into public.platform_offers (id, name, description, billing_period, price, currency, config)
+insert into public.platform_offers (id, name, description, billing_period, price, currency, config, active)
 values
-  ('per_member', 'Par Membre Actif', 'Idéal pour démarrer sans risque', 'monthly', 1.00, 'USD',
-   jsonb_build_object('badge_quota', 50, 'min_monthly', 20.00, 'setup_fee', 50.00)),
-  ('tiered', 'Paliers Fixes', 'Prix fixe mensuel prévisible', 'monthly', 45.00, 'USD',
-   jsonb_build_object('badge_quota', 60, 'tiers', jsonb_build_array(
-     jsonb_build_object('max_members', 60, 'price', 45, 'badge_quota', 30),
-     jsonb_build_object('max_members', 120, 'price', 80, 'badge_quota', 60),
-     jsonb_build_object('max_members', 250, 'price', 140, 'badge_quota', 100),
-     jsonb_build_object('max_members', 500, 'price', 220, 'badge_quota', 100)
-   ))),
-  ('unlimited_annual', 'Illimité Annuel', 'Pour les grandes salles et chaînes', 'annual', 1500.00, 'USD',
-   jsonb_build_object('badge_quota', 100, 'hardware_included', true))
-on conflict (id) do nothing;
+  ('plan_basic', 'PLAN 1 : BASIC (Starter)', 'Idéal pour démarrer avec contrôle par badge QR et PIN.', 'annual', 650.00, 'USD',
+   jsonb_build_object('max_members', 250, 'overage_member_fee', 2.0, 'badge_quota', 0, 'includes_tablet', false, 'tablet_count', 0, 'tablet_optional_price', 180.0, 'biometric_supported', false,
+     'features', jsonb_build_array('Jiska 250 manb aktif', 'Depasman : +2.00 USD / manb extra', 'Aksè Badj QR & Kòd PIN sekirize', 'Opsyon Tablèt Android : +180 USD (sou kòmand)', '❌ Lektè anprent pa enkli (rezève pou plan siperyè)', 'Sipò teknik & mizajou enkli')), true),
+  ('plan_medium', 'PLAN 2 : MEDIUM (Growth)', 'Pour salles en croissance avec suivi rigoureux des paiements.', 'annual', 950.00, 'USD',
+   jsonb_build_object('max_members', 500, 'overage_member_fee', 2.5, 'badge_quota', 0, 'includes_tablet', false, 'tablet_count', 0, 'tablet_optional_price', 150.0, 'biometric_supported', false,
+     'features', jsonb_build_array('Jiska 500 manb aktif', 'Depasman : +2.50 USD / manb extra', 'Aksè Badj QR & Kòd PIN sekirize', 'Opsyon Tablèt Android : +150 USD (sou kòmand)', 'Jesyon peman, rapò finansye & resi', '❌ Lektè anprent pa enkli (rezève pou plan siperyè)')), true),
+  ('plan_pro', 'PLAN 3 : PRO (Expansion)', 'Solution complète avec 1 tablette offerte, 300 badges et support biométrique.', 'annual', 1500.00, 'USD',
+   jsonb_build_object('max_members', 1000, 'overage_member_fee', 2.0, 'badge_quota', 300, 'includes_tablet', true, 'tablet_count', 1, 'biometric_supported', true, 'is_hot', true,
+     'features', jsonb_build_array('Jiska 1 000 manb aktif', 'Depasman : +2.00 USD / manb extra', '300 Badj fizik QR GRATIS enkli 🪪', '1 Tablèt Android GRATIS enkli 📱', '✅ Modil Byometrik Anprent dijital Enkli', 'Lektè USB sou kòmand (kliyan peye l, delè 2-4 semèn)', 'Sipò priyoritè 24/7')), true),
+  ('plan_enterprise', 'PLAN 4 : ENTERPRISE (Unlimited)', 'Accompagnement illimité et haute performance avec 1 tablette et 500 badges.', 'annual', 2500.00, 'USD',
+   jsonb_build_object('max_members', 0, 'overage_member_fee', 0.0, 'badge_quota', 500, 'includes_tablet', true, 'tablet_count', 1, 'biometric_supported', true,
+     'features', jsonb_build_array('MEMBRES ILLIMITÉS (San limit) 🚀', 'Depasman manb : 0 USD (Tout enkli)', '500 Badj fizik QR GRATIS enkli 🪪', '1 Tablèt Android GRATIS enkli 📱 (1 sèl tablèt)', '✅ Modil Byometrik Anprent dijital Enkli', 'Lektè USB sou kòmand (kliyan peye l, delè 2-4 semèn)', 'Aksè API, rapò avanse & backup nwaj', 'Responsab kont dedye')), true)
+on conflict (id) do update set
+  name = excluded.name, description = excluded.description, price = excluded.price, config = excluded.config, active = true;
 
 create table if not exists public.gym_contracts (
   id uuid primary key default gen_random_uuid(),

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- HID Global / DigitalPersona U.are.U 4500 Fingerprint Reader -->
+    <usb-device vendor-id="1466" product-id="10" />
+    <!-- DigitalPersona U.are.U 4000/4000B -->
+    <usb-device vendor-id="1466" product-id="8" />
+    <!-- DigitalPersona 4500 alternate VID/PID -->
+    <usb-device vendor-id="1466" product-id="12" />
+</resources>

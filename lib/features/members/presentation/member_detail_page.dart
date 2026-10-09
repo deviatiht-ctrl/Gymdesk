@@ -1,4 +1,7 @@
-﻿import 'package:flutter/material.dart';
+import '../../../core/access_control/fstw_access_control_service.dart';
+import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,6 +24,8 @@ import '../../subscriptions/domain/subscription_rules.dart';
 import '../data/member_pin_service.dart';
 import '../data/members_repository.dart';
 import '../domain/member.dart';
+import 'fingerprint_enrollment_dialog.dart';
+import '../../../core/sync/sync_models.dart';
 
 class MemberDetailPage extends ConsumerStatefulWidget {
   const MemberDetailPage({super.key, required this.memberId});
@@ -136,7 +141,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
       try {
         await _badges.resetMemberPin(member.id);
       } catch (_) {
-        // Hors ligne : marquage local synchronisÃ© via l'outbox.
+        // Hors ligne : marquage local synchronisé via l'outbox.
         await _pins.markPinResetRequired(
           member.id,
           ref.read(appRuntimeProvider).session?.gymId ?? '',
@@ -145,10 +150,59 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     });
   }
 
+  Future<void> _removeFingerprint(Member member) async {
+    final s = AppStrings.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Retire Anprent'),
+        content: Text('Èske w vle efase anprent anrejistre pou ${member.fullName}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(s.text('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(s.text('delete')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _run(() async {
+      final runtime = ref.read(appRuntimeProvider);
+      try {
+        await runtime.client.rpc('remove_member_fingerprint', params: {'p_member': member.id});
+      } catch (_) {
+        try {
+          await runtime.client.from('members').update({
+            'fingerprint_template': null,
+            'fingerprint_registered': false,
+            'updated_at': _now.toIso8601String(),
+          }).eq('id', member.id);
+        } catch (_) {}
+      }
+      final updatedRow = {
+        ...member.row,
+        'fingerprint_template': null,
+        'fingerprint_registered': false,
+        'updated_at': _now.toIso8601String(),
+      };
+      await runtime.database?.save(
+        SyncEntity.members,
+        updatedRow,
+        changedAt: _now,
+      );
+      unawaited(runtime.sync?.synchronize());
+    });
+  }
+
   Future<void> _replaceBadge(Member member, BadgeItem old) async {
     final s = AppStrings.of(context);
     final available = await _badges.getAvailableBadges();
-    if (!context.mounted) return;
+    if (!mounted) return;
     if (available.isEmpty) {
       _error('no_badges_available');
       return;
@@ -204,7 +258,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     final activePlans = plans
         .where((p) => p.active && p.deletedAt == null)
         .toList();
-    if (!context.mounted) return;
+    if (!mounted) return;
     GymPlan? plan = activePlans.isEmpty ? null : activePlans.first;
     final paid = TextEditingController(
       text: plan?.price.toStringAsFixed(2) ?? '',
@@ -232,7 +286,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                           (p) => DropdownMenuItem(
                             value: p,
                             child: Text(
-                              '${p.name} Â· ${p.price.toStringAsFixed(2)} ${p.currency}',
+                              '${p.name} · ${p.price.toStringAsFixed(2)} ${p.currency}',
                             ),
                           ),
                         )
@@ -339,7 +393,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
   Future<void> _collect(Member member, GymSubscription subscription) async {
     final s = AppStrings.of(context);
     final payments = await _members.watchPayments(member.id).first;
-    if (!context.mounted) return;
+    if (!mounted) return;
     final paid = payments
         .where((payment) => payment.subscriptionId == subscription.id)
         .fold<double>(0, (total, payment) => total + payment.amount);
@@ -553,10 +607,10 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               style: Theme.of(context).textTheme.headlineMedium,
                             ),
                             Text(
-                              '${member.memberNumber} Â· ${s.text(member.status)}',
+                              '${member.memberNumber} · ${s.text(member.status)}',
                             ),
                             Text(
-                              '${s.text('validity')} : ${s.text('validity_${validity.reason}')}${validity.daysLeft == null ? '' : ' Â· ${validity.daysLeft} ${s.text('days')}'}',
+                              '${s.text('validity')} : ${s.text('validity_${validity.reason}')}${validity.daysLeft == null ? '' : ' · ${validity.daysLeft} ${s.text('days')}'}',
                               style: TextStyle(
                                 color: validity.valid
                                     ? Theme.of(context).colorScheme.primary
@@ -594,7 +648,70 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                         if (canManage)
                           PopupMenuButton<String>(
                             onSelected: (value) {
+                              if (value == 'sync_door') {
+                                final fstw = ref.read(fstwAccessControlServiceProvider);
+                                if (member.fingerprintTemplate != null && member.fingerprintTemplate!.isNotEmpty) {
+                                  fstw.sendUserFingerprint(member.id, member.fingerprintTemplate!, member.fullName).then((ok) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          backgroundColor: ok ? const Color(0xff1f6f4a) : Colors.red,
+                                          content: Text(ok ? '✅ Anprent senkronize sou Pòt FSTW F30 !' : '❌ Pòt la pa reponn. Kòmand anrejistre nan file d\'attente.'),
+                                        ),
+                                      );
+                                    }
+                                  });
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Manb sa a pa gen anprent anrejistre.')),
+                                  );
+                                }
+                              }
+                              if (value == 'temp_pin') {
+                                final fstw = ref.read(fstwAccessControlServiceProvider);
+                                final code = '${100000 + (member.id.hashCode.abs() % 900000)}';
+                                final exp = DateTime.now().add(const Duration(hours: 24));
+                                fstw.setTemporaryPin(member.id, code, exp).then((ok) {
+                                  if (mounted) {
+                                    showDialog(
+                                      context: context,
+                                      builder: (ctx) => AlertDialog(
+                                        title: const Text('Kòd PIN Tanporè'),
+                                        content: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Text('Kòd PIN pou antre nan pòt FSTW F30 jodi a :'),
+                                            const SizedBox(height: 12),
+                                            SelectableText(
+                                              code,
+                                              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            const Text('Valab pandan 24 èdtan.', style: TextStyle(color: Colors.grey)),
+                                          ],
+                                        ),
+                                        actions: [
+                                          FilledButton(
+                                            onPressed: () => Navigator.pop(ctx),
+                                            child: const Text('Fèmen'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+                                });
+                              }
                               if (value == 'pin') _resetPin(member);
+                              if (value == 'fingerprint') {
+                                FingerprintEnrollmentDialog.show(
+                                  context,
+                                  member: member,
+                                  onSaved: () => setState(() {}),
+                                );
+                              }
+                              if (value == 'remove_fingerprint') {
+                                _removeFingerprint(member);
+                              }
                               if (value == 'suspend') {
                                 _run(
                                   () => _members.changeStatus(
@@ -616,6 +733,26 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               if (value == 'archive') _archive(member);
                             },
                             itemBuilder: (context) => [
+                              if (canManage)
+                                const PopupMenuItem(
+                                  value: 'sync_door',
+                                  child: Text('🚪 Senkronize ak Pòt FSTW F30'),
+                                ),
+                              if (canManage)
+                                const PopupMenuItem(
+                                  value: 'temp_pin',
+                                  child: Text('🔑 Jenere PIN Tanporè (1 Jou)'),
+                                ),
+                              if (canManage)
+                                PopupMenuItem(
+                                  value: 'fingerprint',
+                                  child: Text(s.text('enroll_fingerprint')),
+                                ),
+                              if (canManage && member.fingerprintRegistered)
+                                const PopupMenuItem(
+                                  value: 'remove_fingerprint',
+                                  child: Text('Retire anprent'),
+                                ),
                               if (canManage)
                                 PopupMenuItem(
                                   value: 'pin',
@@ -710,10 +847,10 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 title: Text(
-                                  '${DateFormat.yMd(locale).format(subscription.startDate)} â†’ ${DateFormat.yMd(locale).format(subscription.endDate)} Â· ${subscription.price.toStringAsFixed(2)}',
+                                  '${DateFormat.yMd(locale).format(subscription.startDate)} → ${DateFormat.yMd(locale).format(subscription.endDate)} · ${subscription.price.toStringAsFixed(2)}',
                                 ),
                                 subtitle: Text(
-                                  '${s.text(subscription.status)}${subscription.imported ? ' Â· ${s.text('imported_period')}' : ''}',
+                                  '${s.text(subscription.status)}${subscription.imported ? ' · ${s.text('imported_period')}' : ''}',
                                 ),
                                 trailing: Wrap(
                                   spacing: 4,
@@ -790,10 +927,10 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                   ListTile(
                                     contentPadding: EdgeInsets.zero,
                                     title: Text(
-                                      '${payment.amount.toStringAsFixed(2)} ${payment.currency} Â· ${s.text('method_${payment.method}')}',
+                                      '${payment.amount.toStringAsFixed(2)} ${payment.currency} · ${s.text('method_${payment.method}')}',
                                     ),
                                     subtitle: Text(
-                                      '${DateFormat.yMMMd(locale).add_Hm().format(payment.paidAt.toLocal())}${payment.reference == null ? '' : ' Â· ${payment.reference}'}',
+                                      '${DateFormat.yMMMd(locale).add_Hm().format(payment.paidAt.toLocal())}${payment.reference == null ? '' : ' · ${payment.reference}'}',
                                     ),
                                   ),
                               ],
@@ -842,7 +979,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                     size: 16,
                                   ),
                                   label: Text(
-                                    '${badge.formattedNumber} Â· ${s.text('badge_status_${badge.status}')}',
+                                    '${badge.formattedNumber} · ${s.text('badge_status_${badge.status}')}',
                                   ),
                                 ),
                                 OutlinedButton.icon(
@@ -906,7 +1043,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                         : () => _run(
                                             () => _badges.releaseBadge(
                                               badge,
-                                              reason: 'LibÃ©ration du badge',
+                                              reason: 'Libération du badge',
                                             ),
                                           ),
                                     icon: const Icon(LucideIcons.lockOpen),
@@ -915,6 +1052,103 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               ],
                             );
                           },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.fingerprint, size: 24),
+                            const SizedBox(width: 8),
+                            Text(
+                              s.text('fingerprint'),
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                            const Spacer(),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: member.fingerprintRegistered
+                                    ? const Color(0xff1f6f4a).withValues(alpha: 0.15)
+                                    : Colors.orange.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    member.fingerprintRegistered
+                                        ? LucideIcons.circleCheck
+                                        : LucideIcons.circleAlert,
+                                    size: 14,
+                                    color: member.fingerprintRegistered
+                                        ? const Color(0xff1f6f4a)
+                                        : Colors.orange,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    member.fingerprintRegistered
+                                        ? s.text('fingerprint_registered')
+                                        : s.text('fingerprint_not_registered'),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: member.fingerprintRegistered
+                                          ? const Color(0xff1f6f4a)
+                                          : Colors.orange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          member.fingerprintRegistered
+                              ? s.text('fingerprint_registered_desc')
+                              : s.text('fingerprint_empty_desc'),
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.outline,
+                              ),
+                        ),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 8,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: _busy
+                                  ? null
+                                  : () => FingerprintEnrollmentDialog.show(
+                                        context,
+                                        member: member,
+                                        onSaved: () => setState(() {}),
+                                      ),
+                              icon: const Icon(LucideIcons.fingerprint, size: 16),
+                              label: Text(s.text('enroll_fingerprint')),
+                            ),
+                            if (member.fingerprintRegistered)
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Theme.of(context).colorScheme.error,
+                                ),
+                                onPressed: _busy ? null : () => _removeFingerprint(member),
+                                icon: const Icon(LucideIcons.trash2, size: 16),
+                                label: Text(s.text('remove_fingerprint')),
+                              ),
+                          ],
                         ),
                       ],
                     ),

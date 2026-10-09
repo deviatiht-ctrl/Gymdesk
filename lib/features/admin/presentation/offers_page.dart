@@ -68,14 +68,14 @@ class _OffersPageState extends ConsumerState<OffersPage> {
     final priceController = TextEditingController(
       text: existing != null
           ? (existing.price % 1 == 0 ? existing.price.toStringAsFixed(0) : existing.price.toStringAsFixed(2))
-          : '350',
+          : '650',
     );
     final currencyController = TextEditingController(text: existing?.currency ?? 'USD');
     final badgeQuotaController = TextEditingController(
       text: existing != null ? '${existing.badgeQuota}' : '0',
     );
     final maxMembersController = TextEditingController(
-      text: existing != null ? '${existing.maxMembers}' : '50',
+      text: existing != null ? '${existing.maxMembers}' : '250',
     );
     final overageMemberFeeController = TextEditingController(
       text: existing != null ? '${existing.overageMemberFee}' : '2.0',
@@ -89,12 +89,13 @@ class _OffersPageState extends ConsumerState<OffersPage> {
     final featuresController = TextEditingController(
       text: existing != null && existing.features.isNotEmpty
           ? existing.features.join('\n')
-          : 'Jiska 50 manb aktif\nDepasman : +2.00 USD / manb extra\nBadj QR fizik sou kòmand\nOpsyon Tablèt Android : +180 USD',
+          : 'Jiska 250 manb aktif\nDepasman : +2.00 USD / manb extra\nAksè Badj QR & Kòd PIN sekirize\nOpsyon Tablèt Android : +180 USD\nLektè anprent pa enkli (sou kòmand nan Pro/Enterprise)',
     );
 
     String billingPeriod = existing?.billingPeriod ?? 'annual';
     bool isHot = existing?.isHot ?? false;
     bool includesTablet = existing?.includesTablet ?? (billingPeriod == 'annual');
+    bool biometricSupported = existing?.biometricSupported ?? false;
 
     final updated = await showDialog<bool>(
       context: context,
@@ -260,6 +261,12 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                       onChanged: (val) => setDialogState(() => includesTablet = val),
                     ),
                     SwitchListTile(
+                      title: const Text('Modil Byometrik (Anprent Dijital)'),
+                      subtitle: const Text('Pèmèt lektè anprent nan gym nan (Lektè USB a sou kòmand, se kliyan ki peye l)'),
+                      value: biometricSupported,
+                      onChanged: (val) => setDialogState(() => biometricSupported = val),
+                    ),
+                    SwitchListTile(
                       title: Text(s.text('is_hot_plan')),
                       subtitle: const Text('Mete yon bèl etikèt "PI POPILÈ 🔥" ak koulè anfaz'),
                       value: isHot,
@@ -292,7 +299,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                   final name = nameController.text.trim();
                   final price = double.tryParse(priceController.text.replaceAll(',', '.')) ?? 0;
                   final quota = int.tryParse(badgeQuotaController.text) ?? 0;
-                  final maxMembers = int.tryParse(maxMembersController.text) ?? 50;
+                  final maxMembers = int.tryParse(maxMembersController.text) ?? 250;
                   final overageFee = double.tryParse(overageMemberFeeController.text.replaceAll(',', '.')) ?? 0.0;
                   final tabletCount = int.tryParse(tabletCountController.text) ?? (includesTablet ? 1 : 0);
                   final tabletOptionalPrice = double.tryParse(tabletOptionalPriceController.text.replaceAll(',', '.')) ?? 0.0;
@@ -311,6 +318,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                   config['tablet_count'] = tabletCount;
                   config['tablet_optional_price'] = tabletOptionalPrice;
                   config['includes_tablet'] = includesTablet || tabletCount > 0;
+                  config['biometric_supported'] = biometricSupported;
                   config['is_hot'] = isHot;
                   config['features'] = rawFeatures;
 
@@ -636,6 +644,60 @@ class _OfferCard extends StatelessWidget {
                   _FeatureRow(
                     icon: LucideIcons.tablet,
                     text: 'Opsyon Tablèt Android : +${offer.tabletOptionalPrice.toStringAsFixed(0)} USD',
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (offer.biometricSupported || offer.includesDoorAccess) ...[
+                  const _FeatureRow(
+                    icon: LucideIcons.fingerprint,
+                    text: 'Sistèm Pòt Byometrik FSTW F30 Enkli ✅ (USB + TCP/IP)',
+                    highlight: true,
+                  ),
+                  const SizedBox(height: 8),
+                  const _FeatureRow(
+                    icon: LucideIcons.wrench,
+                    text: 'Enstalasyon Konplè sou plas pa yon Ekip Teknik Enkli 🛠️',
+                    highlight: true,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                if (offer.installmentsAllowed) ...[
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: colors.primaryContainer.withAlpha(90),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: colors.primary.withAlpha(120)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(LucideIcons.creditCard, size: 16, color: colors.primary),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Peman an 3 Fwa Disponib 💳',
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: colors.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '• Tranche 1 (Akonpt Materyèl/Enstalasyon) : ${offer.installment1.toStringAsFixed(0)} ${offer.currency}\n'
+                          '• Tranche 2 (30 jou) : ${offer.installment2.toStringAsFixed(0)} ${offer.currency}\n'
+                          '• Tranche 3 (60 jou) : ${offer.installment3.toStringAsFixed(0)} ${offer.currency}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            height: 1.4,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],

@@ -45,6 +45,13 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
   bool _loading = true;
   bool _busy = false;
   String? _error;
+  bool _biometricEnabled = false;
+  String _biometricMode = 'badge_pin';
+  bool _doorEnabled = true;
+  final _doorIpController = TextEditingController(text: '192.168.1.200');
+  final _doorPortController = TextEditingController(text: '5005');
+  final _tempPinHoursController = TextEditingController(text: '24');
+  bool _testingDoor = false;
   final _booleans = {
     'allow_access_pending': false,
     'reception_see_all_payments': false,
@@ -76,6 +83,12 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
         _gym = gym;
         _logoPath = gym.logoUrl;
         _logoPreview = null;
+        _biometricEnabled = gym.settings['biometric_enabled'] == true;
+        _biometricMode = gym.settings['biometric_mode'] as String? ?? 'badge_pin';
+        _doorEnabled = gym.settings['door_terminal_enabled'] != false;
+        _doorIpController.text = gym.settings['door_terminal_ip'] as String? ?? '192.168.1.200';
+        _doorPortController.text = '${gym.settings['door_terminal_port'] ?? 5005}';
+        _tempPinHoursController.text = '${gym.settings['temporary_pin_duration_hours'] ?? 24}';
         for (final entry in _fields.entries) {
           entry.value.text = switch (entry.key) {
             'name' => gym.name,
@@ -210,6 +223,12 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
         'entry_duplicate_seconds': int.parse(
           _fields['entry_duplicate_seconds']!.text,
         ),
+        'biometric_enabled': _biometricEnabled,
+        'biometric_mode': _biometricMode,
+        'door_terminal_enabled': _doorEnabled,
+        'door_terminal_ip': _doorIpController.text.trim(),
+        'door_terminal_port': int.tryParse(_doorPortController.text) ?? 5005,
+        'temporary_pin_duration_hours': int.tryParse(_tempPinHoursController.text) ?? 24,
         ..._booleans,
       };
       final changedAt =
@@ -445,6 +464,164 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
                             : (value) =>
                                   setState(() => _booleans[entry.key] = value),
                       ),
+                    const SizedBox(height: 16),
+                    const Divider(),
+                    const SizedBox(height: 16),
+                    Text(
+                      s.text('biometrics'),
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(s.text('biometric_enable_label')),
+                      subtitle: Text(s.text('biometric_enable_desc')),
+                      value: _biometricEnabled,
+                      onChanged: _busy
+                          ? null
+                          : (value) => setState(() => _biometricEnabled = value),
+                    ),
+                    if (_biometricEnabled) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: _biometricMode,
+                        decoration: InputDecoration(
+                          labelText: s.text('biometric_mode'),
+                          prefixIcon: const Icon(LucideIcons.fingerprint),
+                        ),
+                        items: [
+                          DropdownMenuItem(
+                            value: 'badge_pin',
+                            child: Text(s.text('biometric_mode_badge_pin')),
+                          ),
+                          DropdownMenuItem(
+                            value: 'fingerprint_only',
+                            child: Text(s.text('biometric_mode_fingerprint_only')),
+                          ),
+                          DropdownMenuItem(
+                            value: 'combo',
+                            child: Text(s.text('biometric_mode_combo')),
+                          ),
+                        ],
+                        onChanged: _busy
+                            ? null
+                            : (val) {
+                                if (val != null) {
+                                  setState(() => _biometricMode = val);
+                                }
+                              },
+                      ),
+                      const SizedBox(height: 16),
+                      // Konfigirasyon Tèminal Pòt FSTW F30
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(120),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(LucideIcons.doorOpen, size: 20),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Tèminal Kontwòl Aksè Pòt (FSTW F30)',
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('Aktive Senkronizasyon Pòt la'),
+                              subtitle: const Text('Voye anprent ak PIN tanporè sou tèminal pòt la otomatikman'),
+                              value: _doorEnabled,
+                              onChanged: _busy ? null : (v) => setState(() => _doorEnabled = v),
+                            ),
+                            if (_doorEnabled) ...[
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: TextFormField(
+                                      controller: _doorIpController,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Adrès IP Lokal FSTW F30',
+                                        hintText: '192.168.1.200',
+                                        prefixIcon: Icon(LucideIcons.network),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 1,
+                                    child: TextFormField(
+                                      controller: _doorPortController,
+                                      keyboardType: TextInputType.number,
+                                      decoration: const InputDecoration(
+                                        labelText: 'Pò TCP',
+                                        hintText: '5005',
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              TextFormField(
+                                controller: _tempPinHoursController,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Dire Validite PIN Tanporè (Lè)',
+                                  hintText: '24',
+                                  prefixIcon: Icon(LucideIcons.clock),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              OutlinedButton.icon(
+                                icon: _testingDoor
+                                    ? const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : const Icon(LucideIcons.radio, size: 16),
+                                label: const Text('Teste Koneksyon ak Pòt FSTW F30'),
+                                onPressed: _testingDoor
+                                    ? null
+                                    : () async {
+                                        setState(() => _testingDoor = true);
+                                        final fstwService = ref.read(fstwAccessControlServiceProvider);
+                                        final ip = _doorIpController.text.trim();
+                                        final port = int.tryParse(_doorPortController.text) ?? 5005;
+                                        final ok = await fstwService.connectDevice(ip, port);
+                                        if (mounted) {
+                                          setState(() => _testingDoor = false);
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              backgroundColor: ok ? const Color(0xff1f6f4a) : Colors.red,
+                                              content: Text(
+                                                ok
+                                                    ? '✅ Koneksyon ak Tèminal Pòt FSTW F30 ($ip:$port) reyisi !'
+                                                    : '❌ Pa ka konekte sou Tèminal Pòt ($ip:$port). Verifye kab rezo a ak routeur la.',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    const Divider(),
                     if (_error != null) MessagePanel(message: s.text(_error!)),
                     if (runtime.sync != null)
                       ListenableBuilder(

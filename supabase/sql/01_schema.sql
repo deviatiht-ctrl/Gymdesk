@@ -104,6 +104,8 @@ create table public.members (
     status                   text not null default 'active'
                              check (status in ('active','suspended','archived')),
     qr_style                 jsonb,                   -- surcharge du style QR salle
+    fingerprint_template     text,
+    fingerprint_registered   boolean not null default false,
     created_by               uuid references public.staff(id),
     created_at               timestamptz not null default now(),
     updated_at               timestamptz not null default now(),
@@ -116,10 +118,12 @@ create table public.members (
 create unique index uq_members_nif on public.members(gym_id, nif)
     where nif is not null;
 
-create index idx_members_name    on public.members(gym_id, last_name);
-create index idx_members_qr      on public.members(gym_id, qr_token);
-create index idx_members_status  on public.members(gym_id, status);
-create index idx_members_updated on public.members(gym_id, updated_at);
+create index idx_members_name        on public.members(gym_id, last_name);
+create index idx_members_qr          on public.members(gym_id, qr_token);
+create index idx_members_status      on public.members(gym_id, status);
+create index idx_members_fingerprint on public.members(gym_id, fingerprint_registered)
+    where fingerprint_registered = true;
+create index idx_members_updated     on public.members(gym_id, updated_at);
 
 -- -------------------------------------------------------------
 -- Types d'abonnement
@@ -209,13 +213,14 @@ create table public.attendance (
     server_received_at  timestamptz not null default now(),
     result              text not null check (result in (
                             'granted','denied_expired','denied_no_subscription',
-                            'denied_suspended','denied_unknown')),
+                            'denied_suspended','denied_bad_fingerprint','denied_unknown')),
     denial_reason       text,
     entry_number_today  int,
     device_id           text,
     scanned_by          uuid references public.staff(id),
     was_offline         boolean not null default false,
     suspect_clock       boolean not null default false,
+    fingerprint_verified boolean not null default false,
     created_at          timestamptz not null default now()
 );
 

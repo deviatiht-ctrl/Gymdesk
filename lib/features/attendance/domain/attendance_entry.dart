@@ -19,6 +19,8 @@ class AttendanceEntry {
   String? get scannedBy => row['scanned_by'] as String?;
   bool get wasOffline => row['was_offline'] == true;
   bool get suspectClock => row['suspect_clock'] == true;
+  bool get pinVerified => row['pin_verified'] == true;
+  bool get fingerprintVerified => row['fingerprint_verified'] == true;
 }
 
 class QrCredential {

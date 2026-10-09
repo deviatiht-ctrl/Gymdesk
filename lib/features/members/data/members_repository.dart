@@ -667,6 +667,8 @@ class MembersRepository {
     'notes': draft.notes.trim().isEmpty ? null : draft.notes.trim(),
     'status': 'active',
     'qr_style': null,
+    'fingerprint_registered': false,
+    'fingerprint_template': null,
     'created_by': session.staffId,
     'created_at': changedAt.toUtc().toIso8601String(),
     'updated_at': changedAt.toUtc().toIso8601String(),

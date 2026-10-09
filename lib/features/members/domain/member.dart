@@ -30,6 +30,10 @@ class Member {
   String? get notes => row['notes'] as String?;
   String get status => row['status'] as String? ?? 'active';
   Json get qrStyle => Map<String, dynamic>.from(row['qr_style'] as Map? ?? {});
+  String? get fingerprintTemplate => row['fingerprint_template'] as String?;
+  bool get fingerprintRegistered =>
+      row['fingerprint_registered'] == true ||
+      (row['fingerprint_template'] as String?)?.isNotEmpty == true;
   String get updatedAt => row['updated_at'] as String;
   String? get deletedAt => row['deleted_at'] as String?;
 

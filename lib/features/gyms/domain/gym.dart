@@ -1,4 +1,4 @@
-﻿import '../../../core/sync/sync_models.dart';
+import '../../../core/sync/sync_models.dart';
 
 class Gym {
   const Gym({
@@ -117,96 +117,164 @@ class PlatformOffer {
       Map<String, dynamic>.from(t as Map),
   ];
   bool get isAnnual => billingPeriod == 'annual';
+  bool get biometricSupported => config['biometric_supported'] == true;
+  bool get includesDoorAccess => config['includes_door_access'] == true;
+  String get doorHardwareKit =>
+      config['door_hardware_kit'] as String? ??
+      'Tèminal FSTW F30 TCP/IP + Lektè USB DigitalPersona 4500 + Ventouse 280kg + Bra LZ + Bouton sòti + Alimantasyon sekirize';
+  bool get installationIncluded => config['installation_included'] == true;
+  bool get installmentsAllowed => config['installments_allowed'] == true;
+  double get installment1 =>
+      (config['installment_1_amount'] as num?)?.toDouble() ??
+      (price > 0 ? (price * 0.58).roundToDouble() : 0.0);
+  double get installment2 =>
+      (config['installment_2_amount'] as num?)?.toDouble() ??
+      (price > 0 ? ((price - installment1) / 2).roundToDouble() : 0.0);
+  double get installment3 =>
+      (config['installment_3_amount'] as num?)?.toDouble() ??
+      (price > 0 ? (price - installment1 - installment2).roundToDouble() : 0.0);
 
   static const List<PlatformOffer> defaultAnnualPlans = [
     PlatformOffer(
       id: 'plan_basic',
-      name: 'PLAN 1 : BASIC (Starter)',
-      description: 'Idéal pour petites salles démarrant la gestion numérique.',
+      name: 'PLAN 1 : BASIC (Starter & Pòt Byometrik)',
+      description: 'Solisyon konplè pou ti sal jiska 150 manm avèk kontwòl aksè pòt byometrik.',
       billingPeriod: 'annual',
-      price: 350,
+      price: 950,
       currency: 'USD',
       config: {
-        'max_members': 50,
+        'max_members': 150,
         'overage_member_fee': 2.0,
         'badge_quota': 0,
         'includes_tablet': false,
         'tablet_count': 0,
         'tablet_optional_price': 180.0,
+        'biometric_supported': true,
+        'includes_door_access': true,
+        'door_hardware_kit':
+            'Tèminal FSTW F30 TCP/IP + Lektè USB DigitalPersona 4500 + Ventouse 280kg + Bra LZ + Bouton sòti + Alimantasyon sekirize',
+        'installation_included': true,
+        'installments_allowed': true,
+        'installment_1_amount': 550.0,
+        'installment_2_amount': 200.0,
+        'installment_3_amount': 200.0,
         'features': [
-          'Jiska 50 manb aktif',
+          'Jiska 150 manb aktif',
           'Depasman : +2.00 USD / manb extra',
-          'Badj QR fizik sou kòmand (frais impression)',
-          'Opsyon Tablèt Android : +180 USD',
+          '✅ Sistèm Pòt Byometrik FSTW F30 Enkli',
+          '✅ Lektè anprent USB DigitalPersona 4500 Enkli',
+          '✅ Kit Materyèl pòt (Ventouse 280kg, Bra LZ, Bouton sòti, Alim) Enkli',
+          '🛠️ Enstalasyon konplè sou plas pa yon ekip teknik',
+          '💳 Posibilite Peman an 3 fwa : \$550 akonpt + \$200 (mwa 2) + \$200 (mwa 3)',
+          'Kòd PIN tanporè pou pas 1 jou',
+          'Badj fizik opsyonèl (manb ka antre ak anprent sèlman)',
           'Sipò teknik & mizajou enkli',
         ],
       },
     ),
     PlatformOffer(
       id: 'plan_medium',
-      name: 'PLAN 2 : MEDIUM (Growth)',
-      description: 'Pour salles en croissance cherchant un contrôle rigoureux.',
+      name: 'PLAN 2 : MEDIUM (Growth & Pòt Byometrik)',
+      description: 'Pou sal an kwasans jiska 500 manm avèk jesyon pòt ak rapò finansye konplè.',
       billingPeriod: 'annual',
-      price: 750,
+      price: 1450,
       currency: 'USD',
       config: {
-        'max_members': 150,
-        'overage_member_fee': 5.0,
+        'max_members': 500,
+        'overage_member_fee': 2.5,
         'badge_quota': 0,
         'includes_tablet': false,
         'tablet_count': 0,
         'tablet_optional_price': 150.0,
+        'biometric_supported': true,
+        'includes_door_access': true,
+        'door_hardware_kit':
+            'Tèminal FSTW F30 TCP/IP + Lektè USB DigitalPersona 4500 + Ventouse 280kg + Bra LZ + Bouton sòti + Alimantasyon sekirize',
+        'installation_included': true,
+        'installments_allowed': true,
+        'installment_1_amount': 850.0,
+        'installment_2_amount': 300.0,
+        'installment_3_amount': 300.0,
         'features': [
-          'Jiska 150 manb aktif',
-          'Depasman : +5.00 USD / manb extra',
-          'Badj QR fizik sou kòmand (frais impression)',
-          'Opsyon Tablèt Android : +150 USD',
-          'Jesyon peman & rapò finansye',
+          'Jiska 500 manb aktif',
+          'Depasman : +2.50 USD / manb extra',
+          '✅ Sistèm Pòt Byometrik FSTW F30 Enkli',
+          '✅ Lektè anprent USB DigitalPersona 4500 Enkli',
+          '✅ Kit Materyèl pòt konplè & Enstalasyon pa ekip teknik',
+          '💳 Posibilite Peman an 3 fwa : \$850 akonpt + \$300 + \$300',
+          'Kòd PIN tanporè pou pas 1 jou',
+          'Jesyon peman, rapò finansye avanse & resi',
+          'Sipò priyoritè',
         ],
       },
     ),
     PlatformOffer(
       id: 'plan_pro',
-      name: 'PLAN 3 : PRO (Expansion)',
-      description: 'Solution complète clé en main avec tablette et 300 badges offerts.',
+      name: 'PLAN 3 : PRO (Expansion & Tablèt Gratis)',
+      description: 'Solisyon avanse avèk 1 tablèt Android gratis, 1000 manm, ak aksè pòt entegre.',
       billingPeriod: 'annual',
-      price: 1200,
+      price: 2200,
       currency: 'USD',
       config: {
-        'max_members': 300,
-        'overage_member_fee': 3.0,
-        'badge_quota': 300,
+        'max_members': 1000,
+        'overage_member_fee': 2.0,
+        'badge_quota': 200,
         'includes_tablet': true,
         'tablet_count': 1,
+        'biometric_supported': true,
+        'includes_door_access': true,
+        'door_hardware_kit':
+            'Tèminal FSTW F30 TCP/IP + Lektè USB DigitalPersona 4500 + Ventouse 280kg + Bra LZ + Bouton sòti + Alimantasyon sekirize',
+        'installation_included': true,
+        'installments_allowed': true,
+        'installment_1_amount': 1300.0,
+        'installment_2_amount': 450.0,
+        'installment_3_amount': 450.0,
         'is_hot': true,
         'features': [
-          'Jiska 300 manb aktif',
-          'Depasman : +3.00 USD / manb extra',
-          '300 Badj fizik QR GRATIS enkli 🪪',
-          '1 Tablèt Android GRATIS enkli 📱',
-          'Eskanè kamera rapid & PIN sekirize',
+          'Jiska 1 000 manb aktif',
+          'Depasman : +2.00 USD / manb extra',
+          '📱 1 Tablèt Android GRATIS enkli pou akèy la',
+          '✅ Sistèm Pòt Byometrik FSTW F30 Enkli',
+          '✅ Lektè anprent USB DigitalPersona 4500 Enkli',
+          '✅ Kit Materyèl pòt konplè & Enstalasyon pa ekip teknik',
+          '💳 Posibilite Peman an 3 fwa : \$1,300 akonpt + \$450 + \$450',
+          '200 Badj fizik QR gratis (opsyonèl)',
           'Sipò priyoritè 24/7',
         ],
       },
     ),
     PlatformOffer(
       id: 'plan_enterprise',
-      name: 'PLAN 4 : ENTERPRISE (Unlimited)',
-      description: 'Accompagnement illimité et haute performance avec 2 tablettes et 500 badges.',
+      name: 'PLAN 4 : ENTERPRISE (Unlimited Performance)',
+      description: 'Akonpanyiman total san okenn limit manm, tablèt gratis, ak ekip teknik dedye.',
       billingPeriod: 'annual',
-      price: 2200,
+      price: 3200,
       currency: 'USD',
       config: {
         'max_members': 0,
         'overage_member_fee': 0.0,
         'badge_quota': 500,
         'includes_tablet': true,
-        'tablet_count': 2,
+        'tablet_count': 1,
+        'biometric_supported': true,
+        'includes_door_access': true,
+        'door_hardware_kit':
+            'Tèminal FSTW F30 TCP/IP + Lektè USB DigitalPersona 4500 + Ventouse 280kg + Bra LZ + Bouton sòti + Alimantasyon sekirize',
+        'installation_included': true,
+        'installments_allowed': true,
+        'installment_1_amount': 1800.0,
+        'installment_2_amount': 700.0,
+        'installment_3_amount': 700.0,
         'features': [
           'MEMBRES ILLIMITÉS (San limit) 🚀',
           'Depasman manb : 0 USD (Tout enkli)',
-          '500 Badj fizik QR GRATIS enkli 🪪',
-          '2 Tablettes Android GRATIS enkli 📱📱',
+          '📱 1 Tablèt Android GRATIS enkli',
+          '✅ Sistèm Pòt Byometrik FSTW F30 Enkli',
+          '✅ Lektè anprent USB DigitalPersona 4500 Enkli',
+          '✅ Kit Materyèl pòt konplè & Enstalasyon pa ekip teknik',
+          '💳 Posibilite Peman an 3 fwa : \$1,800 akonpt + \$700 + \$700',
+          '500 Badj fizik QR gratis (opsyonèl)',
           'Aksè API, rapò avanse & backup nwaj',
           'Responsab kont dedye',
         ],

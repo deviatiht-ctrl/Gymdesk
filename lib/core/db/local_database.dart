@@ -228,7 +228,7 @@ class LocalDatabase extends _$LocalDatabase {
 
   Future<List<OutboxData>> pending({int limit = 50}) =>
       (select(outbox)
-            ..where((t) => t.status.equals('pending'))
+            ..where((t) => t.status.isNotValue('synced'))
             ..orderBy([(t) => OrderingTerm.asc(t.sequence)])
             ..limit(limit))
           .get();
@@ -348,7 +348,6 @@ class LocalDatabase extends _$LocalDatabase {
           status: Value('pending'),
           nextAttemptAt: Value(null),
           lastError: Value(null),
-          attempts: Value(0),
         ),
       );
 
@@ -439,9 +438,9 @@ class LocalDatabase extends _$LocalDatabase {
     required Json member,
     required Json subscription,
     required Json? payment,
-    required Json badge,
+    Json? badge,
     required Json pin,
-    required Json history,
+    Json? history,
     Uint8List? photoBytes,
     required DateTime changedAt,
   }) => transaction(() async {
@@ -529,27 +528,29 @@ class LocalDatabase extends _$LocalDatabase {
       );
     }
 
-    // 4. Badge
-    final badgeWithTs = {...badge, 'updated_at': timestamp};
-    await into(records).insertOnConflictUpdate(
-      RecordsCompanion.insert(
-        entity: SyncEntity.badges.table,
-        id: badge['id'] as String,
-        gymId: gymId,
-        payload: jsonEncode(badgeWithTs),
-      ),
-    );
-    await into(outbox).insert(
-      OutboxCompanion.insert(
-        id: _uuid.v4(),
-        entity: SyncEntity.badges.table,
-        entityId: badge['id'] as String,
-        operation: 'update',
-        payload: jsonEncode(badgeWithTs),
-        changedAt: timestamp,
-        createdAt: DateTime.now().toUtc().toIso8601String(),
-      ),
-    );
+    // 4. Badge (opsyonèl)
+    if (badge != null) {
+      final badgeWithTs = {...badge, 'updated_at': timestamp};
+      await into(records).insertOnConflictUpdate(
+        RecordsCompanion.insert(
+          entity: SyncEntity.badges.table,
+          id: badge['id'] as String,
+          gymId: gymId,
+          payload: jsonEncode(badgeWithTs),
+        ),
+      );
+      await into(outbox).insert(
+        OutboxCompanion.insert(
+          id: _uuid.v4(),
+          entity: SyncEntity.badges.table,
+          entityId: badge['id'] as String,
+          operation: 'update',
+          payload: jsonEncode(badgeWithTs),
+          changedAt: timestamp,
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+        ),
+      );
+    }
 
     // 5. PIN
     final pinWithTs = {...pin, 'updated_at': timestamp};
@@ -573,15 +574,17 @@ class LocalDatabase extends _$LocalDatabase {
       ),
     );
 
-    // 6. Historique badge
-    await into(records).insertOnConflictUpdate(
-      RecordsCompanion.insert(
-        entity: SyncEntity.badgeHistory.table,
-        id: history['id'] as String,
-        gymId: gymId,
-        payload: jsonEncode(history),
-      ),
-    );
+    // 6. Historique badge (opsyonèl)
+    if (history != null) {
+      await into(records).insertOnConflictUpdate(
+        RecordsCompanion.insert(
+          entity: SyncEntity.badgeHistory.table,
+          id: history['id'] as String,
+          gymId: gymId,
+          payload: jsonEncode(history),
+        ),
+      );
+    }
   });
 }
 
