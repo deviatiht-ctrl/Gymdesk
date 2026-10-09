@@ -117,6 +117,7 @@ class PlatformOffer {
       Map<String, dynamic>.from(t as Map),
   ];
   bool get isAnnual => billingPeriod == 'annual';
+  bool get isOneTime => billingPeriod == 'one_time';
   bool get biometricSupported => config['biometric_supported'] == true;
   bool get includesDoorAccess => config['includes_door_access'] == true;
   String get doorHardwareKit =>
@@ -139,7 +140,7 @@ class PlatformOffer {
       id: 'plan_basic',
       name: 'PLAN 1 : BASIC (Starter & Pòt Byometrik)',
       description: 'Solisyon konplè pou ti sal jiska 150 manm avèk kontwòl aksè pòt byometrik.',
-      billingPeriod: 'annual',
+      billingPeriod: 'one_time',
       price: 950,
       currency: 'USD',
       config: {
@@ -176,7 +177,7 @@ class PlatformOffer {
       id: 'plan_medium',
       name: 'PLAN 2 : MEDIUM (Growth & Pòt Byometrik)',
       description: 'Pou sal an kwasans jiska 500 manm avèk jesyon pòt ak rapò finansye konplè.',
-      billingPeriod: 'annual',
+      billingPeriod: 'one_time',
       price: 1450,
       currency: 'USD',
       config: {
@@ -212,7 +213,7 @@ class PlatformOffer {
       id: 'plan_pro',
       name: 'PLAN 3 : PRO (Expansion & Tablèt Gratis)',
       description: 'Solisyon avanse avèk 1 tablèt Android gratis, 1000 manm, ak aksè pòt entegre.',
-      billingPeriod: 'annual',
+      billingPeriod: 'one_time',
       price: 2200,
       currency: 'USD',
       config: {
@@ -248,7 +249,7 @@ class PlatformOffer {
       id: 'plan_enterprise',
       name: 'PLAN 4 : ENTERPRISE (Unlimited Performance)',
       description: 'Akonpanyiman total san okenn limit manm, tablèt gratis, ak ekip teknik dedye.',
-      billingPeriod: 'annual',
+      billingPeriod: 'one_time',
       price: 3200,
       currency: 'USD',
       config: {

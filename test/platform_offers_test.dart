@@ -15,6 +15,8 @@ void main() {
       // 1. Basic Plan
       expect(basic.maxMembers, 150);
       expect(basic.price, 950.0);
+      expect(basic.isOneTime, isTrue);
+      expect(basic.billingPeriod, 'one_time');
       expect(basic.biometricSupported, isTrue);
       expect(basic.includesDoorAccess, isTrue);
       expect(basic.installmentsAllowed, isTrue);

@@ -179,6 +179,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                       initialValue: billingPeriod,
                       decoration: InputDecoration(labelText: s.text('offer_billing_period')),
                       items: [
+                        const DropdownMenuItem(value: 'one_time', child: Text('Peman an 1 sèl fwa (A vi)')),
                         DropdownMenuItem(value: 'annual', child: Text(s.text('annual'))),
                         DropdownMenuItem(value: 'monthly', child: Text(s.text('monthly'))),
                       ],
