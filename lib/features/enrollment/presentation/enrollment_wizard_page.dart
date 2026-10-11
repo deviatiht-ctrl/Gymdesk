@@ -352,10 +352,10 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                     : 'Byenvini nan $gymName !';
 
             final welcomeSubject = isFr
-                ? '🎉 Confirmation d\'inscription — $gymName'
+                ? 'Confirmation de votre inscription — $gymName'
                 : isEn
-                    ? '🎉 Registration Confirmation — $gymName'
-                    : '🎉 Konfimasyon Enskripsyon w nan $gymName';
+                    ? 'Registration Confirmation — $gymName'
+                    : 'Konfimasyon Enskripsyon w nan $gymName';
 
             final welcomeBody = isFr
                 ? 'Bonjour $fullName,\n\nNous sommes ravis de vous compter parmi nos membres ! Votre inscription a été enregistrée avec succès.\n\n• Formule : ${plan.name}\n• Période : Valable jusqu\'au ${ymd(endDate)}\n• Montant réglé : $amt HTG (${_paymentMethod.toUpperCase()})\n• Accès : Votre empreinte biométrique Suprema BioMini est enregistrée pour un accès sécurisé aux portes.\n\nBon entraînement et à très bientôt à la salle !'

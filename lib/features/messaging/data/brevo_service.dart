@@ -144,6 +144,12 @@ class BrevoService {
         ? '<img src="$logoUrl" alt="$gymName" width="80" style="display:block;max-width:80px;max-height:80px;object-fit:contain;margin:0 auto 16px;border-radius:12px;" />'
         : '';
 
+    final hasGreeting = RegExp(r'^(bonjour|bonjou|hello|hi|dear|chers?|chères?)\b', caseSensitive: false)
+        .hasMatch(bodyText.trim());
+    final greetingHtml = (!hasGreeting && recipientName.trim().isNotEmpty)
+        ? '<p style="margin:0 0 16px;font-size:16px;font-weight:600;color:#0F172A;">Bonjour $recipientName,</p>'
+        : '';
+
     return '''<!doctype html>
 <html lang="fr">
 <head>
@@ -166,7 +172,7 @@ class BrevoService {
           </tr>
           <tr>
             <td style="padding:0 28px 20px;">
-              <p style="margin:0 0 16px;font-size:16px;font-weight:600;color:#0F172A;">Bonjour $recipientName,</p>
+              $greetingHtml
               $paragraphs
             </td>
           </tr>
@@ -182,9 +188,9 @@ class BrevoService {
             </td>
           </tr>''' : '''<tr><td style="height:12px;"></td></tr>'''}
           <tr>
-            <td style="background:#F8FAFC;padding:24px 32px;border-top:1px solid #E2E8F0;text-align:center;">
-              <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#64748B;">$gymName — Votre Espace Forme & Santé</p>
-              <p style="margin:0;font-size:12px;color:#94A3B8;">Vous recevez cet email car vous êtes inscrit comme membre de notre salle de sport.</p>
+            <td style="background:#F8FAFC;padding:20px 32px;border-top:1px solid #E2E8F0;text-align:center;">
+              <p style="margin:0 0 4px;font-size:13px;font-weight:600;color:#475569;">$gymName</p>
+              <p style="margin:0;font-size:12px;color:#64748B;">Service Accueil & Membres • Pour toute question, contactez la réception de votre club.</p>
             </td>
           </tr>
         </table>
@@ -216,6 +222,9 @@ class BrevoService {
       'replyTo': {
         'name': config.senderName,
         'email': config.senderEmail,
+      },
+      'headers': {
+        'X-Mailin-Tag': 'transactional',
       },
       'subject': subject,
       'htmlContent': htmlContent,

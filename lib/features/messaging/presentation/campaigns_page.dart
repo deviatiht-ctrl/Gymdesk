@@ -108,10 +108,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                 ? 'Big Fitness Challenge This Saturday!'
                 : 'Gwo Defi Fitness Samdi sa a !';
         _subjectController.text = isFr
-            ? '🔥 Rejoins le Grand Défi & Cours Collectif ce samedi'
+            ? 'Grand Défi & Cours Collectif ce samedi'
             : isEn
-                ? '🔥 Join our Special Fitness Challenge this Saturday'
-                : '🔥 Patisipe nan Gwo Defi ak Antrenman Kolektif Samdi a';
+                ? 'Special Fitness Challenge this Saturday'
+                : 'Gwo Defi ak Antrenman Kolektif Samdi a';
         _bodyController.text = isFr
             ? 'Bonjour {nom},\n\nCe samedi, nous organisons une session spéciale de Bootcamp & Fitness Challenge ! Au programme : des épreuves conviviales, des conseils nutritionnels personnalisés, et des cadeaux pour les participants.\n\nRendez-vous dès 9h00 en tenue de sport. Viens te dépasser avec nous !'
             : isEn
@@ -124,10 +124,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                 ? 'Exclusive Member Promotion'
                 : 'Spesyal Pwomosyon pou Manm yo';
         _subjectController.text = isFr
-            ? '🎉 Remise spéciale sur les abonnements de 3 mois et plus'
+            ? 'Remise spéciale sur les abonnements de 3 mois et plus'
             : isEn
-                ? '🎉 Special discount on 3-month renewals and more'
-                : '🎉 Rabè espesyal sou renouvèlman 3 mwa oswa plis';
+                ? 'Special discount on 3-month renewals and more'
+                : 'Rabè espesyal sou renouvèlman 3 mwa oswa plis';
         _bodyController.text = isFr
             ? 'Bonjour {nom},\n\nProfite dès aujourd\'hui d\'une réduction spéciale pour tout renouvellement de 3 mois ou plus. Invite un ami et bénéficie d\'une semaine supplémentaire offerte !\n\nOffre valable pour une durée limitée à la réception.'
             : isEn
