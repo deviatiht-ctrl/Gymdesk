@@ -66,11 +66,6 @@ const stringsCoreV3 = <String, List<String>>{
     'Membre enregistré avec succès dans le système.',
     'Member successfully registered in the system.',
   ],
-  'brevo_email_success': [
-    '✅ Imèl voye otomatikman ak logo gym nan ak tout detay abònman an.',
-    '✅ Email envoyé automatiquement avec le logo de la salle et les détails de l’abonnement.',
-    '✅ Email sent automatically with gym branding and subscription details.',
-  ],
   'send_whatsapp_btn': [
     'Voye Mesaj WhatsApp bay Manm lan',
     'Envoyer le Message WhatsApp au Membre',
@@ -141,7 +136,7 @@ const stringsCoreV3 = <String, List<String>>{
     'Existing Member (No registration fee)',
   ],
 
-  // Kanpay, Seleksyon Manm & Brevo
+  // Kanpay & Seleksyon Manm
   'filter_inactive_members': ['Manm Inaktif (Pou relanse)', 'Membres Inactifs (À relancer)', 'Inactive Members (Win-back)'],
   'filter_active_members': ['Manm Aktif', 'Membres Actifs', 'Active Members'],
   'filter_all_members': ['Tout Manm yo', 'Tous les Membres', 'All Members'],
@@ -157,18 +152,21 @@ const stringsCoreV3 = <String, List<String>>{
   'template_special_discount': ['🎁 Pwomosyon & Rabè Re-abònman', '🎁 Promotion & Réduction Réabonnement', '🎁 Special Renewal Discount'],
   'preview_email_design': ['Aperçu Design Imèl', 'Aperçu du Design Email', 'Email Design Preview'],
   'edit_message': ['Edite Mesaj la', 'Éditer le Message', 'Edit Message'],
-  'brevo_settings_btn': ['Konfigirasyon Brevo', 'Configuration Brevo', 'Brevo Configuration'],
-  'brevo_api_key_label': ['Clé API Brevo (xkeysib-...) *', 'Clé API Brevo (xkeysib-...) *', 'Brevo API Key (xkeysib-...) *'],
-  'brevo_sender_email_label': ['Imèl Espeditè (Valide nan Brevo) *', 'Email Expéditeur (Validé chez Brevo) *', 'Sender Email (Verified on Brevo) *'],
-  'brevo_sender_name_label': ['Non Espeditè (Eg: GymDesk Club)', 'Nom Expéditeur (Ex: GymDesk Club)', 'Sender Name (Ex: GymDesk Club)'],
-  'test_brevo_btn': ['Teste Koneksyon Brevo', 'Tester la Connexion Brevo', 'Test Brevo Connection'],
-  'testing_brevo': ['Ap teste...', 'Test en cours...', 'Testing...'],
-  'brevo_connected_success': ['Koneksyon Brevo reyisi ! Kont aktif.', 'Connexion Brevo réussie ! Compte actif.', 'Brevo connection successful! Active account.'],
-  'brevo_connection_failed': ['Echèk koneksyon. Verifye kle API a.', 'Échec de connexion. Vérifiez la clé API.', 'Connection failed. Check API key.'],
-  'brevo_configured': ['Brevo Konfigire', 'Brevo Configuré', 'Brevo Configured'],
-  'brevo_not_configured': ['Brevo Pa Konfigire', 'Brevo Non Configuré', 'Brevo Not Configured'],
-  'save_brevo_settings': ['Anrejistre Paramèt Brevo', 'Enregistrer les Paramètres Brevo', 'Save Brevo Settings'],
-  'brevo_saved_success': ['Paramèt Brevo anrejistre avèk siksè !', 'Paramètres Brevo enregistrés avec succès !', 'Brevo settings saved successfully!'],
+  'campaign_reply_to_gym': [
+    'Si manm yo reponn, repons lan ap vin sou imèl gym nan.',
+    'Si un membre répond, la réponse arrive sur l’email de la salle.',
+    'Member replies go straight to the gym email.',
+  ],
+  'campaign_queued_summary': [
+    'imèl pare pou voye otomatikman',
+    'emails programmés pour envoi automatique',
+    'emails queued for automatic delivery',
+  ],
+  'campaign_send_failed': [
+    'Kanpay la pa pase. Verifye entènèt la epi senkronize manm yo anvan.',
+    'Échec de la campagne. Vérifiez la connexion et synchronisez les membres.',
+    'Campaign failed. Check the connection and sync members first.',
+  ],
   'insert_tag_nom': ['+ {nom}', '+ {nom}', '+ {nom}'],
   'insert_tag_gym': ['+ {gym}', '+ {gym}', '+ {gym}'],
   'cta_button_text': ['RETOUNEN NAN SAL LA KOUNYE A', 'REPRENDRE L’ENTRAÎNEMENT MAINTENANT', 'RESUME TRAINING NOW'],

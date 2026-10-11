@@ -1,4 +1,4 @@
-import { createEmailHandler, type EmailGateway, type EmailJob } from './handler.ts';
+import { brevoPayload, createEmailHandler, type EmailGateway, type EmailJob } from './handler.ts';
 import { renderEmail } from './templates.ts';
 
 function assert(value: unknown): asserts value {
@@ -54,6 +54,21 @@ Deno.test('missing Brevo configuration does not consume a queue reservation', as
   const gateway = new Gateway();
   const response = await createEmailHandler(gateway, { ...config, apiKey: '' })(request());
   assert(response.status === 503 && gateway.claims === 0);
+});
+Deno.test('member emails are sent under the gym name with the gym as Reply-To and a text part', () => {
+  const branded = { ...job, payload: { ...job.payload, reply_to: 'contact@gym.example', gym_name: 'Gym "Elite"\nPAP' } };
+  const body = brevoPayload(branded, config, renderEmail(branded, null));
+  assert(body.sender.name === 'Gym Elite PAP' && body.sender.email === config.senderEmail);
+  assert(body.replyTo?.email === 'contact@gym.example' && body.textContent.includes('Répondez'));
+  assert(!('List-Unsubscribe' in body.headers));
+  const campaign = { ...branded, kind: 'campaign' as const, payload: { ...branded.payload, subject: 'Promo', body_text: 'Bonjour Marie,\nSalut' } };
+  const sent = brevoPayload(campaign, config, renderEmail(campaign, null));
+  assert(sent.subject === 'Promo' && sent.headers['List-Unsubscribe'] === '<mailto:contact@gym.example?subject=STOP>');
+  assert(!sent.htmlContent.includes('&lt;script&gt;') && sent.textContent.includes('STOP'));
+  const noReply = brevoPayload({ ...job, payload: { ...job.payload, reply_to: 'not-an-email' } }, config, renderEmail(job, null));
+  assert(!('replyTo' in noReply));
+  const platform = brevoPayload({ ...job, kind: 'gym_welcome' }, config, renderEmail({ ...job, kind: 'gym_welcome' }, null));
+  assert(platform.sender.name === 'GymDesk');
 });
 Deno.test('templates escape content and reject unsafe logo URLs and colors', () => {
   const rendered = renderEmail(job, 'javascript:alert(1)');

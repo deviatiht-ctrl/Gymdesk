@@ -6,6 +6,7 @@ import '../core/access_control/access_popup_overlay.dart';
 import '../core/sync/sync_models.dart';
 import '../core/widgets/async_panel.dart';
 import '../features/admin/presentation/declarations_page.dart';
+import '../features/admin/presentation/email_settings_page.dart';
 import '../features/admin/presentation/offers_page.dart';
 import '../features/auth/presentation/login_page.dart';
 import '../features/auth/presentation/password_reset_page.dart';
@@ -294,6 +295,10 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
           path: '/admin/offers',
           builder: (context, state) => const OffersPage(),
         ),
+        GoRoute(
+          path: '/admin/email',
+          builder: (context, state) => const EmailSettingsPage(),
+        ),
       ],
     ),
   ],
@@ -346,7 +351,7 @@ class _AppShell extends StatelessWidget {
   final String location;
   final Widget child;
   List<String> get _paths => runtime.session?.isPlatformAdmin == true
-      ? ['/gyms', '/admin/offers', '/admin/declarations', '/settings']
+      ? ['/gyms', '/admin/offers', '/admin/declarations', '/admin/email', '/settings']
       : {'owner', 'supervisor'}.contains(runtime.session?.role)
       ? [
           '/',
@@ -386,7 +391,7 @@ class _AppShell extends StatelessWidget {
           LucideIcons.settings,
         ];
   List<String> get _keys => runtime.session?.isPlatformAdmin == true
-      ? ['gyms', 'offers', 'declarations', 'settings']
+      ? ['gyms', 'offers', 'declarations', 'email_admin', 'settings']
       : {'owner', 'supervisor'}.contains(runtime.session?.role)
       ? [
           'home',
@@ -415,6 +420,7 @@ class _AppShell extends StatelessWidget {
           LucideIcons.building2,
           LucideIcons.tag,
           LucideIcons.clipboardCheck,
+          LucideIcons.mail,
           LucideIcons.settings,
         ]
       : {'owner', 'supervisor'}.contains(runtime.session?.role)

@@ -20,19 +20,36 @@ interface Config {
   senderName: string;
 }
 const json = (value: unknown, status = 200) => Response.json(value, { status });
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const displayName = (value: unknown, fallback: string) =>
+  String(value ?? '').replace(/[\r\n"<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70) || fallback;
+
+export function brevoPayload(job: EmailJob, config: Pick<Config, 'senderEmail' | 'senderName'>, content: ReturnType<typeof renderEmail>) {
+  const replyTo = typeof job.payload.reply_to === 'string' && emailPattern.test(job.payload.reply_to) ? job.payload.reply_to : null;
+  const name = job.kind === 'gym_welcome' ? config.senderName : displayName(job.payload.gym_name, config.senderName);
+  const headers: Record<string, string> = { 'X-GymDesk-Event': job.id };
+  if (job.kind === 'campaign' && replyTo) headers['List-Unsubscribe'] = `<mailto:${replyTo}?subject=STOP>`;
+  return {
+    sender: { name, email: config.senderEmail },
+    ...(replyTo ? { replyTo: { email: replyTo, name } } : {}),
+    to: [{ email: job.recipient, ...(typeof job.payload.name === 'string' ? { name: displayName(job.payload.name, '') } : {}) }],
+    subject: content.subject, htmlContent: content.html, textContent: content.text,
+    tags: ['gymdesk', job.kind], headers,
+  };
+}
 
 export function createEmailHandler(gateway: EmailGateway, config: Config, send: typeof fetch = fetch) {
   return async (req: Request): Promise<Response> => {
     if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
     if (!config.workerToken || req.headers.get('x-email-worker-token') !== config.workerToken) return json({ error: 'unauthorized' }, 401);
-    if (!config.apiKey || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.senderEmail)) return json({ error: 'email_not_configured' }, 503);
+    if (!config.apiKey || !emailPattern.test(config.senderEmail)) return json({ error: 'email_not_configured' }, 503);
     let accepted = 0;
     const started = Date.now();
     try {
       for (let i = 0; i < 20 && Date.now() - started < 45000; i++) {
         const job = await gateway.claim();
         if (!job) break;
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(job.recipient)) {
+        if (!emailPattern.test(job.recipient)) {
           await gateway.finish(job, 'failed', undefined, 'invalid_recipient');
           continue;
         }
@@ -49,11 +66,7 @@ export function createEmailHandler(gateway: EmailGateway, config: Config, send: 
           response = await send('https://api.brevo.com/v3/smtp/email', {
             method: 'POST',
             headers: { 'api-key': config.apiKey, 'content-type': 'application/json', accept: 'application/json' },
-            body: JSON.stringify({
-              sender: { name: config.senderName, email: config.senderEmail },
-              to: [{ email: job.recipient }], subject: content.subject, htmlContent: content.html,
-              tags: ['gymdesk', job.kind], headers: { 'X-GymDesk-Event': job.id },
-            }),
+            body: JSON.stringify(brevoPayload(job, config, content)),
             signal: AbortSignal.timeout(15000),
           });
         } catch {

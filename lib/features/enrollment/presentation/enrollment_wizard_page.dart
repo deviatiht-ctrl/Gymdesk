@@ -20,7 +20,6 @@ import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
-import '../../messaging/data/brevo_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../members/data/member_pin_service.dart';
 
@@ -331,62 +330,10 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         ).catchError((_) => false));
       }
 
-      // Envoi direct de l'email de bienvenue via Brevo si configuré
       final email = draft.email.trim();
-      bool emailSent = false;
-      if (email.isNotEmpty && email.contains('@')) {
-        try {
-          final brevoService = BrevoService();
-          final brevoConfig = await brevoService.loadConfig();
-          if (brevoConfig.isConfigured) {
-            final isFr = s.locale.languageCode == 'fr';
-            final isEn = s.locale.languageCode == 'en';
-            final gymName = brevoConfig.senderName.isNotEmpty
-                ? brevoConfig.senderName
-                : (runtime.session?.name ?? 'GymDesk');
-
-            final welcomeTitle = isFr
-                ? 'Bienvenue chez $gymName !'
-                : isEn
-                    ? 'Welcome to $gymName!'
-                    : 'Byenvini nan $gymName !';
-
-            final welcomeSubject = isFr
-                ? 'Confirmation de votre inscription — $gymName'
-                : isEn
-                    ? 'Registration Confirmation — $gymName'
-                    : 'Konfimasyon Enskripsyon w nan $gymName';
-
-            final welcomeBody = isFr
-                ? 'Bonjour $fullName,\n\nNous sommes ravis de vous compter parmi nos membres ! Votre inscription a été enregistrée avec succès.\n\n• Formule : ${plan.name}\n• Période : Valable jusqu\'au ${ymd(endDate)}\n• Montant réglé : $amt HTG (${_paymentMethod.toUpperCase()})\n• Accès : Votre empreinte biométrique Suprema BioMini est enregistrée pour un accès sécurisé aux portes.\n\nBon entraînement et à très bientôt à la salle !'
-                : isEn
-                    ? 'Hello $fullName,\n\nWe are excited to welcome you! Your registration has been successfully confirmed.\n\n• Plan: ${plan.name}\n• Period: Valid until ${ymd(endDate)}\n• Amount paid: $amt HTG (${_paymentMethod.toUpperCase()})\n• Access: Your Suprema BioMini fingerprint is registered for secure door entry.\n\nHave great workouts and welcome to the gym!'
-                    : 'Bonjou $fullName,\n\nNou kontan akeyi w kòm manm nan gym nou an ! Enskripsyon w lan konfime avèk siksè.\n\n• Fòmil : ${plan.name}\n• Peryòd : Valid jiska ${ymd(endDate)}\n• Montan ou peye : $amt HTG (${_paymentMethod.toUpperCase()})\n• Aksè : Anprent biometrik Suprema w anrejistre pou w ka antre nan pòt la.\n\nBon antrenman epi byenvini nan gym lan !';
-
-            final html = brevoService.generateHtmlEmail(
-              title: welcomeTitle,
-              bodyText: welcomeBody,
-              recipientName: fullName,
-              gymName: gymName,
-            );
-
-            emailSent = await brevoService.sendSingleEmail(
-              config: brevoConfig,
-              toEmail: email,
-              toName: fullName,
-              subject: welcomeSubject,
-              htmlContent: html,
-              textContent: welcomeBody,
-              tags: ['gymdesk', 'welcome', 'transactional'],
-            );
-          }
-        } catch (_) {
-          emailSent = false;
-        }
-      }
 
       if (mounted) {
-        _showSuccessDialog(s, result.memberId, fullName, plan.name, endDate, emailSent, email);
+        _showSuccessDialog(s, result.memberId, fullName, plan.name, endDate, email);
       }
     } catch (e) {
       if (mounted) {
@@ -398,7 +345,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     }
   }
 
-  void _showSuccessDialog(AppStrings s, String memberId, String fullName, String planName, DateTime endDate, bool emailSent, String email) {
+  void _showSuccessDialog(AppStrings s, String memberId, String fullName, String planName, DateTime endDate, String email) {
     final gymName = ref.read(appRuntimeProvider).session?.name ?? 'GymDesk';
     final wa = _whatsappController.text.trim();
     final isFr = s.locale.languageCode == 'fr';
@@ -430,15 +377,10 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           children: [
             Text('$fullName : ${s.text('member_enrolled_success')}'),
             const SizedBox(height: 10),
-            if (emailSent)
+            if (email.contains('@'))
               Text(
-                s.text('brevo_email_success'),
+                '${s.text('email_after_sync')} ($email)',
                 style: const TextStyle(color: Color(0xFF047857), fontSize: 13, fontWeight: FontWeight.bold),
-              )
-            else if (email.isNotEmpty)
-              Text(
-                'ℹ️ Email enregistré : $email (En attente d’envoi Brevo ou vérifiez la clé API dans Campagnes)',
-                style: const TextStyle(color: Color(0xFFB45309), fontSize: 13),
               ),
             const SizedBox(height: 16),
             ElevatedButton.icon(

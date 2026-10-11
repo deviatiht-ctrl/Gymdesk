@@ -276,7 +276,7 @@ class LocalOverviewPage extends ConsumerWidget {
                 OutlinedButton.icon(
                   onPressed: () => context.go('/campaigns'),
                   icon: const Icon(LucideIcons.mail),
-                  label: const Text('Email & Kanpay Brevo'),
+                  label: const Text('Email & Kanpay'),
                 ),
                 if ({'owner', 'supervisor'}.contains(runtime.session?.role))
                   OutlinedButton.icon(

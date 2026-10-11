@@ -86,18 +86,14 @@ class AppStrings {
     ],
     'email_pending': ['An atant', 'En attente', 'Queued'],
     'email_sending': ['Ap voye', 'En cours', 'Sending'],
-    'email_sent': [
-      'Brevo aksepte yo',
-      'Acceptés par Brevo',
-      'Accepted by Brevo',
-    ],
+    'email_sent': ['Voye', 'Envoyés', 'Sent'],
     'email_failed': ['Pou korije', 'À corriger', 'Needs correction'],
     'email_uncertain': ['Pou verifye', 'À vérifier', 'Needs review'],
     'email_pause_until': ['Poz jiska', 'Pause jusqu’au', 'Paused until'],
     'email_queue_hint': [
-      'Lè kota a fini, imèl yo rete an atant. Imèl ki bezwen verifikasyon mande kontwòl nan Brevo anvan yo voye yo ankò.',
-      'Quota épuisé : les emails restent en attente. Les envois incertains doivent être vérifiés dans Brevo avant toute relance.',
-      'When quota is exhausted, emails stay queued. Uncertain sends must be checked in Brevo before retrying.',
+      'Lè limit jounen an rive, imèl yo rete an atant epi yo pati otomatikman apre. Kontakte sipò GymDesk si gen imèl pou korije oswa verifye.',
+      'Limite du jour atteinte : les emails restent en attente et partent automatiquement ensuite. Contactez le support GymDesk pour les emails à corriger ou vérifier.',
+      'When the daily limit is reached, emails stay queued and go out automatically later. Contact GymDesk support about emails needing correction or review.',
     ],
     'email_status_unavailable': [
       'Swivi imèl pa disponib. Verifye entènèt ak konfigirasyon sèvè a.',
@@ -105,9 +101,9 @@ class AppStrings {
       'Email status unavailable. Check the network and server configuration.',
     ],
     'email_after_sync': [
-      'Konfimasyon imèl la ap antre nan fil datant apre senkronizasyon.',
-      'La confirmation email sera mise en file après synchronisation.',
-      'Email confirmation will be queued after synchronization.',
+      'Imèl konfimasyon an ap voye otomatikman apre senkronizasyon.',
+      'L’email de confirmation partira automatiquement après synchronisation.',
+      'The confirmation email will be sent automatically after synchronization.',
     ],
     'password': ['Modpas', 'Mot de passe', 'Password'],
     'show_password': [
@@ -1434,6 +1430,32 @@ class AppStrings {
       'Payez avant la fin de l’essai pour ne jamais perdre l’accès.',
       'Pay before the trial ends to never lose access.',
     ],
+    // ===================== Admin : emails =====================
+    'email_admin': ['Imèl', 'Emails', 'Emails'],
+    'email_settings_title': ['Konfigirasyon imèl otomatik', 'Configuration des emails automatiques', 'Automatic email settings'],
+    'email_settings_hint': [
+      'Kle Brevo a rete sou sèvè a sèlman. Gym yo pa janm wè l. Chak imèl pati ak non gym nan, epi repons yo ale sou imèl gym nan.',
+      'La clé Brevo reste uniquement sur le serveur, les salles ne la voient jamais. Chaque email part au nom de la salle et les réponses arrivent sur l’email de la salle.',
+      'The Brevo key stays on the server only; gyms never see it. Each email is sent under the gym name and replies go to the gym email.',
+    ],
+    'email_key_set': ['Kle anrejistre', 'Clé enregistrée', 'Key saved'],
+    'email_key_missing': ['Pa gen kle', 'Aucune clé', 'No key'],
+    'email_api_key': ['Kle API Brevo (xkeysib-...)', 'Clé API Brevo (xkeysib-...)', 'Brevo API key (xkeysib-...)'],
+    'email_api_key_keep': ['Kite vid pou kenbe kle aktyèl la.', 'Laisser vide pour garder la clé actuelle.', 'Leave blank to keep the current key.'],
+    'email_sender_email': ['Imèl espeditè', 'Email expéditeur', 'Sender email'],
+    'email_sender_email_hint': [
+      'Sou yon domèn otantifye nan Brevo (SPF, DKIM, DMARC). Pa itilize Gmail.',
+      'Sur un domaine authentifié dans Brevo (SPF, DKIM, DMARC). Pas d’adresse Gmail.',
+      'On a domain authenticated in Brevo (SPF, DKIM, DMARC). No Gmail address.',
+    ],
+    'email_sender_name': ['Non platfòm nan', 'Nom de la plateforme', 'Platform name'],
+    'email_sender_name_hint': [
+      'Itilize pou imèl GymDesk yo. Imèl manm yo pati ak non gym nan.',
+      'Utilisé pour les emails GymDesk. Les emails aux membres portent le nom de la salle.',
+      'Used for GymDesk emails. Member emails carry the gym name.',
+    ],
+    'email_config_saved': ['Konfigirasyon anrejistre.', 'Configuration enregistrée.', 'Settings saved.'],
+    'email_config_save_failed': ['Anrejistreman an pa pase.', 'Échec de l’enregistrement.', 'Save failed.'],
     // ===================== Admin : catalogue des offres =====================
     'offers': ['Òf yo', 'Offres', 'Offers'],
     'offers_catalog': [

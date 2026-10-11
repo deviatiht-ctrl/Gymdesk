@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +7,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../app/providers.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
-import '../data/brevo_service.dart';
 
 class CampaignsPage extends ConsumerStatefulWidget {
   const CampaignsPage({super.key});
@@ -19,7 +17,6 @@ class CampaignsPage extends ConsumerStatefulWidget {
 
 class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTickerProviderStateMixin {
   late final TabController _tabController;
-  final _brevoService = BrevoService();
 
   // Fòmilè Kanpay
   final _titleController = TextEditingController();
@@ -36,10 +33,6 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
 
   bool _showVisualPreview = false;
   bool _isSending = false;
-  BrevoSendProgress? _sendProgress;
-
-  // Konfigirasyon Brevo
-  BrevoConfig _brevoConfig = const BrevoConfig(apiKey: '', senderEmail: '', senderName: 'GymDesk');
 
   // Istorik
   bool _loadingHistory = true;
@@ -49,18 +42,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _loadBrevoConfig();
     _loadHistory();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final s = AppStrings.of(context);
       _applyTemplate('inactive_winback', s);
       _runPreview();
     });
-  }
-
-  Future<void> _loadBrevoConfig() async {
-    final cfg = await _brevoService.loadConfig();
-    if (mounted) setState(() => _brevoConfig = cfg);
   }
 
   void _applyTemplate(String val, AppStrings s) {
@@ -310,181 +297,6 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     }
   }
 
-  void _showBrevoDialog() {
-    final s = AppStrings.of(context);
-    final apiKeyController = TextEditingController(text: _brevoConfig.apiKey);
-    final senderEmailController = TextEditingController(text: _brevoConfig.senderEmail);
-    final senderNameController = TextEditingController(text: _brevoConfig.senderName);
-
-    bool isTesting = false;
-    String? testResult;
-    bool testSuccess = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return AlertDialog(
-            title: Row(
-              children: [
-                const Icon(LucideIcons.mail, color: Color(0xFF0F766E)),
-                const SizedBox(width: 10),
-                Text(s.text('brevo_settings_btn')),
-              ],
-            ),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 500),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF0FDF4),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFBBF7D0)),
-                      ),
-                      child: const Text(
-                        'Pour envoyer les emails automatiquement (logo, relances, reçus), renseignez votre clé API Brevo (anciennement Sendinblue).',
-                        style: TextStyle(fontSize: 13, color: Color(0xFF166534)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: apiKeyController,
-                      decoration: InputDecoration(
-                        labelText: s.text('brevo_api_key_label'),
-                        hintText: 'xkeysib-xxxxxxxxxxxxxxxx',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(LucideIcons.key),
-                      ),
-                      obscureText: true,
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: senderEmailController,
-                      decoration: InputDecoration(
-                        labelText: s.text('brevo_sender_email_label'),
-                        hintText: 'contact@votregym.com',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(LucideIcons.atSign),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    TextField(
-                      controller: senderNameController,
-                      decoration: InputDecoration(
-                        labelText: s.text('brevo_sender_name_label'),
-                        hintText: 'GymDesk Fitness Club',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(LucideIcons.building),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (testResult != null)
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        margin: const EdgeInsets.only(bottom: 12),
-                        decoration: BoxDecoration(
-                          color: testSuccess ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          testResult!,
-                          style: TextStyle(
-                            color: testSuccess ? const Color(0xFF15803D) : const Color(0xFFB91C1C),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    Row(
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: isTesting
-                              ? null
-                              : () async {
-                                  setModalState(() {
-                                    isTesting = true;
-                                    testResult = null;
-                                  });
-                                  try {
-                                    final res = await _brevoService.testConnection(apiKeyController.text);
-                                    setModalState(() {
-                                      testSuccess = true;
-                                      testResult = '${s.text('brevo_connected_success')} (${res['company'] ?? res['email']})';
-                                    });
-                                  } catch (e) {
-                                    setModalState(() {
-                                      testSuccess = false;
-                                      testResult = '${s.text('brevo_connection_failed')} $e';
-                                    });
-                                  } finally {
-                                    setModalState(() => isTesting = false);
-                                  }
-                                },
-                          icon: isTesting
-                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(LucideIcons.activity, size: 16),
-                          label: Text(s.text('test_brevo_btn')),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    ExpansionTile(
-                      tilePadding: EdgeInsets.zero,
-                      title: const Text('Commande Supabase Secrets (Serveur)', style: TextStyle(fontSize: 13)),
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: SelectableText(
-                            'npx supabase secrets set BREVO_API_KEY="${apiKeyController.text.trim()}" BREVO_SENDER_EMAIL="${senderEmailController.text.trim()}" BREVO_SENDER_NAME="${senderNameController.text.trim()}"',
-                            style: const TextStyle(color: Color(0xFF38BDF8), fontFamily: 'monospace', fontSize: 11),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.text('cancel'))),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F766E),
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () async {
-                  final newCfg = BrevoConfig(
-                    apiKey: apiKeyController.text.trim(),
-                    senderEmail: senderEmailController.text.trim(),
-                    senderName: senderNameController.text.trim().isEmpty ? 'GymDesk' : senderNameController.text.trim(),
-                  );
-                  final messenger = ScaffoldMessenger.of(context);
-                  final msg = s.text('brevo_saved_success');
-                  await _brevoService.saveConfig(newCfg);
-                  if (mounted) setState(() => _brevoConfig = newCfg);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  messenger.showSnackBar(
-                    SnackBar(content: Text(msg), backgroundColor: const Color(0xFF059669)),
-                  );
-                },
-                child: Text(s.text('save_brevo_settings')),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
   Future<void> _sendCampaign() async {
     final s = AppStrings.of(context);
     final title = _titleController.text.trim();
@@ -509,28 +321,6 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       return;
     }
 
-    if (!_brevoConfig.isConfigured) {
-      final openSettings = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(s.text('brevo_not_configured')),
-          content: const Text(
-            'Pour envoyer vos emails aux membres, vous devez configurer votre clé API Brevo et votre adresse email expéditeur.',
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.text('cancel'))),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E), foregroundColor: Colors.white),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(s.text('brevo_settings_btn')),
-            ),
-          ],
-        ),
-      );
-      if (openSettings == true) _showBrevoDialog();
-      return;
-    }
-
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -542,7 +332,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
             Text('Êtes-vous sûr de vouloir envoyer cette campagne à ${targetRecipients.length} membre(s) sélectionné(s) ?'),
             const SizedBox(height: 12),
             Text('• Objet : $subject', style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text('• Expéditeur : ${_brevoConfig.senderName} (${_brevoConfig.senderEmail})'),
+            Text('• ${s.text('campaign_reply_to_gym')}'),
           ],
         ),
         actions: [
@@ -558,60 +348,29 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
 
     if (confirmed != true) return;
 
-    setState(() {
-      _isSending = true;
-      _sendProgress = BrevoSendProgress(current: 0, total: targetRecipients.length, successCount: 0, failCount: 0);
-    });
-
-    final gymId = ref.read(appRuntimeProvider).session?.gymId;
-    final gymName = _brevoConfig.senderName;
-
+    setState(() => _isSending = true);
     try {
-      // 1. Envoi direct via Brevo API avec Stream de progression
-      await for (final progress in _brevoService.sendBatchCampaign(
-        config: _brevoConfig,
-        recipients: targetRecipients,
-        title: title,
-        subjectTemplate: subject,
-        bodyTemplate: body,
-        gymName: gymName,
-      )) {
-        if (mounted) setState(() => _sendProgress = progress);
-      }
-
-      // 2. Enregistrement dans Supabase pour l'historique
-      if (gymId != null) {
-        try {
-          final client = Supabase.instance.client;
-          await client.from('campaigns').insert({
-            'gym_id': gymId,
-            'title': title,
-            'subject': subject,
-            'body_text': body,
-            'template_key': _templateKey,
-            'filter': {'status': _filterStatus},
-            'status': 'sent',
-            'sent_at': DateTime.now().toIso8601String(),
-            'recipient_count': _sendProgress?.successCount ?? targetRecipients.length,
-          });
-        } catch (_) {}
-      }
-
+      final count = await Supabase.instance.client.rpc('campaign_send_members', params: {
+        'p_title': title,
+        'p_subject': subject,
+        'p_body': body,
+        'p_template_key': _templateKey,
+        'p_member_ids': targetRecipients.map((m) => m['member_id'].toString()).toList(),
+        'p_filter': {'status': _filterStatus},
+      });
       if (mounted) {
-        final success = _sendProgress?.successCount ?? 0;
-        final total = targetRecipients.length;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$success $total ${s.text('sent_count_summary')} $total'),
+            content: Text('$count / ${targetRecipients.length} ${s.text('campaign_queued_summary')}'),
             backgroundColor: const Color(0xFF059669),
           ),
         );
         _loadHistory();
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text(s.text('campaign_send_failed')), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -635,28 +394,6 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     return Scaffold(
       appBar: AppBar(
         title: Text(s.text('campaigns_title')),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: ActionChip(
-              avatar: Icon(
-                _brevoConfig.isConfigured ? LucideIcons.circleCheck : LucideIcons.key,
-                size: 16,
-                color: _brevoConfig.isConfigured ? const Color(0xFF047857) : const Color(0xFFB45309),
-              ),
-              label: Text(
-                _brevoConfig.isConfigured ? s.text('brevo_configured') : s.text('brevo_not_configured'),
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                  color: _brevoConfig.isConfigured ? const Color(0xFF047857) : const Color(0xFFB45309),
-                ),
-              ),
-              backgroundColor: _brevoConfig.isConfigured ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-              onPressed: _showBrevoDialog,
-            ),
-          ),
-        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: [
@@ -981,46 +718,6 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
 
               const SizedBox(height: 24),
 
-              // 5. Progression d'envoi en direct si actif
-              if (_isSending && _sendProgress != null) ...[
-                Card(
-                  color: const Color(0xFFF0FDF4),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              s.text('sending_to_members'),
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF166534)),
-                            ),
-                            Text(
-                              '${_sendProgress!.current} / ${_sendProgress!.total}',
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF166534)),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        LinearProgressIndicator(
-                          value: _sendProgress!.total > 0 ? _sendProgress!.current / _sendProgress!.total : 0,
-                          backgroundColor: Colors.white,
-                          color: const Color(0xFF0F766E),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _sendProgress!.currentRecipient,
-                          style: const TextStyle(fontSize: 12, color: Color(0xFF15803D)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-
               // 6. Bouton d'Envoi Principal
               SizedBox(
                 width: double.infinity,
@@ -1072,7 +769,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     final title = _titleController.text.trim().isEmpty ? 'Titre de la Campagne' : _titleController.text.trim();
     final body = _bodyController.text.trim().isEmpty ? 'Contenu de votre message...' : _bodyController.text.trim();
     final sampleName = _filteredRecipients.isNotEmpty ? _filteredRecipients.first['name'] : 'Jean Dupont';
-    final gymName = _brevoConfig.senderName.isNotEmpty ? _brevoConfig.senderName : 'GymDesk';
+    final gymName = ref.read(appRuntimeProvider).session?.name ?? 'GymDesk';
 
     final paragraphs = body
         .replaceAll('{nom}', sampleName)

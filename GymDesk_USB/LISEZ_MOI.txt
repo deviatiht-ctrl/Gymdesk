@@ -32,7 +32,7 @@ FONCTIONNALITÉS INTÉGRÉES & MATÉRIEL SUPPORTÉ :
 - MESSAGERIE & BREVO :
   * Email de bienvenue immédiat dès l'inscription d'un membre
   * Prévisualisation des campagnes avec liste complète des membres (actifs, inactifs, etc.)
-  * Filtre WhatsApp et intégration API Brevo
+  * Filtre WhatsApp et envoi automatique des emails (réponses reçues sur l'email de la salle)
 
 - CAISSE & SESSIONS :
   * Encaissements en Gourdes haïtiennes (HTG), reçus et clôtures journalières
