@@ -1,12 +1,29 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../features/members/domain/member.dart';
 import 'access_agent_client.dart';
 import 'biometric_models.dart';
+
+/// Erè lè lektè anprent lan pa disponib oswa kapti a echwe.
+/// Pa gen okenn template simile: si pa gen lektè, nou di sa klèman.
+class BiometricUnavailableException implements Exception {
+  const BiometricUnavailableException(this.code, this.message);
+  final String code;
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// Rezilta yon kapti reyèl.
+class FingerprintCapture {
+  const FingerprintCapture({required this.template, required this.quality});
+  final String template;
+  final int quality;
+}
 
 class BiometricService {
   BiometricService({AccessAgentClient? agentClient})
@@ -28,7 +45,26 @@ class BiometricService {
 
   StreamSubscription? _eventSub;
   bool _initialized = false;
-  final Random _rnd = Random();
+  bool _disposed = false;
+  bool _captureLoopActive = false;
+
+  bool get _isAndroid => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// Lektè a pare (agent la la epi li wè yon lektè USB).
+  bool get readerAvailable {
+    final st = agent.status.value;
+    return st.connected && st.readerConnected;
+  }
+
+  /// Eksplikasyon pou itilizatè a lè lektè a pa disponib.
+  String get unavailableReason {
+    final st = agent.status.value;
+    if (!st.connected) {
+      return 'Agent GymDesk (access_agent.exe) non démarré. Lancez "Lancer_GymDesk.bat".';
+    }
+    if (st.sdkError != null && st.sdkError!.isNotEmpty) return st.sdkError!;
+    return 'Aucun lecteur d’empreintes détecté. Branchez le lecteur USB.';
+  }
 
   bool get isConnected =>
       state.value == BiometricSensorState.ready ||
@@ -39,21 +75,10 @@ class BiometricService {
     if (_initialized) return;
     _initialized = true;
 
-    // Kòmanse koute Access Agent lokal la
     agent.startMonitoring();
-    agent.status.addListener(() {
-      final st = agent.status.value;
-      if (st.connected && st.readerConnected) {
-        state.value = BiometricSensorState.ready;
-      } else if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-        // Pa chanje eta si Android ap itilize chanèl natif
-      } else {
-        // Si pa gen agent, kite l prè pou simulation pou anpeche aplikasyon an bloke
-        state.value = BiometricSensorState.ready;
-      }
-    });
+    agent.status.addListener(_onAgentStatus);
 
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (_isAndroid) {
       try {
         _eventSub = _eventChannel.receiveBroadcastStream().listen(
           (dynamic raw) {
@@ -90,23 +115,31 @@ class BiometricService {
 
         checkSensorConnection();
       } catch (_) {
+        state.value = BiometricSensorState.notSupported;
+      }
+    }
+  }
+
+  void _onAgentStatus() {
+    if (_disposed) return;
+    if (readerAvailable) {
+      if (state.value == BiometricSensorState.disconnected ||
+          state.value == BiometricSensorState.error) {
         state.value = BiometricSensorState.ready;
       }
-    } else {
-      // Sou Web ak Windows PC, nou konsidere lektè a pare (via Agent oswa emulatè lokal)
-      state.value = BiometricSensorState.ready;
+    } else if (!_isAndroid) {
+      state.value = BiometricSensorState.disconnected;
     }
   }
 
   Future<bool> checkSensorConnection() async {
-    // 1. Tcheke si Access Agent lokal la disponib
     final agentStatus = await agent.checkHealth();
     if (agentStatus.connected && agentStatus.readerConnected) {
       state.value = BiometricSensorState.ready;
       return true;
     }
 
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (_isAndroid) {
       try {
         final res = await _methodChannel.invokeMethod<bool>('isSensorConnected');
         final connected = res == true;
@@ -115,73 +148,153 @@ class BiometricService {
             : BiometricSensorState.disconnected;
         return connected;
       } catch (_) {
-        state.value = BiometricSensorState.ready;
-        return true;
+        state.value = BiometricSensorState.disconnected;
+        return false;
       }
     }
 
-    // Sou PC ak Web, nou toujou pèmèt fonksyone
-    state.value = BiometricSensorState.ready;
-    return true;
+    state.value = BiometricSensorState.disconnected;
+    return false;
   }
 
   Future<bool> requestUsbPermission() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return true;
+    if (!_isAndroid) return true;
     try {
       final res = await _methodChannel.invokeMethod<bool>('requestUsbPermission');
       return res == true;
     } catch (_) {
-      return true;
+      return false;
     }
   }
 
+  /// Kòmanse koute lektè a an kontinyèl. Chak anprent kaptire voye yon
+  /// evènman `fingerprint_captured` sou [events].
   Future<bool> startCapture() async {
-    state.value = BiometricSensorState.waitingFinger;
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (_isAndroid) {
+      state.value = BiometricSensorState.waitingFinger;
       try {
         final res = await _methodChannel.invokeMethod<bool>('startCapture');
         return res == true;
       } catch (_) {
-        return true;
+        return false;
       }
     }
+    if (_captureLoopActive) return true;
+    _captureLoopActive = true;
+    unawaited(_runCaptureLoop());
     return true;
   }
 
+  Future<void> _runCaptureLoop() async {
+    while (_captureLoopActive && !_disposed) {
+      if (!readerAvailable) {
+        await agent.checkHealth();
+        if (!readerAvailable) {
+          await Future<void>.delayed(const Duration(seconds: 3));
+          continue;
+        }
+      }
+
+      state.value = BiometricSensorState.waitingFinger;
+      final res = await agent.capture(timeout: const Duration(seconds: 10));
+      if (!_captureLoopActive || _disposed) break;
+
+      if (res['success'] == true && res['template'] is String) {
+        state.value = BiometricSensorState.ready;
+        _eventsController.add(BiometricEvent(
+          type: 'fingerprint_captured',
+          template: res['template'] as String,
+          quality: (res['quality'] as num?)?.toInt(),
+          raw: res,
+        ));
+        // Ti poz pou moun nan retire dwèt li anvan pwochen kapti a.
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        continue;
+      }
+
+      final error = res['error']?.toString() ?? '';
+      if (error == 'capture_failed' || error == 'timeout') {
+        // Pa gen dwèt pandan delè a: kontinye tann.
+        continue;
+      }
+      if (error == 'low_quality') {
+        _eventsController.add(BiometricEvent(
+          type: 'low_quality',
+          message: res['message']?.toString(),
+          raw: res,
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        continue;
+      }
+      if (error == 'no_reader' || error == 'sdk_missing' || error == 'agent_offline') {
+        state.value = BiometricSensorState.disconnected;
+        await agent.checkHealth();
+      }
+      await Future<void>.delayed(const Duration(seconds: 2));
+    }
+  }
+
   Future<bool> stopCapture() async {
-    state.value = BiometricSensorState.ready;
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    _captureLoopActive = false;
+    if (!_disposed) {
+      state.value = readerAvailable
+          ? BiometricSensorState.ready
+          : BiometricSensorState.disconnected;
+    }
+    if (_isAndroid) {
       try {
         final res = await _methodChannel.invokeMethod<bool>('stopCapture');
         return res == true;
       } catch (_) {
-        return true;
+        return false;
       }
     }
     return true;
   }
 
-  /// Kaptire yon etap anprent (avèk Access Agent oswa emulatè entèlijan)
-  Future<String> captureFingerprintSample({int step = 1}) async {
-    state.value = BiometricSensorState.capturing;
-
-    if (agent.status.value.connected) {
-      final res = await agent.captureStep();
-      if (res['success'] == true && res['template'] != null) {
-        state.value = BiometricSensorState.ready;
-        return res['template'] as String;
+  /// Kaptire yon anprent reyèl (avèk kalite). Voye
+  /// [BiometricUnavailableException] si lektè a pa disponib oswa kapti a echwe.
+  Future<FingerprintCapture> captureWithQuality({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    if (!readerAvailable) {
+      await agent.checkHealth();
+      if (!readerAvailable) {
+        state.value = BiometricSensorState.disconnected;
+        throw BiometricUnavailableException('no_reader', unavailableReason);
       }
     }
 
-    // Fallback: emilasyon ak template b64 solid pou tès
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    final bytes = List<int>.generate(256, (i) => (i * 7 + step * 13 + _rnd.nextInt(50)) % 256);
-    final sample = base64Encode(bytes);
-    state.value = BiometricSensorState.ready;
-    return sample;
+    state.value = BiometricSensorState.waitingFinger;
+    final res = await agent.capture(timeout: timeout);
+    if (res['success'] == true && res['template'] is String) {
+      state.value = BiometricSensorState.ready;
+      return FingerprintCapture(
+        template: res['template'] as String,
+        quality: (res['quality'] as num?)?.toInt() ?? 0,
+      );
+    }
+
+    final code = res['error']?.toString() ?? 'capture_failed';
+    state.value = (code == 'no_reader' || code == 'sdk_missing' || code == 'agent_offline')
+        ? BiometricSensorState.disconnected
+        : BiometricSensorState.ready;
+    final message = switch (code) {
+      'capture_failed' || 'timeout' => 'Aucun doigt détecté. Posez le doigt sur le lecteur et réessayez.',
+      'busy' => 'Le lecteur est occupé. Réessayez dans un instant.',
+      _ => res['message']?.toString() ?? 'Capture échouée.',
+    };
+    throw BiometricUnavailableException(code, message);
   }
 
-  /// Verifikasyon 1:1 ant anprent ki sot poze a ak anprent ki anrejistre a
+  /// Kaptire yon anprent reyèl epi retounen template a (base64).
+  Future<String> captureFingerprintSample({int step = 1}) async {
+    final cap = await captureWithQuality();
+    return cap.template;
+  }
+
+  /// Verifikasyon 1:1 ant anprent ki sot poze a ak anprent ki anrejistre a.
+  /// Si okenn motè matching pa disponib, rezilta a se "pa matche" (fail-closed).
   Future<BiometricMatchResult> match1to1({
     required String candidateTemplate,
     required String enrolledTemplate,
@@ -190,7 +303,7 @@ class BiometricService {
       return const BiometricMatchResult(isMatch: false, score: 0.0);
     }
 
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    if (_isAndroid) {
       try {
         final res = await _methodChannel.invokeMethod<Map>('matchTemplates', {
           'candidate': candidateTemplate,
@@ -204,47 +317,62 @@ class BiometricService {
       } catch (_) {}
     }
 
-    // Konparezon ISO/ANSI
+    final ok = await agent.match(candidateTemplate, enrolledTemplate);
+    if (ok != null) {
+      return BiometricMatchResult(isMatch: ok, score: ok ? 1.0 : 0.0);
+    }
+
+    // Fallback: konparezon nimerik si agent la pa konekte (egz. tès inite oswa mòd offline)
     final score = computeSimilarity(candidateTemplate, enrolledTemplate);
     return BiometricMatchResult(isMatch: score >= 0.70, score: score);
   }
 
-  /// Idantifikasyon 1:N nan mitan tout manm gym lan
+  /// Idantifikasyon 1:N nan mitan tout manm gym lan (anprent prensipal + sekou).
   Future<Member?> match1toN({
     required String candidateTemplate,
     required List<Member> members,
   }) async {
     if (candidateTemplate.isEmpty || members.isEmpty) return null;
 
-    Member? bestMember;
-    double bestScore = 0.0;
-
-    for (final member in members) {
-      final t = member.fingerprintTemplate;
-      if (t == null || t.isEmpty) continue;
-
-      final res = await match1to1(
-        candidateTemplate: candidateTemplate,
-        enrolledTemplate: t,
-      );
-      if (res.isMatch && res.score > bestScore) {
-        bestScore = res.score;
-        bestMember = member;
+    final byId = <String, Member>{};
+    final candidates = <Map<String, String>>[];
+    for (final m in members) {
+      final primary = m.fingerprintTemplate;
+      final backup = m.row['fingerprint_backup_template'] as String?;
+      for (final t in [primary, backup]) {
+        if (t == null || t.isEmpty) continue;
+        candidates.add({'id': m.id, 'template': t});
+        byId[m.id] = m;
       }
     }
+    if (candidates.isEmpty) return null;
 
-    return bestScore >= 0.70 ? bestMember : null;
+    if (_isAndroid) {
+      for (final c in candidates) {
+        final res = await match1to1(
+          candidateTemplate: candidateTemplate,
+          enrolledTemplate: c['template']!,
+        );
+        if (res.isMatch) return byId[c['id']];
+      }
+      return null;
+    }
+
+    final id = await agent.identify(candidateTemplate, candidates);
+    if (id != null) return byId[id];
+
+    // Fallback si agent la pa reponn (egz. tès inite)
+    for (final c in candidates) {
+      final res = await match1to1(
+        candidateTemplate: candidateTemplate,
+        enrolledTemplate: c['template']!,
+      );
+      if (res.isMatch) return byId[c['id']];
+    }
+    return null;
   }
 
-  /// Kalkile konpatibilite 3 kapti pandan enwolman
-  double verifyEnrollmentQuality(String c1, String c2, String c3) {
-    final s12 = computeSimilarity(c1, c2);
-    final s23 = computeSimilarity(c2, c3);
-    final s13 = computeSimilarity(c1, c3);
-    return (s12 + s23 + s13) / 3.0;
-  }
-
-  /// Algorit konparezon nimerik tèmplat ISO/ANSI
+  /// Algorit konparezon nimerik tèmplat ISO/ANSI (itil pou tès ak sekou offline)
   static double computeSimilarity(String t1, String t2) {
     if (t1.isEmpty || t2.isEmpty) return 0.0;
     if (t1 == t2) return 1.0;
@@ -255,8 +383,8 @@ class BiometricService {
 
       if (b1.isEmpty || b2.isEmpty) return 0.0;
 
-      final minLen = min(b1.length, b2.length);
-      final maxLen = max(b1.length, b2.length);
+      final minLen = math.min(b1.length, b2.length);
+      final maxLen = math.max(b1.length, b2.length);
 
       var closeMatches = 0;
       for (var i = 0; i < minLen; i++) {
@@ -270,10 +398,21 @@ class BiometricService {
     }
   }
 
+  /// Kalkile konpatibilite 3 kapti pandan enwolman
+  static double verifyEnrollmentQuality(String c1, String c2, String c3) {
+    final s12 = computeSimilarity(c1, c2);
+    final s23 = computeSimilarity(c2, c3);
+    final s13 = computeSimilarity(c1, c3);
+    return (s12 + s23 + s13) / 3.0;
+  }
+
   void dispose() {
+    _disposed = true;
+    _captureLoopActive = false;
     try {
       _eventSub?.cancel();
     } catch (_) {}
+    agent.status.removeListener(_onAgentStatus);
     _eventsController.close();
     agent.dispose();
     state.dispose();

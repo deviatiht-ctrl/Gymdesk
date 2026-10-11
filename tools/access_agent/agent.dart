@@ -2,27 +2,25 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
+
+import 'suprema_ffi.dart';
 
 /// GymDesk Local Access Agent & Standalone Portable Server V3
 /// - Écoute sur http://127.0.0.1:47811
 /// - Sert l'application web GymDesk localement (portable clé USB sans installation)
-/// - Pilote les capteurs biométriques USB (Suprema BioMini, DigitalPersona, ZKTeco, SecuGen)
+/// - Pilote le lecteur biométrique USB Suprema BioMini via le SDK officiel
+///   (UFScanner.dll / UFMatcher.dll). Sans SDK ou sans lecteur, l'agent le
+///   signale honnêtement (`reader_connected: false`) : aucune capture simulée.
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
-final Random _rnd = Random();
-bool _readerConnected = true;
+const String agentVersion = '3.2.0';
 bool _doorConnected = true;
 
-class ActiveEnrollment {
-  ActiveEnrollment({required this.memberId});
-  final String memberId;
-  int currentStep = 0;
-  final List<String> captures = [];
-  Completer<String>? completer;
-}
+SupremaSdk? _sdk;
+DateTime _lastRefresh = DateTime.fromMillisecondsSinceEpoch(0);
+DateTime _lastLoadAttempt = DateTime.fromMillisecondsSinceEpoch(0);
+bool _captureBusy = false;
 
-ActiveEnrollment? _currentEnrollment;
 final List<HttpResponse> _eventSubscribers = [];
 
 void broadcastEvent(Map<String, dynamic> data) {
@@ -40,13 +38,50 @@ void broadcastEvent(Map<String, dynamic> data) {
   }
 }
 
+List<String> _sdkCandidateDirs() {
+  final exeDir = File(Platform.resolvedExecutable).parent.path;
+  final cwd = Directory.current.path;
+  final sep = Platform.pathSeparator;
+  return [
+    exeDir,
+    '$exeDir${sep}sdk',
+    cwd,
+    '$cwd${sep}sdk',
+    '$cwd${sep}tools${sep}access_agent${sep}sdk',
+  ];
+}
+
+/// Chaje SDK a si li poko chaje (re-eseye chak 15 s), epi rafrechi lis lektè
+/// yo chak 3 s pou detekte branchman/debranchman USB.
+void _ensureSdk() {
+  final now = DateTime.now();
+  if (_sdk == null) {
+    if (now.difference(_lastLoadAttempt).inSeconds < 15) return;
+    _lastLoadAttempt = now;
+    _sdk = SupremaSdk.load(_sdkCandidateDirs());
+    _lastRefresh = now;
+    return;
+  }
+  if (!_captureBusy && now.difference(_lastRefresh).inSeconds >= 3) {
+    _lastRefresh = now;
+    _sdk!.refresh();
+  }
+}
+
 Future<void> main(List<String> args) async {
   final port = args.isNotEmpty ? int.tryParse(args[0]) ?? 47811 : 47811;
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+  _ensureSdk();
   print('========================================================');
-  print(' GymDesk Portable Access Agent V3 demare sou port $port');
+  print(' GymDesk Portable Access Agent $agentVersion sou port $port');
   print(' URL Local : http://127.0.0.1:$port');
-  print(' Biometrie Suprema BioMini + Kontwol Relè Pòt Aktif');
+  if (_sdk == null) {
+    print(' [!] SDK Suprema pa chaje: ${SupremaSdk.lastLoadError}');
+  } else if (!_sdk!.readerConnected) {
+    print(' [!] SDK chaje, men okenn lektè Suprema pa konekte.');
+  } else {
+    print(' Lektè Suprema konekte: ${_sdk!.scannerId}');
+  }
   print('========================================================');
 
   await for (final request in server) {
@@ -58,6 +93,70 @@ void _setCorsHeaders(HttpResponse res) {
   res.headers.set('Access-Control-Allow-Origin', '*');
   res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+}
+
+Future<Map<String, dynamic>> _readJson(HttpRequest request) async {
+  final bodyStr = await utf8.decodeStream(request);
+  if (bodyStr.isEmpty) return {};
+  return jsonDecode(bodyStr) as Map<String, dynamic>;
+}
+
+Future<void> _json(HttpResponse res, Object body, {int status = HttpStatus.ok}) async {
+  res.statusCode = status;
+  res.headers.contentType = ContentType.json;
+  res.write(jsonEncode(body));
+  await res.close();
+}
+
+Map<String, dynamic> _readerUnavailable() {
+  if (_sdk == null) {
+    return {
+      'success': false,
+      'error': 'sdk_missing',
+      'message': SupremaSdk.lastLoadError ?? 'SDK Suprema non chargé.',
+    };
+  }
+  return {
+    'success': false,
+    'error': 'no_reader',
+    'message': 'Aucun lecteur Suprema BioMini détecté. Vérifiez le câble USB.',
+  };
+}
+
+/// Kapti reyèl, pataje pa /capture ak /enroll/capture.
+Future<void> _handleCapture(HttpRequest request, HttpResponse res) async {
+  final body = await _readJson(request);
+  final timeoutMs = ((body['timeout_ms'] as num?)?.toInt() ?? 10000).clamp(1000, 30000);
+  final minQuality = ((body['min_quality'] as num?)?.toInt() ?? 50).clamp(0, 100);
+
+  _ensureSdk();
+  final sdk = _sdk;
+  if (sdk == null || !sdk.readerConnected) {
+    await _json(res, _readerUnavailable(), status: HttpStatus.serviceUnavailable);
+    return;
+  }
+  if (_captureBusy) {
+    await _json(res, {'success': false, 'error': 'busy', 'message': 'Une capture est déjà en cours.'},
+        status: HttpStatus.conflict);
+    return;
+  }
+
+  _captureBusy = true;
+  broadcastEvent({'type': 'waiting_finger'});
+  try {
+    final cap = await sdk.capture(timeoutMs: timeoutMs, minQuality: minQuality);
+    broadcastEvent({'type': 'fingerprint_captured', 'quality': cap.quality});
+    await _json(res, {
+      'success': true,
+      'template': cap.templateB64,
+      'quality': cap.quality,
+      'format': 'iso_19794_2',
+    });
+  } on SupremaException catch (e) {
+    await _json(res, {'success': false, 'error': e.code, 'message': e.message});
+  } finally {
+    _captureBusy = false;
+  }
 }
 
 Future<void> _handleRequest(HttpRequest request) async {
@@ -73,20 +172,20 @@ Future<void> _handleRequest(HttpRequest request) async {
   final path = request.uri.path;
 
   try {
-    // 1. Diagnostics & Statut
+    // 1. Diagnostics & Statut (valè reyèl SDK a)
     if (path == '/health' || path == '/status') {
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({
+      _ensureSdk();
+      final sdk = _sdk;
+      await _json(res, {
         'status': 'ok',
-        'version': '3.1.0',
-        'reader_connected': _readerConnected,
-        'reader_vendor': 'Suprema Inc.',
-        'reader_model': 'BioMini Plus 2 (BMP-2 V01A)',
-        'reader_serial': '2889239531',
+        'version': agentVersion,
+        'sdk_loaded': sdk != null,
+        'sdk_error': sdk == null ? SupremaSdk.lastLoadError : null,
+        'reader_connected': sdk?.readerConnected ?? false,
+        'reader_name': (sdk?.readerConnected ?? false) ? 'Suprema BioMini' : null,
+        'reader_serial': sdk?.scannerId,
         'door_connected': _doorConnected,
-        'door_terminal': 'Suprema BioEntry W2 (IP: 192.168.1.105)',
-      }));
-      await res.close();
+      });
       return;
     }
 
@@ -100,101 +199,44 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
-    // 3. Détection USB Plug and Play (BioMini Plus 2)
+    // 3. Lecteurs USB réellement détectés par le SDK
     if (path == '/api/devices' && request.method == 'GET') {
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({
-        'devices': [
-          {
-            'vid': '0x1612',
-            'pid': '0x000B',
-            'vendor': 'Suprema Inc.',
-            'product': 'BioMini Plus 2 (BMP-2 V01A)',
-            'serial': '2889239531',
-            'driver': 'UFScanner.dll',
-            'lfd': true,
-            'role': 'enrollment',
-          },
-        ],
-      }));
-      await res.close();
-      return;
-    }
-
-    // 3bis. Terminaux d'Accès IP (Suprema BioEntry W2 - Porte)
-    if (path == '/api/terminals' && request.method == 'GET') {
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({
-        'terminals': [
-          {
-            'id': 'term_bioentry_w2',
-            'gym_id': 'default',
-            'label': 'BioEntry W2 — Porte Principale',
-            'vendor': 'Suprema Inc.',
-            'model': 'BioEntry W2',
-            'serial': 'BEW2-2889239531',
-            'ip': '192.168.1.105',
-            'port': 51211,
-            'firmware': 'v1.4.2-IP',
-            'connector': 'device_sdk',
-            'door_label': 'Porte Principale',
-            'status': 'active',
-            'last_seen': DateTime.now().toIso8601String(),
-          },
-        ],
-      }));
-      await res.close();
-      return;
-    }
-
-    if (path == '/api/terminals/ping' && request.method == 'POST') {
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({'online': true, 'model': 'BioEntry W2', 'latency_ms': 4}));
-      await res.close();
-      return;
-    }
-
-    if (path == '/api/terminals/sync' && request.method == 'POST') {
-      final bodyStr = await utf8.decodeStream(request);
-      final body = jsonDecode(bodyStr.isNotEmpty ? bodyStr : '{}') as Map<String, dynamic>;
-      final user = body['user'] as Map<String, dynamic>? ?? {};
-      final userId = user['user_id'] ?? 'unknown';
-      final name = user['name'] ?? 'Membre';
-      final endDate = user['end_date'] ?? '';
-
-      print('[SUPREMA IP] Membre synchronisé sur BioEntry W2: $name ($userId) - Fin: $endDate');
-
-      broadcastEvent({
-        'type': 'terminal_user_synced',
-        'terminal': 'BioEntry W2',
-        'userId': userId,
-        'name': name,
-        'endDate': endDate,
+      _ensureSdk();
+      final sdk = _sdk;
+      final devices = <Map<String, dynamic>>[];
+      if (sdk != null && sdk.readerConnected) {
+        devices.add({
+          'vid': '0x1612',
+          'vendor': 'Suprema Inc.',
+          'product': 'Suprema BioMini',
+          'serial': sdk.scannerId ?? '',
+          'driver': 'UFScanner.dll',
+          'count': sdk.scannerCount,
+          'status': 'connected',
+        });
+      }
+      await _json(res, {
+        'devices': devices,
+        'sdk_loaded': sdk != null,
+        'sdk_error': sdk == null ? SupremaSdk.lastLoadError : null,
       });
-
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({'success': true, 'synced': true, 'user_id': userId}));
-      await res.close();
       return;
     }
 
-    if (path == '/api/terminals/pulse' && request.method == 'POST') {
-      print('[SUPREMA IP] Impulsion relais envoyée au terminal BioEntry W2 (Déverrouillage porte)');
-      broadcastEvent({
-        'type': 'door_opened',
-        'terminal': 'BioEntry W2',
-        'timestamp': DateTime.now().toIso8601String(),
-      });
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({'success': true, 'terminal': 'BioEntry W2', 'state': 'unlocked'}));
-      await res.close();
+    // 3bis. Terminaux IP BioEntry W2 : pas encore intégrés (nécessite Suprema G-SDK).
+    if (path.startsWith('/api/terminals')) {
+      await _json(res, {
+        'success': false,
+        'online': false,
+        'error': 'not_configured',
+        'message': 'Intégration BioEntry W2 non disponible (Suprema G-SDK requis).',
+      }, status: HttpStatus.notImplemented);
       return;
     }
 
     // 4. Commande d'impulsion relais porte
     if (path == '/api/relay/pulse' && request.method == 'POST') {
-      final bodyStr = await utf8.decodeStream(request);
-      final body = jsonDecode(bodyStr.isNotEmpty ? bodyStr : '{}') as Map<String, dynamic>;
+      final body = await _readJson(request);
       final port = body['port']?.toString() ?? 'COM3';
       final durationMs = (body['durationMs'] as num?)?.toInt() ?? 3000;
 
@@ -207,95 +249,75 @@ Future<void> _handleRequest(HttpRequest request) async {
         'timestamp': DateTime.now().toIso8601String(),
       });
 
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({'success': true, 'port': port, 'durationMs': durationMs}));
-      await res.close();
+      await _json(res, {'success': true, 'port': port, 'durationMs': durationMs});
       return;
     }
 
     // 5. Statut Relais
     if (path == '/api/relay/status') {
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({'success': true, 'state': 'closed'}));
-      await res.close();
+      await _json(res, {'success': true, 'state': 'closed'});
       return;
     }
 
-    // 6. Enrôlement biométrique
+    // 6. Capture biométrique réelle
     if (path == '/enroll/start' && request.method == 'POST') {
-      final bodyStr = await utf8.decodeStream(request);
-      final body = jsonDecode(bodyStr.isNotEmpty ? bodyStr : '{}') as Map<String, dynamic>;
-      final memberId = body['member_id']?.toString() ?? 'member_${DateTime.now().millisecondsSinceEpoch}';
-
-      _currentEnrollment = ActiveEnrollment(memberId: memberId);
-      broadcastEvent({
-        'type': 'enroll_step',
-        'step': 1,
-        'total': 3,
-        'message': 'Placez le doigt sur le lecteur Suprema (Capture 1/3)',
-      });
-
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({'success': true, 'member_id': memberId, 'step': 1}));
-      await res.close();
+      final body = await _readJson(request);
+      final memberId = body['member_id']?.toString() ?? '';
+      broadcastEvent({'type': 'enroll_start', 'member_id': memberId});
+      await _json(res, {'success': true, 'member_id': memberId});
       return;
     }
 
-    if (path == '/enroll/capture' && request.method == 'POST') {
-      final enrollment = _currentEnrollment;
-      if (enrollment == null) {
-        res.statusCode = HttpStatus.badRequest;
-        res.write(jsonEncode({'error': 'no_active_enrollment'}));
-        await res.close();
+    if ((path == '/capture' || path == '/enroll/capture') && request.method == 'POST') {
+      await _handleCapture(request, res);
+      return;
+    }
+
+    // 7. Vérification 1:1 (algorithme Suprema)
+    if (path == '/match' && request.method == 'POST') {
+      final body = await _readJson(request);
+      final sdk = _sdk;
+      if (sdk == null) {
+        await _json(res, _readerUnavailable(), status: HttpStatus.serviceUnavailable);
         return;
       }
+      final probe = body['probe']?.toString() ?? '';
+      final template = body['template']?.toString() ?? '';
+      bool ok;
+      try {
+        ok = sdk.verify(probe, template);
+      } catch (_) {
+        ok = false;
+      }
+      await _json(res, {'success': true, 'match': ok});
+      return;
+    }
 
-      enrollment.currentStep++;
-      final quality = 85 + _rnd.nextInt(12); // Qualité Suprema 85-97%
-      final templateBytes = List<int>.generate(384, (i) => (i * 31 + DateTime.now().millisecond) % 256);
-      final templateB64 = base64Encode(templateBytes);
-      enrollment.captures.add(templateB64);
-
-      if (enrollment.currentStep < 3) {
-        broadcastEvent({
-          'type': 'enroll_step',
-          'step': enrollment.currentStep + 1,
-          'total': 3,
-          'quality': quality,
-          'message': 'Levez le doigt puis reposez-le (Capture ${enrollment.currentStep + 1}/3)',
-        });
-        res.headers.contentType = ContentType.json;
-        res.write(jsonEncode({
-          'success': true,
-          'step': enrollment.currentStep,
-          'quality': quality,
-          'finished': false,
-        }));
-        await res.close();
-        return;
-      } else {
-        broadcastEvent({
-          'type': 'enroll_complete',
-          'member_id': enrollment.memberId,
-          'quality': quality,
-          'template': templateB64,
-          'message': 'Empreinte enregistrée avec succès !',
-        });
-
-        _currentEnrollment = null;
-
-        res.headers.contentType = ContentType.json;
-        res.write(jsonEncode({
-          'success': true,
-          'step': 3,
-          'quality': quality,
-          'finished': true,
-          'template': templateB64,
-          'format': 'suprema_384',
-        }));
-        await res.close();
+    // 8. Identification 1:N (algorithme Suprema, boucle UFM_Verify)
+    if (path == '/identify' && request.method == 'POST') {
+      final body = await _readJson(request);
+      final sdk = _sdk;
+      if (sdk == null) {
+        await _json(res, _readerUnavailable(), status: HttpStatus.serviceUnavailable);
         return;
       }
+      final probe = body['probe']?.toString() ?? '';
+      final candidates = (body['candidates'] as List? ?? const []).cast<Map>();
+      String? matchedId;
+      for (final c in candidates) {
+        final tpl = c['template']?.toString() ?? '';
+        if (tpl.isEmpty) continue;
+        try {
+          if (sdk.verify(probe, tpl)) {
+            matchedId = c['id']?.toString();
+            break;
+          }
+        } catch (_) {
+          // template envalid (egz. ansyen template simile) -> inyore
+        }
+      }
+      await _json(res, {'success': true, 'id': matchedId});
+      return;
     }
 
     if (path == '/door/open' && request.method == 'POST') {
@@ -304,13 +326,11 @@ Future<void> _handleRequest(HttpRequest request) async {
         'reason': 'Impulsion manuelle',
         'timestamp': DateTime.now().toIso8601String(),
       });
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({'success': true, 'message': 'Porte déverrouillée'}));
-      await res.close();
+      await _json(res, {'success': true, 'message': 'Porte déverrouillée'});
       return;
     }
 
-    // 7. Serveur de fichiers statiques (GymDesk Portable Web)
+    // 9. Serveur de fichiers statiques (GymDesk Portable Web)
     final served = await _serveStaticFile(request, res, path);
     if (served) return;
 
@@ -318,9 +338,11 @@ Future<void> _handleRequest(HttpRequest request) async {
     res.write('Not Found');
     await res.close();
   } catch (e) {
-    res.statusCode = HttpStatus.internalServerError;
-    res.write(jsonEncode({'error': e.toString()}));
-    await res.close();
+    try {
+      res.statusCode = HttpStatus.internalServerError;
+      res.write(jsonEncode({'error': e.toString()}));
+      await res.close();
+    } catch (_) {}
   }
 }
 

@@ -37,27 +37,9 @@ class _IdentifyReaderPageState extends ConsumerState<IdentifyReaderPage> {
         });
       }
     } catch (_) {
-      // Fallback : lecteurs virtuels / simulés ou Suprema par défaut
       if (mounted) {
         setState(() {
-          _detectedDevices = [
-            {
-              'vid': '0x1612',
-              'pid': '0x000B',
-              'vendor': 'Suprema Inc.',
-              'product': 'BioMini Plus 2',
-              'serial': 'BM-SUP-000B',
-              'status': 'connected',
-            },
-            {
-              'vid': '0x05BA',
-              'pid': '0x000A',
-              'vendor': 'DigitalPersona Inc.',
-              'product': 'U.are.U 4500 Fingerprint Reader',
-              'serial': 'DP-4500-A01',
-              'status': 'available',
-            },
-          ];
+          _detectedDevices = [];
           _scanning = false;
         });
       }

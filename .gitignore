@@ -19,3 +19,4 @@ android/local.properties
 .flutter-plugins
 .flutter-plugins-dependencies
 GymDesk_USB/data/
+supabase/.temp/

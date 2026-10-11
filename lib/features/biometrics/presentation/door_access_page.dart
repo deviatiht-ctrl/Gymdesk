@@ -75,36 +75,18 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       final db = runtime.database;
       if (db == null) throw Exception('Database offline');
 
-      // 1:N Identification dans la base locale
-      final rows = await db.watchRecords(SyncEntity.members, limit: 5000).first;
-      Member? matched;
-      final candidates = <Template>[];
-
+      // 1:N Identification dans la base locale via BiometricService
+      final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
+      final members = <Member>[];
       for (final r in rows) {
         try {
-          final payload = jsonDecode(r.payload) as Map<String, dynamic>;
-          final tmpl = payload['fingerprint_template'] as String?;
-          final backup = payload['fingerprint_backup_template'] as String?;
-          if (tmpl != null) {
-            candidates.add(Template(data: tmpl, vendor: 'suprema', templateFormat: 'suprema_384', memberId: payload['id']));
-          }
-          if (backup != null) {
-            candidates.add(Template(data: backup, vendor: 'suprema', templateFormat: 'suprema_384', fingerIndex: 2, memberId: payload['id']));
-          }
+          members.add(Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map)));
         } catch (_) {}
       }
-
-      final reader = SupremaBioMiniReader(const UsbIdentity(vid: '0x1612', pid: '0x000B'));
-      final result = await reader.identify(Capture(template: probeTemplate, quality: 90), candidates);
-
-      if (result != null) {
-        final memberRow = rows.firstWhere((r) {
-          final p = jsonDecode(r.payload) as Map;
-          return p['id'] == result.memberId;
-        });
-        final payload = jsonDecode(memberRow.payload) as Map<String, dynamic>;
-        matched = Member(payload);
-      }
+      final matched = await _biometricService.match1toN(
+        candidateTemplate: probeTemplate,
+        members: members,
+      );
 
       if (matched == null) {
         setState(() {

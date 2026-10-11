@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -68,7 +66,7 @@ class _FingerprintEnrollmentDialogState
   void _updateHint() {
     setState(() {
       _hint = switch (_currentStep) {
-        1 => 'Poze dwèt la sou lektè DigitalPersona a (Kapti 1/3)',
+        1 => 'Poze dwèt la sou lektè a (Kapti 1/3)',
         2 => 'Retire dwèt la epi repoze l ankò (Kapti 2/3)',
         _ => 'Repoze l yon dènye fwa pou konfimasyon (Kapti 3/3)',
       };
@@ -79,13 +77,31 @@ class _FingerprintEnrollmentDialogState
     if (_busy) return;
     if (event.type == 'fingerprint_captured' && event.template != null) {
       _processCapture(event.template!);
+    } else if (event.type == 'low_quality') {
+      setState(() => _hint = event.message ?? 'Kalite pa ase. Repoze dwèt la byen plat.');
     } else if (event.type == 'waiting_finger') {
       _updateHint();
     }
   }
 
-  void _processCapture(String template) {
+  Future<void> _processCapture(String template) async {
     if (_captures.length >= _currentStep) return;
+
+    // Kapti 2 ak 3 dwe matche ak premye a (menm dwèt).
+    if (_captures.isNotEmpty) {
+      final bio = ref.read(biometricServiceProvider);
+      final res = await bio.match1to1(
+        candidateTemplate: template,
+        enrolledTemplate: _captures.first,
+      );
+      if (!mounted) return;
+      if (!res.isMatch) {
+        setState(() => _hint =
+            'Anprent sa a pa koresponn ak premye a. Itilize menm dwèt la (Kapti $_currentStep/3).');
+        return;
+      }
+    }
+
     setState(() {
       _captures.add(template);
       if (_currentStep < 3) {
@@ -96,17 +112,6 @@ class _FingerprintEnrollmentDialogState
         _saveEnrollment();
       }
     });
-  }
-
-  /// Simile yon kapti pou anviwònman tès oswa Web kote lektè a pa ploge
-  void _simulateCapture() {
-    final rand = Random();
-    final bytes = List<int>.generate(
-      512,
-      (i) => (widget.member.id.hashCode + i + rand.nextInt(3)) % 256,
-    );
-    final simulatedTemplate = base64Encode(bytes);
-    _processCapture(simulatedTemplate);
   }
 
   Future<void> _saveEnrollment() async {
@@ -171,7 +176,7 @@ class _FingerprintEnrollmentDialogState
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text(': '),
+            content: Text('Erè anrejistreman anprent: $e'),
           ),
         );
       }
@@ -181,7 +186,7 @@ class _FingerprintEnrollmentDialogState
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
-    final bioState = ref.watch(biometricServiceProvider).state.value;
+    final bio = ref.watch(biometricServiceProvider);
 
     return AlertDialog(
       title: Row(
@@ -267,60 +272,47 @@ class _FingerprintEnrollmentDialogState
             ),
             const SizedBox(height: 12),
 
-            // Status Badge
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: bioState == BiometricSensorState.ready ||
-                        bioState == BiometricSensorState.waitingFinger
-                    ? Colors.green.shade50
-                    : Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.circle,
-                    size: 10,
-                    color: bioState == BiometricSensorState.ready ||
-                            bioState == BiometricSensorState.waitingFinger
-                        ? Colors.green
-                        : Colors.orange,
+            // Status Badge (eta reyèl lektè a)
+            ValueListenableBuilder<BiometricSensorState>(
+              valueListenable: bio.state,
+              builder: (context, st, _) {
+                final ok = st == BiometricSensorState.ready ||
+                    st == BiometricSensorState.waitingFinger ||
+                    st == BiometricSensorState.capturing;
+                final serial = bio.agent.status.value.readerSerial;
+                final label = ok
+                    ? 'Lektè konekte${serial != null && serial.isNotEmpty ? ' ($serial)' : ''}'
+                    : bio.unavailableReason;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: ok ? Colors.green.shade50 : Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    bioState == BiometricSensorState.ready ||
-                            bioState == BiometricSensorState.waitingFinger
-                        ? 'Lektè U.are.U 4500 Konekte'
-                        : 'Lektè ap tann USB...',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: bioState == BiometricSensorState.ready ||
-                              bioState == BiometricSensorState.waitingFinger
-                          ? Colors.green.shade800
-                          : Colors.orange.shade800,
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.circle, size: 10, color: ok ? Colors.green : Colors.orange),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: ok ? Colors.green.shade800 : Colors.orange.shade800,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
 
             if (_busy) ...[
               const SizedBox(height: 16),
               const CircularProgressIndicator(),
             ],
-
-            const SizedBox(height: 12),
-            // Bouton pou teste/simile si lektè USB a pa ploge sou machin dev la
-            TextButton.icon(
-              onPressed: _busy ? null : _simulateCapture,
-              icon: const Icon(LucideIcons.sparkles, size: 16),
-              label: Text(
-                'Simile Kapti Dwèt (Kapti /3)',
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
           ],
         ),
       ),
@@ -350,7 +342,7 @@ class _FingerprintEnrollmentDialogState
         child: isDone
             ? const Icon(LucideIcons.check, size: 20, color: Colors.white)
             : Text(
-                '',
+                '$step',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: isCurrent ? Colors.white : Colors.grey.shade700,

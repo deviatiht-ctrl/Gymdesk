@@ -45,23 +45,22 @@ class _ReaderDiagnosticPageState extends ConsumerState<ReaderDiagnosticPage> {
       _match1to1Success = null;
     });
 
-    _addLog('Début de capture test...');
+    _addLog('Début de capture test... Posez votre doigt sur le lecteur.');
     final sw = Stopwatch()..start();
 
     try {
-      final sample = await _biometricService.captureFingerprintSample(step: 1);
+      final cap = await _biometricService.captureWithQuality();
       sw.stop();
 
-      final quality = 85 + (DateTime.now().millisecond % 13); // 85-97% score Suprema
       setState(() {
-        _sampleTemplate = sample;
-        _lastQuality = quality;
-        _livenessOk = true;
+        _sampleTemplate = cap.template;
+        _lastQuality = cap.quality;
+        _livenessOk = cap.quality >= 50;
         _captureDurationMs = sw.elapsedMilliseconds;
         _testing = false;
       });
 
-      _addLog('Capture réussie en ${_captureDurationMs}ms (Qualité: $quality%, LFD: Vivant).');
+      _addLog('Capture réussie en ${_captureDurationMs}ms (Qualité: ${cap.quality}%).');
     } catch (e) {
       sw.stop();
       setState(() => _testing = false);
@@ -70,13 +69,28 @@ class _ReaderDiagnosticPageState extends ConsumerState<ReaderDiagnosticPage> {
   }
 
   Future<void> _run1to1MatchTest() async {
-    if (_sampleTemplate == null) return;
-    _addLog('Test de vérification 1:1 en mémoire...');
-    await Future<void>.delayed(const Duration(milliseconds: 150));
-    setState(() {
-      _match1to1Success = true;
-    });
-    _addLog('Résultat 1:1 : Concordance parfaite (Score: 0.98 >= 0.85).');
+    if (_sampleTemplate == null) {
+      _addLog('Veuillez d\'abord capturer une première empreinte.');
+      return;
+    }
+    _addLog('Posez le même doigt sur le lecteur pour tester la vérification 1:1...');
+    try {
+      final secondCap = await _biometricService.captureWithQuality();
+      final res = await _biometricService.match1to1(
+        candidateTemplate: secondCap.template,
+        enrolledTemplate: _sampleTemplate!,
+      );
+      setState(() {
+        _match1to1Success = res.isMatch;
+      });
+      if (res.isMatch) {
+        _addLog('Résultat 1:1 : Correspondance confirmée (Score: ${(res.score * 100).toStringAsFixed(0)}%).');
+      } else {
+        _addLog('Résultat 1:1 : Non concordant. Les empreintes ne correspondent pas.');
+      }
+    } catch (e) {
+      _addLog('Erreur test 1:1 : $e');
+    }
   }
 
   void _exportLogs(AppStrings s) {

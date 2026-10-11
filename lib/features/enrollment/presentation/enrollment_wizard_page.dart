@@ -141,33 +141,37 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     try {
       final sample = await _biometricService.captureFingerprintSample(step: _selectedFingerIndex);
 
-      // Verifikasyon 1:N kont doublon nan baz lokal
+      // Verifikasyon 1:N kont doublon nan baz lokal (algorit SDK a)
       final runtime = ref.read(appRuntimeProvider);
       final db = runtime.database;
       if (db != null) {
-        final rows = await db.watchRecords(SyncEntity.members, limit: 2000).first;
+        final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
+        final enrolled = <Member>[];
         for (final r in rows) {
           try {
-            final payload = jsonDecode(r.payload) as Map;
-            final existing = payload['fingerprint_template'] as String?;
-            if (existing != null && existing == sample) {
-              final dupName = '${payload['first_name']} ${payload['last_name']}';
-              if (mounted) {
-                showDialog<void>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    icon: const Icon(LucideIcons.triangleAlert, color: Colors.orange, size: 36),
-                    title: Text(s.text('duplicate_fingerprint_alert')),
-                    content: Text('${s.text('duplicate_fingerprint_alert')}\n($dupName)'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.text('ok'))),
-                    ],
-                  ),
-                );
-              }
-              break;
-            }
+            final m = Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map));
+            if (m.fingerprintTemplate?.isNotEmpty ?? false) enrolled.add(m);
           } catch (_) {}
+        }
+        final dup = await _biometricService.match1toN(
+          candidateTemplate: sample,
+          members: enrolled,
+        );
+        if (dup != null && mounted) {
+          final dupName = '${dup.firstName} ${dup.lastName}';
+          showDialog<void>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              icon: const Icon(LucideIcons.triangleAlert, color: Colors.orange, size: 36),
+              title: Text(s.text('duplicate_fingerprint_alert')),
+              content: Text('${s.text('duplicate_fingerprint_alert')}\n($dupName)'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.text('ok'))),
+              ],
+            ),
+          );
+          setState(() => _isCapturing = false);
+          return;
         }
       }
 

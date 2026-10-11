@@ -20,9 +20,10 @@ COMMENT L'UTILISER :
 FONCTIONNALITÉS INTÉGRÉES & MATÉRIEL SUPPORTÉ :
 ------------------------------------------------------------------------
 - ACCUEIL (USB) : Lecteur Suprema BioMini Plus 2 (BMP-2 V01A)
+  * Pour activer le lecteur physique, placez les DLLs officielles Suprema (UFScanner.dll, UFMatcher.dll) dans ce dossier à côté de access_agent.exe (ou dans un sous-dossier sdk/).
   * Enrôlement 2 empreintes (Doigt principal + Doigt de secours)
-  * Détection faux doigts (LFD) et qualité d'empreinte
-  * Anti-doublons biométriques automatiques
+  * Détection faux doigts (LFD) et qualité d'empreinte réelle
+  * Anti-doublons biométriques automatiques 1:N via l'algorithme Suprema
 
 - PORTE (IP ETHERNET) : Terminal mural Suprema BioEntry W2 (192.168.1.105:51211)
   * Reconnaissance autonome 1:N et pilotage direct du relais gâche

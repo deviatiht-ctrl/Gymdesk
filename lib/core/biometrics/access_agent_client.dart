@@ -9,6 +9,8 @@ class AccessAgentStatus {
     required this.readerConnected,
     required this.doorConnected,
     this.readerName,
+    this.readerSerial,
+    this.sdkError,
     this.doorName,
     this.version,
   });
@@ -17,6 +19,8 @@ class AccessAgentStatus {
   final bool readerConnected;
   final bool doorConnected;
   final String? readerName;
+  final String? readerSerial;
+  final String? sdkError;
   final String? doorName;
   final String? version;
 
@@ -54,6 +58,8 @@ class AccessAgentClient {
           readerConnected: data['reader_connected'] == true,
           doorConnected: data['door_connected'] == true,
           readerName: data['reader_name']?.toString(),
+          readerSerial: data['reader_serial']?.toString(),
+          sdkError: data['sdk_error']?.toString(),
           doorName: data['door_name']?.toString(),
           version: data['version']?.toString(),
         );
@@ -82,16 +88,69 @@ class AccessAgentClient {
     }
   }
 
-  Future<Map<String, dynamic>> captureStep() async {
+  /// Kapti reyèl sou lektè a. Bloke jiskaske yon dwèt poze oswa [timeout].
+  /// Retounen `{success, template, quality}` oswa `{success:false, error, message}`.
+  Future<Map<String, dynamic>> capture({
+    Duration timeout = const Duration(seconds: 10),
+    int minQuality = 50,
+  }) async {
     try {
       final res = await http
-          .post(Uri.parse('$baseUrl/enroll/capture'))
+          .post(
+            Uri.parse('$baseUrl/capture'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'timeout_ms': timeout.inMilliseconds,
+              'min_quality': minQuality,
+            }),
+          )
+          .timeout(timeout + const Duration(seconds: 5));
+      final body = res.body.isEmpty ? <String, dynamic>{} : jsonDecode(res.body);
+      if (body is Map<String, dynamic>) return body;
+    } on TimeoutException {
+      return {'success': false, 'error': 'timeout', 'message': 'Délai de capture dépassé.'};
+    } catch (_) {}
+    return {
+      'success': false,
+      'error': 'agent_offline',
+      'message': 'Agent GymDesk (access_agent.exe) injoignable.',
+    };
+  }
+
+  /// Verifikasyon 1:1 pa algorit SDK a. `null` si agent la pa disponib.
+  Future<bool?> match(String probe, String template) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/match'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'probe': probe, 'template': template}),
+          )
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
-        return jsonDecode(res.body) as Map<String, dynamic>;
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return data['match'] == true;
       }
     } catch (_) {}
-    return {'success': false};
+    return null;
+  }
+
+  /// Idantifikasyon 1:N. Retounen id kandida a, oswa `null`.
+  Future<String?> identify(String probe, List<Map<String, String>> candidates) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/identify'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'probe': probe, 'candidates': candidates}),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return data['id']?.toString();
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<bool> manualDoorOpen(String reason) async {
