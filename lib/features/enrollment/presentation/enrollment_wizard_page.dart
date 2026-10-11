@@ -368,7 +368,6 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               bodyText: welcomeBody,
               recipientName: fullName,
               gymName: gymName,
-              ctaText: isFr ? 'REPRENDRE L’ENTRAÎNEMENT' : isEn ? 'START TRAINING NOW' : 'KÒMANSE ANTRENMAN AN',
             );
 
             emailSent = await brevoService.sendSingleEmail(
@@ -377,6 +376,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               toName: fullName,
               subject: welcomeSubject,
               htmlContent: html,
+              textContent: welcomeBody,
+              tags: ['gymdesk', 'welcome', 'transactional'],
             );
           }
         } catch (_) {

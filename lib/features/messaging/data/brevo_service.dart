@@ -128,7 +128,8 @@ class BrevoService {
     final color = accentColor != null && RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(accentColor)
         ? accentColor
         : '#0F766E';
-    final buttonText = ctaText ?? 'REPRENDRE L’ENTRAÎNEMENT MAINTENANT';
+    final showCta = ctaText != null && ctaText.trim().isNotEmpty;
+    final buttonText = ctaText ?? '';
     final buttonUrl = ctaUrl ?? 'https://gymdesk.app';
 
     // Remplacer les retours à la ligne par des balises <p>
@@ -150,37 +151,36 @@ class BrevoService {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$title</title>
 </head>
-<body style="margin:0;padding:24px 12px;background:#0F172A;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1E293B;">
-  <div style="display:none;max-height:0;overflow:hidden">$title — $gymName</div>
+<body style="margin:0;padding:24px 12px;background:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1E293B;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
     <tr>
       <td align="center">
-        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 20px 25px -5px rgba(0,0,0,0.15);">
-          <tr><td style="height:8px;background:linear-gradient(90deg, $color, #0D9488);"></td></tr>
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #E2E8F0;box-shadow:0 4px 6px -1px rgba(0,0,0,0.05);">
+          <tr><td style="height:6px;background:$color;"></td></tr>
           <tr>
-            <td style="padding:32px 28px 20px;text-align:center;">
+            <td style="padding:28px 28px 16px;text-align:center;">
               $logoHtml
-              <span style="display:inline-block;padding:4px 14px;background:#CCFBF1;color:#0F766E;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:12px;">$gymName</span>
-              <h1 style="margin:8px 0 16px;font-size:24px;font-weight:800;color:#0F172A;line-height:1.3;">$title</h1>
+              <span style="display:inline-block;padding:4px 14px;background:#F0FDFA;color:#0F766E;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:12px;">$gymName</span>
+              <h1 style="margin:8px 0 16px;font-size:22px;font-weight:800;color:#0F172A;line-height:1.3;">$title</h1>
             </td>
           </tr>
           <tr>
-            <td style="padding:0 32px 24px;">
-              <p style="margin:0 0 16px;font-size:17px;font-weight:600;color:#0F172A;">Bonjour $recipientName,</p>
+            <td style="padding:0 28px 20px;">
+              <p style="margin:0 0 16px;font-size:16px;font-weight:600;color:#0F172A;">Bonjour $recipientName,</p>
               $paragraphs
             </td>
           </tr>
-          <tr>
-            <td align="center" style="padding:10px 32px 36px;">
+          ${showCta ? '''<tr>
+            <td align="center" style="padding:10px 28px 30px;">
               <table role="presentation" cellspacing="0" cellpadding="0">
                 <tr>
-                  <td align="center" style="border-radius:12px;background:$color;">
-                    <a href="$buttonUrl" target="_blank" style="display:inline-block;padding:16px 36px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;letter-spacing:0.5px;">$buttonText</a>
+                  <td align="center" style="border-radius:10px;background:$color;">
+                    <a href="$buttonUrl" target="_blank" style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;letter-spacing:0.5px;">$buttonText</a>
                   </td>
                 </tr>
               </table>
             </td>
-          </tr>
+          </tr>''' : '''<tr><td style="height:12px;"></td></tr>'''}
           <tr>
             <td style="background:#F8FAFC;padding:24px 32px;border-top:1px solid #E2E8F0;text-align:center;">
               <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#64748B;">$gymName — Votre Espace Forme & Santé</p>
@@ -201,8 +201,29 @@ class BrevoService {
     required String toName,
     required String subject,
     required String htmlContent,
+    String? textContent,
+    List<String>? tags,
   }) async {
     final url = Uri.parse('https://api.brevo.com/v3/smtp/email');
+    final payload = <String, dynamic>{
+      'sender': {
+        'name': config.senderName,
+        'email': config.senderEmail,
+      },
+      'to': [
+        {'email': toEmail, 'name': toName}
+      ],
+      'replyTo': {
+        'name': config.senderName,
+        'email': config.senderEmail,
+      },
+      'subject': subject,
+      'htmlContent': htmlContent,
+      if (textContent != null && textContent.trim().isNotEmpty)
+        'textContent': textContent.trim(),
+      'tags': tags ?? ['gymdesk', 'transactional'],
+    };
+
     final response = await _client.post(
       url,
       headers: {
@@ -210,18 +231,7 @@ class BrevoService {
         'content-type': 'application/json',
         'accept': 'application/json',
       },
-      body: jsonEncode({
-        'sender': {
-          'name': config.senderName,
-          'email': config.senderEmail,
-        },
-        'to': [
-          {'email': toEmail, 'name': toName}
-        ],
-        'subject': subject,
-        'htmlContent': htmlContent,
-        'tags': ['gymdesk', 'campaign'],
-      }),
+      body: jsonEncode(payload),
     ).timeout(const Duration(seconds: 15));
 
     return response.statusCode >= 200 && response.statusCode < 300;
@@ -288,6 +298,8 @@ class BrevoService {
           toName: name,
           subject: personalizedSubject,
           htmlContent: html,
+          textContent: personalizedBody,
+          tags: ['gymdesk', 'campaign'],
         );
 
         if (ok) {
