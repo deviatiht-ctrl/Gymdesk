@@ -439,7 +439,7 @@ class LocalDatabase extends _$LocalDatabase {
     required Json subscription,
     required Json? payment,
     Json? badge,
-    required Json pin,
+    Json? pin,
     Json? history,
     Uint8List? photoBytes,
     required DateTime changedAt,
@@ -552,27 +552,29 @@ class LocalDatabase extends _$LocalDatabase {
       );
     }
 
-    // 5. PIN
-    final pinWithTs = {...pin, 'updated_at': timestamp};
-    await into(records).insertOnConflictUpdate(
-      RecordsCompanion.insert(
-        entity: SyncEntity.memberPins.table,
-        id: pin['member_id'] as String,
-        gymId: gymId,
-        payload: jsonEncode(pinWithTs),
-      ),
-    );
-    await into(outbox).insert(
-      OutboxCompanion.insert(
-        id: _uuid.v4(),
-        entity: SyncEntity.memberPins.table,
-        entityId: pin['member_id'] as String,
-        operation: 'insert',
-        payload: jsonEncode(pinWithTs),
-        changedAt: timestamp,
-        createdAt: DateTime.now().toUtc().toIso8601String(),
-      ),
-    );
+    // 5. PIN (Optionnel)
+    if (pin != null && pin['pin_hash'] != null && pin['pin_hash'] != '' && pin['pin_hash'] != 'UNSET') {
+      final pinWithTs = {...pin, 'updated_at': timestamp};
+      await into(records).insertOnConflictUpdate(
+        RecordsCompanion.insert(
+          entity: SyncEntity.memberPins.table,
+          id: pin['member_id'] as String,
+          gymId: gymId,
+          payload: jsonEncode(pinWithTs),
+        ),
+      );
+      await into(outbox).insert(
+        OutboxCompanion.insert(
+          id: _uuid.v4(),
+          entity: SyncEntity.memberPins.table,
+          entityId: pin['member_id'] as String,
+          operation: 'insert',
+          payload: jsonEncode(pinWithTs),
+          changedAt: timestamp,
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+        ),
+      );
+    }
 
     // 6. Historique badge (opsyonèl)
     if (history != null) {

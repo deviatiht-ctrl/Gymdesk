@@ -167,8 +167,8 @@ class SyncPage extends ConsumerWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text('${op.attempts}'),
-                              if (op.status == 'failed') ...[
-                                const SizedBox(width: 8),
+                              const SizedBox(width: 8),
+                              if (op.status == 'failed')
                                 IconButton(
                                   icon: const Icon(LucideIcons.rotateCw, size: 18),
                                   tooltip: s.text('retry'),
@@ -177,14 +177,13 @@ class SyncPage extends ConsumerWidget {
                                     engine.synchronize();
                                   },
                                 ),
-                                IconButton(
-                                  icon: const Icon(LucideIcons.trash2, size: 18, color: Colors.red),
-                                  tooltip: s.text('delete'),
-                                  onPressed: () async {
-                                    await db.deleteOutbox(op.id);
-                                  },
-                                ),
-                              ],
+                              IconButton(
+                                icon: const Icon(LucideIcons.trash2, size: 18, color: Colors.red),
+                                tooltip: s.text('delete'),
+                                onPressed: () async {
+                                  await db.deleteOutbox(op.id);
+                                },
+                              ),
                             ],
                           ),
                         ),

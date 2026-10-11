@@ -22,6 +22,7 @@ import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
 import '../../messaging/data/brevo_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
+import '../../members/data/member_pin_service.dart';
 
 class EnrollmentWizardPage extends ConsumerStatefulWidget {
   const EnrollmentWizardPage({super.key});
@@ -43,6 +44,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   final _addressController = TextEditingController();
   final _emergencyNameController = TextEditingController();
   final _emergencyPhoneController = TextEditingController();
+  final _pinController = TextEditingController();
   String _sex = 'male';
   DateTime? _birthDate;
   Uint8List? _photoBytes;
@@ -227,8 +229,12 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   Future<void> _submitEnrollment(AppStrings s) async {
     final runtime = ref.read(appRuntimeProvider);
 
-    if (_primaryTemplate == null && !_skipFingerprintForNow) {
-      setState(() => _errorMessage = s.text('at_least_one_finger'));
+    final hasPin = _pinController.text.trim().isNotEmpty;
+    final isFr = s.locale.languageCode == 'fr';
+    if (_primaryTemplate == null && !_skipFingerprintForNow && !hasPin) {
+      setState(() => _errorMessage = isFr
+          ? 'Veuillez enregistrer une empreinte, saisir un code PIN, ou cocher "Salle sans empreinte".'
+          : 'Tanpri anrejistre yon anprent, mete yon kòd PIN, oswa koche "Sal san anprent".');
       return;
     }
 
@@ -296,6 +302,17 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           changedAt: now,
         );
       }
+
+      if (hasPin && runtime.database != null && runtime.session?.gymId != null) {
+        final pinService = MemberPinService(runtime.database!);
+        final pinData = await pinService.createPinData(
+          result.memberId,
+          runtime.session!.gymId!,
+          _pinController.text.trim(),
+        );
+        await pinService.savePinData(pinData);
+      }
+
       unawaited(runtime.sync?.synchronize());
 
       final fullName = '${draft.firstName} ${draft.lastName}'.trim();
@@ -467,6 +484,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     _emergencyPhoneController.dispose();
     _paymentAmountController.dispose();
     _referenceController.dispose();
+    _pinController.dispose();
     _biometricService.dispose();
     super.dispose();
   }
@@ -876,22 +894,49 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   }
 
   Widget _buildStep4(AppStrings s) {
+    final isFr = s.locale.languageCode == 'fr';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_errorMessage != null) _buildErrorBanner(),
+
+        // Section Code PIN d'accès (Optionnel)
         Card(
-          color: const Color(0xFFF0FDF4),
+          elevation: 1,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(LucideIcons.fingerprint, color: Color(0xFF047857), size: 36),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    s.text('biometrics_settings_hint'),
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF065F46)),
+                Row(
+                  children: [
+                    const Icon(LucideIcons.keyRound, color: Color(0xFF0F766E), size: 22),
+                    const SizedBox(width: 10),
+                    Text(
+                      isFr ? 'Code PIN d\'Accès (Optionnel)' : 'Kòd PIN pou Antre (Opsyonèl)',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  isFr
+                      ? 'Recommandé si la salle dispose d\'un clavier à code ou si le lecteur d\'empreintes n\'est pas utilisé.'
+                      : 'Rekòmande si sal la gen yon klavye nan pòt la oswa si yo pa itilize lektè anprent.',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _pinController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  decoration: InputDecoration(
+                    labelText: isFr ? 'Code PIN (4 à 6 chiffres)' : 'Kòd PIN (4 a 6 chif)',
+                    hintText: 'Ex: 1234',
+                    prefixIcon: const Icon(LucideIcons.lock),
+                    border: const OutlineInputBorder(),
+                    counterText: '',
                   ),
                 ),
               ],
@@ -899,74 +944,112 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           ),
         ),
         const SizedBox(height: 16),
-        // Consentement obligatoire
-        CheckboxListTile(
-          value: _consentGiven,
-          onChanged: (val) => setState(() => _consentGiven = val ?? false),
-          title: Text(s.text('consent_checkbox'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-          controlAffinity: ListTileControlAffinity.leading,
-        ),
-        const SizedBox(height: 16),
-        // Choix du doigt (Principal ou Secours)
-        SegmentedButton<int>(
-          segments: [
-            ButtonSegment(value: 1, label: Text(s.text('primary_finger')), icon: const Icon(LucideIcons.fingerprint)),
-            ButtonSegment(value: 2, label: Text(s.text('backup_finger')), icon: const Icon(LucideIcons.shieldCheck)),
-          ],
-          selected: {_selectedFingerIndex},
-          onSelectionChanged: (set) => setState(() => _selectedFingerIndex = set.first),
-        ),
-        const SizedBox(height: 24),
-        Center(
-          child: Column(
-            children: [
-              GestureDetector(
-                onTap: _isCapturing ? null : () => _captureFingerprint(s),
-                child: Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    color: (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
-                        ? const Color(0xFF059669)
-                        : const Color(0xFF0F766E),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF0F766E).withOpacity(0.3),
-                        blurRadius: 16,
-                        spreadRadius: 4,
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: _isCapturing
-                        ? const CircularProgressIndicator(color: Colors.white)
-                        : Icon(
-                            (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
-                                ? LucideIcons.checkCheck
-                                : LucideIcons.fingerprint,
-                            size: 56,
-                            color: Colors.white,
-                          ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
-                    ? s.text('finger_captured_success')
-                    : s.text('capture_finger_btn'),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-            ],
+
+        // Option : Salle sans lecteur d'empreinte / Enregistrer plus tard
+        Card(
+          color: _skipFingerprintForNow ? const Color(0xFFEFF6FF) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: _skipFingerprintForNow ? Colors.blue : Colors.grey.shade300),
           ),
-        ),
-        if (_isExistingMember) ...[
-          const SizedBox(height: 24),
-          CheckboxListTile(
-            title: Text(s.text('pending_fingerprint')),
+          child: CheckboxListTile(
+            title: Text(
+              isFr ? 'Salle sans empreinte / Enregistrer plus tard' : 'Sal san anprent / Anrejistre pita',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            subtitle: Text(
+              isFr
+                  ? 'Cochez si cette salle utilise le code PIN uniquement ou n\'a pas de lecteur Suprema.'
+                  : 'Koche sa si sal sa a itilize kòd PIN sèlman oswa pa gen lektè Suprema.',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+            ),
             value: _skipFingerprintForNow,
             onChanged: (val) => setState(() => _skipFingerprintForNow = val ?? false),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        if (!_skipFingerprintForNow) ...[
+          Card(
+            color: const Color(0xFFF0FDF4),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.fingerprint, color: Color(0xFF047857), size: 36),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      s.text('biometrics_settings_hint'),
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF065F46)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Consentement obligatoire
+          CheckboxListTile(
+            value: _consentGiven,
+            onChanged: (val) => setState(() => _consentGiven = val ?? false),
+            title: Text(s.text('consent_checkbox'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+          const SizedBox(height: 16),
+          // Choix du doigt (Principal ou Secours)
+          SegmentedButton<int>(
+            segments: [
+              ButtonSegment(value: 1, label: Text(s.text('primary_finger')), icon: const Icon(LucideIcons.fingerprint)),
+              ButtonSegment(value: 2, label: Text(s.text('backup_finger')), icon: const Icon(LucideIcons.shieldCheck)),
+            ],
+            selected: {_selectedFingerIndex},
+            onSelectionChanged: (set) => setState(() => _selectedFingerIndex = set.first),
+          ),
+          const SizedBox(height: 24),
+          Center(
+            child: Column(
+              children: [
+                GestureDetector(
+                  onTap: _isCapturing ? null : () => _captureFingerprint(s),
+                  child: Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
+                          ? const Color(0xFF059669)
+                          : const Color(0xFF0F766E),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF0F766E).withOpacity(0.3),
+                          blurRadius: 16,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: _isCapturing
+                          ? const CircularProgressIndicator(color: Colors.white)
+                          : Icon(
+                              (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
+                                  ? LucideIcons.checkCheck
+                                  : LucideIcons.fingerprint,
+                              size: 56,
+                              color: Colors.white,
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
+                      ? s.text('finger_captured_success')
+                      : s.text('capture_finger_btn'),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ],
+            ),
           ),
         ],
       ],

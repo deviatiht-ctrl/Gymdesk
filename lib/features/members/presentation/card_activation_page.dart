@@ -321,12 +321,15 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
           : _selectedBadge!.qrToken;
       final String? badgeId = _skipBadge ? null : _selectedBadge?.id;
 
-      final pinService = MemberPinService(db);
-      final pinData = await pinService.createPinData(
-        memberId,
-        session.gymId!,
-        _pinFirst,
-      );
+      MemberPinData? pinData;
+      if (_pinFirst.trim().isNotEmpty) {
+        final pinService = MemberPinService(db);
+        pinData = await pinService.createPinData(
+          memberId,
+          session.gymId!,
+          _pinFirst.trim(),
+        );
+      }
 
       final isOneDayPass = _selectedPlan!.durationDays == 1 || _selectedPlan!.name.toLowerCase().contains('1 j') || _selectedPlan!.name.toLowerCase().contains('séance');
       final todayMidnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
@@ -448,8 +451,8 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
         };
       }
 
-      // 5. PIN
-      final pinRow = pinData.toJson();
+      // 5. PIN (Optionnel)
+      final pinRow = pinData?.toJson();
 
       // Enregistrement atomique immédiat en base locale
       await db.activateMemberCard(
