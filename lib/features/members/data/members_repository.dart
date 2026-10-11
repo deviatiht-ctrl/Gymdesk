@@ -83,6 +83,7 @@ class MembersRepository {
               'expiring' => validity.valid && (validity.daysLeft ?? 0) <= 7,
               'expired' => validity.reason == 'expired',
               'pending' => validity.reason == 'pending_payment',
+              'pending_fingerprint' => !member.fingerprintRegistered,
               'none' => validity.reason == 'no_subscription',
               _ => true,
             };

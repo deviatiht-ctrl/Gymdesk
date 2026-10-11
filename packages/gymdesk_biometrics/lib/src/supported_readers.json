@@ -1,0 +1,86 @@
+[
+  {
+    "vendor": "Suprema",
+    "model": "BioMini",
+    "vid": "0x1612",
+    "pid": "0x0001",
+    "supported_platforms": ["windows"]
+  },
+  {
+    "vendor": "Suprema",
+    "model": "BioMini Plus",
+    "vid": "0x1612",
+    "pid": "0x0002",
+    "supported_platforms": ["windows"]
+  },
+  {
+    "vendor": "Suprema",
+    "model": "BioMini Slim",
+    "vid": "0x1612",
+    "pid": "0x0005",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "Suprema",
+    "model": "BioMini Plus 2",
+    "vid": "0x1612",
+    "pid": "0x000B",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "Suprema",
+    "model": "BioMini Combo",
+    "vid": "0x1612",
+    "pid": "0x000C",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "Suprema",
+    "model": "BioMini Slim 2",
+    "vid": "0x1612",
+    "pid": "0x0011",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "Suprema",
+    "model": "BioMini Slim 3",
+    "vid": "0x1612",
+    "pid": "0x0012",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "DigitalPersona",
+    "model": "U.are.U 4500",
+    "vid": "0x05BA",
+    "pid": "0x000A",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "DigitalPersona",
+    "model": "U.are.U 5160",
+    "vid": "0x05BA",
+    "pid": "0x000C",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "ZKTeco",
+    "model": "ZK4500",
+    "vid": "0x1B55",
+    "pid": "0x0120",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "ZKTeco",
+    "model": "Live20R",
+    "vid": "0x2724",
+    "pid": "0x0003",
+    "supported_platforms": ["windows", "android"]
+  },
+  {
+    "vendor": "SecuGen",
+    "model": "Hamster Pro 20",
+    "vid": "0x1162",
+    "pid": "0x2200",
+    "supported_platforms": ["windows", "android"]
+  }
+]

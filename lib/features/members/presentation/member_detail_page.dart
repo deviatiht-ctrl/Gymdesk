@@ -1,4 +1,3 @@
-import '../../../core/access_control/fstw_access_control_service.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -7,17 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../badges/data/badges_repository.dart';
-import '../../badges/data/whatsapp_service.dart';
-import '../../badges/domain/badge.dart';
 import '../../payments/domain/payment.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
-import '../../settings/data/settings_repository.dart';
 import '../../subscriptions/data/subscriptions_repository.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
@@ -40,7 +37,6 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
   late final SubscriptionsRepository _subscriptions;
   late final BadgesRepository _badges;
   late final MemberPinService _pins;
-  late final GymSettingsRepository _settings;
   bool _busy = false;
 
   @override
@@ -60,11 +56,6 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     _pins = MemberPinService(runtime.database!);
     _plans = PlansRepository(runtime.database!, runtime.session!);
     _subscriptions = SubscriptionsRepository(
-      runtime.database!,
-      runtime.session!,
-    );
-    _settings = GymSettingsRepository(
-      runtime.client,
       runtime.database!,
       runtime.session!,
     );
@@ -199,57 +190,61 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     });
   }
 
-  Future<void> _replaceBadge(Member member, BadgeItem old) async {
-    final s = AppStrings.of(context);
-    final available = await _badges.getAvailableBadges();
-    if (!mounted) return;
-    if (available.isEmpty) {
-      _error('no_badges_available');
+  Future<void> _syncMemberDoor(Member member) async {
+    if (member.fingerprintTemplate == null || member.fingerprintTemplate!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Manb sa a pa gen anprent anrejistre.')),
+      );
       return;
     }
-    BadgeItem selected = available.first;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModal) => AlertDialog(
-          title: Text(s.text('replace_badge')),
-          content: DropdownButtonFormField<String>(
-            initialValue: selected.id,
-            decoration: InputDecoration(labelText: s.text('new_badge')),
-            items: available
-                .map(
-                  (b) => DropdownMenuItem(
-                    value: b.id,
-                    child: Text(b.formattedNumber),
-                  ),
-                )
-                .toList(),
-            onChanged: (v) => setModal(
-              () => selected = available.firstWhere((b) => b.id == v),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(s.text('cancel')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(s.text('replace_badge')),
-            ),
-          ],
-        ),
+    final fstw = ref.read(fstwAccessControlServiceProvider);
+    final ok = await fstw.sendUserFingerprint(
+      member.id,
+      member.fingerprintTemplate!,
+      member.fullName,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: ok ? const Color(0xff1f6f4a) : Colors.red,
+        content: Text(ok
+            ? '✅ Anprent senkronize sou Pòt FSTW F30 !'
+            : '❌ Pòt la pa reponn. Kòmand anrejistre nan file d\'attente.'),
       ),
     );
-    if (confirmed == true) {
-      await _run(
-        () => _badges.replaceBadge(
-          oldBadge: old,
-          newBadge: selected,
-          reason: 'Remplacement depuis la fiche membre',
+  }
+
+  Future<void> _createTempPin(Member member) async {
+    final fstw = ref.read(fstwAccessControlServiceProvider);
+    final code = '${100000 + (member.id.hashCode.abs() % 900000)}';
+    final exp = DateTime.now().add(const Duration(hours: 24));
+    await fstw.setTemporaryPin(member.id, code, exp);
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Kòd PIN Tanporè'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Kòd PIN pou antre nan pòt FSTW F30 jodi a :'),
+            const SizedBox(height: 12),
+            SelectableText(
+              code,
+              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4),
+            ),
+            const SizedBox(height: 8),
+            const Text('Valab pandan 24 èdtan.', style: TextStyle(color: Colors.grey)),
+          ],
         ),
-      );
-    }
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fèmen'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _renew(Member member) async {
@@ -635,10 +630,13 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                         OutlinedButton.icon(
                           onPressed: _busy
                               ? null
-                              : () =>
-                                    context.push('/members/${member.id}/badge'),
-                          icon: const Icon(LucideIcons.idCard),
-                          label: Text(s.text('member_badge')),
+                              : () => FingerprintEnrollmentDialog.show(
+                                  context,
+                                  member: member,
+                                  onSaved: () => setState(() {}),
+                                ),
+                          icon: const Icon(LucideIcons.fingerprint),
+                          label: Text(member.fingerprintRegistered ? 'Mete Ajou Anprent' : 'Enskri Anprent'),
                         ),
                         FilledButton.icon(
                           onPressed: _busy ? null : () => _renew(member),
@@ -648,59 +646,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                         if (canManage)
                           PopupMenuButton<String>(
                             onSelected: (value) {
-                              if (value == 'sync_door') {
-                                final fstw = ref.read(fstwAccessControlServiceProvider);
-                                if (member.fingerprintTemplate != null && member.fingerprintTemplate!.isNotEmpty) {
-                                  fstw.sendUserFingerprint(member.id, member.fingerprintTemplate!, member.fullName).then((ok) {
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          backgroundColor: ok ? const Color(0xff1f6f4a) : Colors.red,
-                                          content: Text(ok ? '✅ Anprent senkronize sou Pòt FSTW F30 !' : '❌ Pòt la pa reponn. Kòmand anrejistre nan file d\'attente.'),
-                                        ),
-                                      );
-                                    }
-                                  });
-                                } else {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Manb sa a pa gen anprent anrejistre.')),
-                                  );
-                                }
-                              }
-                              if (value == 'temp_pin') {
-                                final fstw = ref.read(fstwAccessControlServiceProvider);
-                                final code = '${100000 + (member.id.hashCode.abs() % 900000)}';
-                                final exp = DateTime.now().add(const Duration(hours: 24));
-                                fstw.setTemporaryPin(member.id, code, exp).then((ok) {
-                                  if (mounted) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (ctx) => AlertDialog(
-                                        title: const Text('Kòd PIN Tanporè'),
-                                        content: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Text('Kòd PIN pou antre nan pòt FSTW F30 jodi a :'),
-                                            const SizedBox(height: 12),
-                                            SelectableText(
-                                              code,
-                                              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            const Text('Valab pandan 24 èdtan.', style: TextStyle(color: Colors.grey)),
-                                          ],
-                                        ),
-                                        actions: [
-                                          FilledButton(
-                                            onPressed: () => Navigator.pop(ctx),
-                                            child: const Text('Fèmen'),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }
-                                });
-                              }
+                              if (value == 'sync_door') _syncMemberDoor(member);
+                              if (value == 'temp_pin') _createTempPin(member);
                               if (value == 'pin') _resetPin(member);
                               if (value == 'fingerprint') {
                                 FingerprintEnrollmentDialog.show(
@@ -948,110 +895,98 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          s.text('badge_section'),
-                          style: Theme.of(context).textTheme.titleLarge,
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.fingerprint, color: Color(0xFF0F766E), size: 28),
+                            const SizedBox(width: 10),
+                            Text(
+                              'Aksè Byometrik & Anprent',
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 8),
-                        Text(s.text('badge_section_hint')),
+                        const Text(
+                          'Sistèm anprent dijital pou ouvèti pòt la ak sekirite sal la.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
                         const SizedBox(height: 16),
-                        FutureBuilder<BadgeItem?>(
-                          future: _badges.badgeForMember(
-                            member.id,
-                            badgeId: member.row['badge_id'] as String?,
-                          ),
-                          builder: (context, snap) {
-                            if (!snap.hasData) {
-                              return const LoadingPanel();
-                            }
-                            final badge = snap.data;
-                            if (badge == null) {
-                              return Text(s.text('member_no_badge'));
-                            }
-                            return Wrap(
-                              spacing: 16,
-                              runSpacing: 12,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Chip(
-                                  avatar: const Icon(
-                                    LucideIcons.idCard,
-                                    size: 16,
-                                  ),
-                                  label: Text(
-                                    '${badge.formattedNumber} · ${s.text('badge_status_${badge.status}')}',
-                                  ),
+                        Wrap(
+                          spacing: 14,
+                          runSpacing: 12,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Chip(
+                              avatar: Icon(
+                                member.fingerprintRegistered ? LucideIcons.circleCheck : LucideIcons.alertTriangle,
+                                size: 16,
+                                color: member.fingerprintRegistered ? const Color(0xFF047857) : const Color(0xFFB45309),
+                              ),
+                              backgroundColor: member.fingerprintRegistered ? const Color(0xFFECFDF5) : const Color(0xFFFEF3C7),
+                              label: Text(
+                                member.fingerprintRegistered ? 'Anprent Enskri' : 'Pa gen Anprent (Aksè Bloke)',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: member.fingerprintRegistered ? const Color(0xFF065F46) : const Color(0xFF92400E),
                                 ),
-                                OutlinedButton.icon(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => context.push(
-                                          '/members/${member.id}/badge',
-                                        ),
-                                  icon: const Icon(LucideIcons.printer),
-                                  label: Text(s.text('print_badge')),
-                                ),
-                                FilledButton.icon(
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xff25D366),
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  onPressed: _busy
-                                      ? null
-                                      : () async {
-                                          final gym = await _settings.current();
-                                          final activeSub = subscriptions
-                                              .where((sub) => sub.status == 'active')
-                                              .firstOrNull;
-                                          if (!context.mounted) return;
-                                          await WhatsAppService.sendBadgeActivation(
-                                            context: context,
-                                            member: member,
-                                            badge: badge,
-                                            gym: gym,
-                                            endDate: activeSub?.endDate,
-                                          );
-                                        },
-                                  icon: const Icon(LucideIcons.messageSquare, size: 16),
-                                  label: Text(s.text('send_whatsapp')),
-                                ),
-                                if (canManage && badge.isBound)
-                                  OutlinedButton.icon(
-                                    onPressed: _busy
-                                        ? null
-                                        : () => _replaceBadge(member, badge),
-                                    icon: const Icon(LucideIcons.repeat),
-                                    label: Text(s.text('replace_badge')),
-                                  ),
-                                if (canManage && !badge.isBlocked)
-                                  OutlinedButton.icon(
-                                    onPressed: _busy
-                                        ? null
-                                        : () => _run(
-                                            () => _badges.blockBadge(
-                                              badge,
-                                              reason: 'Perte ou vol',
-                                            ),
-                                          ),
-                                    icon: const Icon(LucideIcons.ban),
-                                    label: Text(s.text('block_badge')),
-                                  ),
-                                if (role == 'owner' && badge.isBound)
-                                  OutlinedButton.icon(
-                                    onPressed: _busy
-                                        ? null
-                                        : () => _run(
-                                            () => _badges.releaseBadge(
-                                              badge,
-                                              reason: 'Libération du badge',
-                                            ),
-                                          ),
-                                    icon: const Icon(LucideIcons.lockOpen),
-                                    label: Text(s.text('release_badge')),
-                                  ),
-                              ],
-                            );
-                          },
+                              ),
+                            ),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF0F766E),
+                                foregroundColor: Colors.white,
+                              ),
+                              onPressed: _busy
+                                  ? null
+                                  : () => FingerprintEnrollmentDialog.show(
+                                        context,
+                                        member: member,
+                                        onSaved: () => setState(() {}),
+                                      ),
+                              icon: const Icon(LucideIcons.fingerprint, size: 18),
+                              label: Text(member.fingerprintRegistered ? 'Mete Ajou Anprent' : 'Enskri Anprent Kounye a'),
+                            ),
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF25D366),
+                                foregroundColor: Colors.white,
+                              ),
+                              onPressed: _busy
+                                  ? null
+                                  : () async {
+                                      final wa = member.whatsapp ?? member.phone ?? '';
+                                      if (wa.isEmpty) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Manm sa a pa gen nimewo telefòn oswa WhatsApp.')),
+                                        );
+                                        return;
+                                      }
+                                      final activeSub = subscriptions.where((s) => s.status == 'active').firstOrNull;
+                                      final msg = Uri.encodeComponent(
+                                        'Bonjou ${member.fullName}! Dosye ou nan gym lan aktif.\n'
+                                        'Abonman ou valid jiska: ${activeSub != null ? ymd(activeSub.endDate) : 'N/A'}.\n'
+                                        'Ou ka pase dwèt ou sou lektè a pou antre!',
+                                      );
+                                      final url = 'https://wa.me/${wa.replaceAll('+', '').replaceAll(' ', '')}?text=$msg';
+                                      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                                    },
+                              icon: const Icon(LucideIcons.messageCircle, size: 16),
+                              label: const Text('Voye sou WhatsApp'),
+                            ),
+                            if (canManage && member.fingerprintRegistered)
+                              OutlinedButton.icon(
+                                onPressed: _busy ? null : () => _syncMemberDoor(member),
+                                icon: const Icon(LucideIcons.refreshCw, size: 16),
+                                label: const Text('Senkronize sou Pòt'),
+                              ),
+                            if (canManage && member.fingerprintRegistered)
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                                onPressed: _busy ? null : () => _removeFingerprint(member),
+                                icon: const Icon(LucideIcons.trash2, size: 16),
+                                label: const Text('Retire Anprent'),
+                              ),
+                          ],
                         ),
                       ],
                     ),

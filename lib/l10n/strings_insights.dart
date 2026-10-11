@@ -1,0 +1,93 @@
+/// Tradiksyon V3: tablo bò, rapò, kès, kanpay, kiosk aksè pòt, dyagnostik.
+const stringsInsights = <String, List<String>>{
+  'active_quota': [
+    'Kota Manm Aktyw',
+    'Quota Membres Actifs',
+    'Active Member Quota',
+  ],
+  'door_security_alert': [
+    'Alèt Sekirite Pòt',
+    'Alerte Sécurité Porte',
+    'Door Security Alert',
+  ],
+  'manual_door_opened': [
+    'Pòt la louvri manyèlman',
+    'Porte ouverte manuellement',
+    'Door opened manually',
+  ],
+  'renew_now': [
+    'Renouvle Kounye a',
+    'Renouveler Maintenant',
+    'Renew Now',
+  ],
+  'revenue_today_breakdown': [
+    'Detay Resèt Jodia',
+    'Détail Recettes du Jour',
+    'Today’s Revenue Breakdown',
+  ],
+
+  // Kès & Klòti Jounen
+  'cash_management': ['Jesyon Kès & Klòti Jounen', 'Gestion de Caisse & Clôture', 'Cash Management & Closing'],
+  'open_cash_session': ['Ouvri Kès la', 'Ouvrir la Caisse', 'Open Cash Session'],
+  'close_cash_session': ['Kloti Kès la', 'Clôturer la Caisse', 'Close Cash Session'],
+  'opening_float': ['Fon de Kès Inisyal', 'Fond de Caisse Initial', 'Opening Float'],
+  'expected_cash': ['Montan Espès ki Sipoze La', 'Montant Espèces Attendu', 'Expected Cash Amount'],
+  'counted_cash': ['Montan Espès ou Konte', 'Montant Espèces Compté', 'Counted Cash Amount'],
+  'cash_difference': ['Diferans', 'Écart', 'Difference'],
+  'difference_exact': ['0 HTG (Egzak !)', '0 HTG (Exact !)', '0 HTG (Exact!)'],
+  'surplus': ['Sipli', 'Excédent', 'Surplus'],
+  'deficit': ['Defisi', 'Déficit', 'Shortage'],
+  'cash_closed_success': ['Kès Fèmen ak Siksè !', 'Caisse Clôturée avec Succès !', 'Cash Closed Successfully!'],
+  'cash_opened_success': ['Kès louvri avèk siksè !', 'Caisse ouverte avec succès !', 'Cash session opened successfully!'],
+  'notes_optional': ['Nòt / Remak (Opsyonèl)', 'Notes / Remarques (Optionnel)', 'Notes / Remarks (Optional)'],
+  'session_already_open': ['Yon sesyon kès ouvri deja.', 'Une session de caisse est déjà ouverte.', 'A cash session is already open.'],
+  'no_open_session': ['Pa gen okenn sesyon kès ki louvri kounye a.', 'Aucune session de caisse ouverte actuellement.', 'No open cash session currently.'],
+  'close_session_confirm': ['Èske w sèten ou vle fèmen kès la pou jounen an ?', 'Êtes-vous sûr de vouloir clôturer la caisse pour la journée ?', 'Are you sure you want to close the cash register for the day?'],
+
+  // Kanpay & Mesaj Masif
+  'campaigns_title': ['Kanpay & Mesaj Masif', 'Campagnes & Messages Groupés', 'Campaigns & Bulk Messaging'],
+  'new_campaign': ['Nouvo Kanpay', 'Nouvelle Campagne', 'New Campaign'],
+  'campaign_history': ['Istorik Kanpay yo', 'Historique des Campagnes', 'Campaign History'],
+  'template_label': ['Modèl Mesaj', 'Modèle de Message', 'Message Template'],
+  'target_audience': ['Piblik Sib', 'Audience Cible', 'Target Audience'],
+  'campaign_title_field': ['Tit Kanpay la (Entèn)', 'Titre de la Campagne (Interne)', 'Campaign Title (Internal)'],
+  'campaign_subject_field': ['Sijè Imèl la', 'Objet de l’Email', 'Email Subject'],
+  'campaign_body_field': ['Kontni Mesaj la', 'Corps du Message', 'Message Body'],
+  'send_campaign_btn': ['Voye Kanpay la Kounye a', 'Envoyer la Campagne Maintenant', 'Send Campaign Now'],
+  'sending_campaign': ['Ap voye kanpay la...', 'Envoi de la campagne en cours...', 'Sending campaign...'],
+  'preview_recipients_title': ['Aperçu Moun k ap Resevwa yo', 'Aperçu des Destinataires', 'Recipient Preview'],
+  'campaign_sent_success': ['Kanpay voye avèk siksè !', 'Campagne envoyée avec succès !', 'Campaign sent successfully!'],
+  'no_recipients_found': ['Pa gen okenn manm ki koresponn ak filtè sa a.', 'Aucun membre ne correspond à ce filtre.', 'No members found matching this filter.'],
+
+  // Tablo Bò & Kota Manm Aktif
+  'active_members_label': ['Manm Aktif', 'Membres Actifs', 'Active Members'],
+  'active_quota_description': [
+    'Sèlman manm ki aktif ak abònman valid jodi a ki konte nan limit la. Manm inaktif yo pa konte.',
+    'Seuls les membres actifs avec un abonnement valide aujourd’hui comptent dans la limite. Les membres inactifs ne comptent pas.',
+    'Only active members with a valid subscription today count toward the limit. Inactive members do not count.',
+  ],
+  'available_slots': ['plas aktif disponib', 'places actives disponibles', 'active slots available'],
+  'today_revenue_details': ['Detay Revni Jodi a', 'Détail des Revenus d’Aujourd’hui', 'Today’s Revenue Breakdown'],
+  'payment_by_method_label': ['Peman pa Metòd :', 'Paiements par Méthode :', 'Payments by Method:'],
+  'no_payments_today': ['Poko gen okenn peman ki fèt jodi a.', 'Aucun paiement enregistré aujourd’hui.', 'No payments recorded today.'],
+  'open_all_payments': ['Ouvri Lis Konplè Tout Peman yo', 'Voir la Liste Complète des Paiements', 'View All Payments'],
+
+  // Kiosk Aksè & Pòt
+  'place_finger_prompt': ['Mete dwèt ou sou lektè a pou rantre', 'Posez votre doigt sur le capteur pour entrer', 'Place your finger on reader to enter'],
+  'reader_ready': ['Lektè pare', 'Lecteur prêt', 'Reader ready'],
+  'reader_waiting': ['Ap tann lektè...', 'En attente du lecteur...', 'Waiting for reader...'],
+  'access_granted': ['AKSÈ OTORIZE', 'ACCÈS AUTORISÉ', 'ACCESS GRANTED'],
+  'access_denied': ['AKSÈ REFIZE', 'ACCÈS REFUSÉ', 'ACCESS DENIED'],
+  'subscription_expired': ['Abònman ekspire', 'Abonnement expiré', 'Subscription expired'],
+  'payment_pending': ['Peman an reta', 'Paiement en attente', 'Payment overdue'],
+  'inactive_member': ['Manm inaktif', 'Membre inactif', 'Inactive member'],
+  'unrecognized_fingerprint': ['Anprent pa rekonèt nan sistèm nan', 'Empreinte non reconnue dans le système', 'Fingerprint not recognized'],
+  'manual_search_or_pin': ['Chèche pa Non oswa Kòd PIN', 'Rechercher par Nom ou Code PIN', 'Search by Name or PIN Code'],
+  'open_door_manual': ['Ouvri Pòt la Manyèlman', 'Ouvrir la Porte Manuellement', 'Open Door Manually'],
+  'door_pulse_sent': ['Siyal relè voye bay pòt la avèk siksè.', 'Signal relais envoyé à la porte avec succès.', 'Door relay signal sent successfully.'],
+  'device_online': ['Konekte', 'Connecté', 'Online'],
+  'device_offline': ['Dekonekte', 'Déconnecté', 'Offline'],
+  'copy_report': ['Kopye Rapò a', 'Copier le Rapport', 'Copy Report'],
+  'export_report': ['Ekspòte', 'Exporter', 'Export'],
+  'test_door_open': ['Teste Ouvèti Pòt la', 'Tester l’Ouverture de la Porte', 'Test Door Unlock'],
+};

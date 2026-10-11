@@ -33,6 +33,9 @@ dependencies:
   pdf: 3.13.1
   printing: 5.15.1
   url_launcher: ^6.3.3
+  http: ^1.2.0
+  gymdesk_biometrics:
+    path: packages/gymdesk_biometrics
 
 dev_dependencies:
   flutter_test:

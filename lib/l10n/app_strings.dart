@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'extra_strings.dart';
+
 class AppStrings {
   const AppStrings(this.locale);
   final Locale locale;
@@ -9,7 +11,7 @@ class AppStrings {
   static AppStrings of(BuildContext context) =>
       Localizations.of<AppStrings>(context, AppStrings)!;
   String text(String key) {
-    final values = _values[key];
+    final values = _values[key] ?? extraStrings[key];
     if (values == null) {
       final clean = key.replaceAll('_', ' ');
       return clean.isNotEmpty

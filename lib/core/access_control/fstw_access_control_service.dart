@@ -347,8 +347,6 @@ class FstwAccessControlService {
         bool ok = false;
         switch (job.action) {
           case 'sync_user':
-            final t = job.payload['template']?.toString() ?? '';
-            final n = job.payload['name']?.toString() ?? 'Member';
             ok = await _directExecute('SET_USER', job.payload);
             break;
           case 'delete_user':

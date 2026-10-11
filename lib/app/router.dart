@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../core/access_control/access_popup_overlay.dart';
 import '../core/sync/sync_models.dart';
 import '../core/widgets/async_panel.dart';
 import '../features/admin/presentation/declarations_page.dart';
@@ -11,17 +12,19 @@ import '../features/auth/presentation/password_reset_page.dart';
 import '../features/auth/presentation/signup_page.dart';
 import '../features/auth/presentation/unlock_page.dart';
 import '../features/attendance/presentation/kiosk_page.dart';
-import '../features/attendance/presentation/scan_page.dart';
-import '../features/badges/presentation/badge_templates_page.dart';
-import '../features/badges/presentation/badges_page.dart';
-import '../features/badges/presentation/member_badge_page.dart';
+import '../features/biometrics/presentation/biometric_settings_page.dart';
+import '../features/biometrics/presentation/door_access_page.dart';
+import '../features/biometrics/presentation/identify_reader_page.dart';
+import '../features/biometrics/presentation/reader_diagnostic_page.dart';
+import '../features/cash/presentation/cash_session_page.dart';
 import '../features/dashboard/presentation/local_overview_page.dart';
+import '../features/enrollment/presentation/enrollment_wizard_page.dart';
 import '../features/gyms/presentation/gyms_page.dart';
 import '../features/gyms/presentation/create_gym_page.dart';
-import '../features/members/presentation/card_activation_page.dart';
 import '../features/members/presentation/member_detail_page.dart';
 import '../features/members/presentation/member_form_page.dart';
 import '../features/members/presentation/members_page.dart';
+import '../features/messaging/presentation/campaigns_page.dart';
 import '../features/onboarding/presentation/language_selection_page.dart';
 import '../features/onboarding/presentation/onboarding_page.dart';
 import '../features/onboarding/presentation/splash_page.dart';
@@ -77,8 +80,11 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
     if (platform &&
         (path == '/' ||
             path == '/sync' ||
+            path == '/door_access' ||
             path == '/scan' ||
             path == '/reports' ||
+            path.startsWith('/campaigns') ||
+            path.startsWith('/cash') ||
             path.startsWith('/members') ||
             path.startsWith('/plans') ||
             path.startsWith('/payments'))) {
@@ -88,6 +94,14 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         !{'owner', 'supervisor'}.contains(runtime.session?.role)) {
       return '/';
     }
+    if (path.startsWith('/campaigns') &&
+        (platform ||
+            !{'owner', 'supervisor'}.contains(runtime.session?.role))) {
+      return '/';
+    }
+    if (path.startsWith('/cash') && platform) {
+      return '/gyms';
+    }
     if (path.startsWith('/settings/branding') &&
         (platform || runtime.session?.role != 'owner')) {
       return '/settings';
@@ -96,14 +110,9 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         (platform || runtime.session?.role != 'owner')) {
       return '/settings';
     }
-    if (path.startsWith('/settings/badges') &&
-        (platform ||
-            !{'owner', 'supervisor'}.contains(runtime.session?.role))) {
-      return '/settings';
-    }
-    if (path.startsWith('/badges') &&
-        (platform ||
-            !{'owner', 'supervisor'}.contains(runtime.session?.role))) {
+    if (path.startsWith('/badges') ||
+        path.startsWith('/activate') ||
+        path.startsWith('/settings/badges')) {
       return '/';
     }
     if (path.startsWith('/subscriptions/renewals') &&
@@ -176,8 +185,10 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
       builder: (context, state) => const CreateGymPage(),
     ),
     ShellRoute(
-      builder: (context, state, child) =>
-          _AppShell(runtime: runtime, location: state.uri.path, child: child),
+      builder: (context, state, child) => AccessPopupOverlay(
+        runtime: runtime,
+        child: _AppShell(runtime: runtime, location: state.uri.path, child: child),
+      ),
       routes: [
         GoRoute(
           path: '/',
@@ -189,7 +200,7 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         ),
         GoRoute(
           path: '/members/new',
-          builder: (context, state) => const MemberFormPage(),
+          builder: (context, state) => const EnrollmentWizardPage(),
         ),
         GoRoute(
           path: '/members/:id',
@@ -204,7 +215,7 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         GoRoute(
           path: '/members/:id/badge',
           builder: (context, state) =>
-              MemberBadgePage(memberId: state.pathParameters['id']!),
+              MemberDetailPage(memberId: state.pathParameters['id']!),
         ),
         GoRoute(path: '/plans', builder: (context, state) => const PlansPage()),
         GoRoute(
@@ -212,21 +223,27 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
           builder: (context, state) => const PaymentsPage(),
         ),
         GoRoute(
+          path: '/campaigns',
+          builder: (context, state) => const CampaignsPage(),
+        ),
+        GoRoute(
+          path: '/cash',
+          builder: (context, state) => const CashSessionPage(),
+        ),
+        GoRoute(
           path: '/reports',
           builder: (context, state) => const ReportsPage(),
         ),
-        GoRoute(path: '/scan', builder: (context, state) => const ScanPage()),
+        GoRoute(path: '/door_access', builder: (context, state) => const DoorAccessPage()),
+        GoRoute(path: '/scan', redirect: (context, state) => '/door_access'),
         GoRoute(path: '/sync', builder: (context, state) => const SyncPage()),
         GoRoute(
           path: '/badges',
-          builder: (context, state) => const BadgesPage(),
+          redirect: (context, state) => '/door_access',
         ),
         GoRoute(
           path: '/activate',
-          builder: (context, state) => CardActivationPage(
-            preselectedBadgeId:
-                state.uri.queryParameters['badge'],
-          ),
+          redirect: (context, state) => '/members',
         ),
         GoRoute(
           path: '/subscriptions/renewals',
@@ -237,12 +254,24 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
           builder: (context, state) => const SettingsPage(),
         ),
         GoRoute(
+          path: '/settings/biometrics',
+          builder: (context, state) => const BiometricSettingsPage(),
+        ),
+        GoRoute(
+          path: '/settings/biometrics/identify',
+          builder: (context, state) => const IdentifyReaderPage(),
+        ),
+        GoRoute(
+          path: '/settings/biometrics/diagnostic',
+          builder: (context, state) => const ReaderDiagnosticPage(),
+        ),
+        GoRoute(
           path: '/settings/branding',
           builder: (context, state) => const BrandingPage(),
         ),
         GoRoute(
           path: '/settings/badges',
-          builder: (context, state) => const BadgeTemplatesPage(),
+          redirect: (context, state) => '/settings/biometrics',
         ),
         GoRoute(
           path: '/settings/pin',
@@ -322,27 +351,38 @@ class _AppShell extends StatelessWidget {
       ? [
           '/',
           '/members',
-          '/scan',
-          '/badges',
+          '/door_access',
+          '/campaigns',
+          '/cash',
           '/plans',
           '/payments',
           '/reports',
           '/sync',
           '/settings',
         ]
-      : ['/', '/members', '/scan', '/plans', '/payments', '/sync', '/settings'];
+      : [
+          '/',
+          '/members',
+          '/door_access',
+          '/cash',
+          '/plans',
+          '/payments',
+          '/sync',
+          '/settings',
+        ];
   List<String> get _narrowPaths => runtime.session?.isPlatformAdmin == true
       ? _paths
-      : ['/', '/members', '/scan', '/settings'];
+      : ['/', '/members', '/door_access', '/cash', '/settings'];
   List<String> get _narrowKeys => runtime.session?.isPlatformAdmin == true
       ? _keys
-      : ['home', 'members', 'scan', 'settings'];
+      : ['home', 'members', 'door_access', 'cash', 'settings'];
   List<IconData> get _narrowIcons => runtime.session?.isPlatformAdmin == true
       ? _icons
       : [
           LucideIcons.house,
           LucideIcons.users,
-          LucideIcons.scanLine,
+          LucideIcons.fingerprint,
+          LucideIcons.wallet,
           LucideIcons.settings,
         ];
   List<String> get _keys => runtime.session?.isPlatformAdmin == true
@@ -351,15 +391,25 @@ class _AppShell extends StatelessWidget {
       ? [
           'home',
           'members',
-          'scan',
-          'badges',
+          'door_access',
+          'campaigns',
+          'cash',
           'plans',
           'payments',
           'reports',
           'sync',
           'settings',
         ]
-      : ['home', 'members', 'scan', 'plans', 'payments', 'sync', 'settings'];
+      : [
+          'home',
+          'members',
+          'door_access',
+          'cash',
+          'plans',
+          'payments',
+          'sync',
+          'settings',
+        ];
   List<IconData> get _icons => runtime.session?.isPlatformAdmin == true
       ? [
           LucideIcons.building2,
@@ -371,8 +421,9 @@ class _AppShell extends StatelessWidget {
       ? [
           LucideIcons.house,
           LucideIcons.users,
-          LucideIcons.scanLine,
-          LucideIcons.creditCard,
+          LucideIcons.fingerprint,
+          LucideIcons.mail,
+          LucideIcons.wallet,
           LucideIcons.badgeDollarSign,
           LucideIcons.banknote,
           LucideIcons.chartColumn,
@@ -382,7 +433,8 @@ class _AppShell extends StatelessWidget {
       : [
           LucideIcons.house,
           LucideIcons.users,
-          LucideIcons.scanLine,
+          LucideIcons.fingerprint,
+          LucideIcons.wallet,
           LucideIcons.badgeDollarSign,
           LucideIcons.banknote,
           LucideIcons.refreshCw,

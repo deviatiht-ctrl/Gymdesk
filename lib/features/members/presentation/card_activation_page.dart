@@ -47,7 +47,6 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
   bool _skipBadge = false;
   String? _enrolledFingerprint;
   String? _generatedTempPin;
-  DateTime? _tempPinExpiresAt;
   BadgeItem? _selectedBadge;
   final _usbScanController = TextEditingController();
   final _usbFocusNode = FocusNode();
@@ -469,7 +468,6 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
           _busy = false;
           _createdMemberNumber = memberNumber;
           _generatedTempPin = tempPin;
-          _tempPinExpiresAt = isOneDayPass ? todayMidnight : null;
           _step = 4;
         });
 
@@ -1386,7 +1384,7 @@ Mèsi pou konfyans ou, bòn antrènman !''';
                         member: memberSim,
                         onSaved: () {
                           setState(() {
-                            _enrolledFingerprint = 'DP4500_TEMPLATE_' + DateTime.now().millisecondsSinceEpoch.toString();
+                            _enrolledFingerprint = 'DP4500_TEMPLATE_${DateTime.now().millisecondsSinceEpoch}';
                           });
                         },
                       );

@@ -97,10 +97,10 @@ class DashboardRepository {
         (total, payment) => total + payment.amount,
       ),
       entriesToday: todaysAttendance
-          .where((entry) => entry.result == 'granted')
+          .where((entry) => entry.result.startsWith('granted'))
           .length,
       deniedToday: todaysAttendance
-          .where((entry) => entry.result != 'granted')
+          .where((entry) => !entry.result.startsWith('granted'))
           .length,
     );
   }

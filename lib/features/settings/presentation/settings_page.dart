@@ -36,10 +36,11 @@ class SettingsPage extends ConsumerWidget {
         if ({'owner', 'supervisor'}.contains(session?.role)) ...[
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const Icon(LucideIcons.creditCard),
-            title: Text(s.text('badges')),
+            leading: const Icon(LucideIcons.fingerprint),
+            title: Text(s.text('biometrics_settings')),
+            subtitle: Text(s.text('biometrics_settings_hint')),
             trailing: const Icon(LucideIcons.chevronRight),
-            onTap: () => context.push('/badges'),
+            onTap: () => context.push('/settings/biometrics'),
           ),
           const Divider(height: 1),
           ListTile(
@@ -126,18 +127,7 @@ class SettingsPage extends ConsumerWidget {
             onTap: () => context.push('/settings/staff'),
           ),
         ],
-        if ({'owner', 'supervisor'}.contains(session?.role)) ...[
-          const SizedBox(height: 32),
-          const Divider(height: 1),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(LucideIcons.idCard),
-            title: Text(s.text('badge_templates')),
-            subtitle: Text(s.text('badge_templates_hint')),
-            trailing: const Icon(LucideIcons.chevronRight),
-            onTap: () => context.push('/settings/badges'),
-          ),
-        ],
+
         const SizedBox(height: 32),
         ListTile(
           contentPadding: EdgeInsets.zero,

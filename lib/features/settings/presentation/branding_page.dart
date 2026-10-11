@@ -600,19 +600,18 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
                                         final ip = _doorIpController.text.trim();
                                         final port = int.tryParse(_doorPortController.text) ?? 5005;
                                         final ok = await fstwService.connectDevice(ip, port);
-                                        if (mounted) {
-                                          setState(() => _testingDoor = false);
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(
-                                              backgroundColor: ok ? const Color(0xff1f6f4a) : Colors.red,
-                                              content: Text(
-                                                ok
-                                                    ? '✅ Koneksyon ak Tèminal Pòt FSTW F30 ($ip:$port) reyisi !'
-                                                    : '❌ Pa ka konekte sou Tèminal Pòt ($ip:$port). Verifye kab rezo a ak routeur la.',
-                                              ),
+                                        if (!context.mounted) return;
+                                        setState(() => _testingDoor = false);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            backgroundColor: ok ? const Color(0xff1f6f4a) : Colors.red,
+                                            content: Text(
+                                              ok
+                                                  ? '✅ Koneksyon ak Tèminal Pòt FSTW F30 ($ip:$port) reyisi !'
+                                                  : '❌ Pa ka konekte sou Tèminal Pòt ($ip:$port). Verifye kab rezo a ak routeur la.',
                                             ),
-                                          );
-                                        }
+                                          ),
+                                        );
                                       },
                               ),
                             ],

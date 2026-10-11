@@ -1,0 +1,16 @@
+name: gymdesk_biometrics
+description: Paquet d'intégration biométrique multi-fabricants pour GymDesk (Suprema, DigitalPersona, ZKTeco, SecuGen).
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

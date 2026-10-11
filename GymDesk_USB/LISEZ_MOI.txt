@@ -1,0 +1,44 @@
+========================================================================
+                      GYMDESK V3 — VERSION PORTABLE CLÉ USB
+========================================================================
+
+Ce dossier contient l'application GymDesk complète prête à être copiée
+sur n'importe quelle clé USB pour fonctionner sur n'importe quel ordinateur
+ou laptop Windows 10 / 11 sans aucune installation préalable.
+
+------------------------------------------------------------------------
+COMMENT L'UTILISER :
+------------------------------------------------------------------------
+1. Copiez ce dossier complet ("GymDesk_USB") sur votre clé USB.
+2. Branchez la clé USB sur le laptop de réception ou d'accueil.
+3. Branchez votre lecteur d'empreintes (Suprema BioMini, DigitalPersona...).
+4. Double-cliquez sur "Lancer_GymDesk.bat".
+5. L'application démarre automatiquement en mode application bureau dédié
+   (sans barre d'adresse de navigateur, sans onglets, 100% comme un logiciel PC).
+
+------------------------------------------------------------------------
+FONCTIONNALITÉS INTÉGRÉES & MATÉRIEL SUPPORTÉ :
+------------------------------------------------------------------------
+- ACCUEIL (USB) : Lecteur Suprema BioMini Plus 2 (BMP-2 V01A)
+  * Enrôlement 2 empreintes (Doigt principal + Doigt de secours)
+  * Détection faux doigts (LFD) et qualité d'empreinte
+  * Anti-doublons biométriques automatiques
+
+- PORTE (IP ETHERNET) : Terminal mural Suprema BioEntry W2 (192.168.1.105:51211)
+  * Reconnaissance autonome 1:N et pilotage direct du relais gâche
+  * Synchronisation automatique des membres, dates d'expiration et gabarits
+  * Accès refusé automatiquement lorsque l'abonnement expire
+
+- MESSAGERIE & BREVO :
+  * Email de bienvenue immédiat dès l'inscription d'un membre
+  * Prévisualisation des campagnes avec liste complète des membres (actifs, inactifs, etc.)
+  * Filtre WhatsApp et intégration API Brevo
+
+- CAISSE & SESSIONS :
+  * Encaissements en Gourdes haïtiennes (HTG), reçus et clôtures journalières
+  * Mode Hors-Ligne (Offline First) avec base de données SQLite locale Drift
+
+------------------------------------------------------------------------
+SUPPORT TECHNIQUE :
+Conçu et développé par Cvisual pour GymDesk.
+========================================================================

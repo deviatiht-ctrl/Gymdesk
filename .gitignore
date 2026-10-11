@@ -18,3 +18,4 @@ android/local.properties
 *.sqlite
 .flutter-plugins
 .flutter-plugins-dependencies
+GymDesk_USB/data/

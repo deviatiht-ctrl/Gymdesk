@@ -63,20 +63,14 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                 s.text('members'),
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
-              Wrap(
-                spacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: () => context.go('/members/new'),
-                    icon: const Icon(LucideIcons.userPlus),
-                    label: Text(s.text('member_without_badge')),
-                  ),
-                  FilledButton.icon(
-                    onPressed: () => context.go('/activate'),
-                    icon: const Icon(LucideIcons.idCard),
-                    label: Text(s.text('activate_card')),
-                  ),
-                ],
+              FilledButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F766E),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => context.go('/members/new'),
+                icon: const Icon(LucideIcons.userPlus),
+                label: const Text('Enskri Nouvo Manm (Anprent)'),
               ),
             ],
           ),
@@ -115,11 +109,15 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                   'expiring',
                   'expired',
                   'pending',
-                  'none',
+                  'pending_fingerprint',
                   'suspended',
                 ])
                   ChoiceChip(
-                    label: Text(s.text('member_filter_$filter')),
+                    label: Text(
+                      filter == 'pending_fingerprint'
+                          ? 'An atann anprent (Pou rele)'
+                          : s.text('member_filter_$filter'),
+                    ),
                     selected: _filter == filter,
                     onSelected: (_) => setState(() => _filter = filter),
                   ),
@@ -148,8 +146,8 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                   padding: const EdgeInsets.all(24),
                   child: MessagePanel(
                     message: s.text('members_empty'),
-                    action: s.text('activate_card'),
-                    onAction: () => context.go('/activate'),
+                    action: 'Enskri yon Nouvo Manm',
+                    onAction: () => context.go('/members/new'),
                   ),
                 );
               }
