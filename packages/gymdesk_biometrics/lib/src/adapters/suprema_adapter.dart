@@ -5,7 +5,7 @@ import '../fingerprint_reader.dart';
 import '../models.dart';
 
 class SupremaBioMiniAdapter implements ReaderVendorAdapter {
-  static const String vendorVid = '0x1612';
+  static const String vendorVid = '0x16D1';
 
   @override
   String get vendorId => 'suprema';
@@ -15,8 +15,8 @@ class SupremaBioMiniAdapter implements ReaderVendorAdapter {
 
   @override
   bool supports(UsbIdentity id) {
-    final v = id.vid.toLowerCase();
-    return v == vendorVid || v == '1612';
+    final v = id.vid.toLowerCase().replaceAll('0x', '');
+    return v == '16d1' || v == '1612';
   }
 
   @override

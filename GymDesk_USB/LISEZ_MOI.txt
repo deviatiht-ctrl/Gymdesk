@@ -9,35 +9,67 @@ ou laptop Windows 10 / 11 sans aucune installation préalable.
 ------------------------------------------------------------------------
 COMMENT L'UTILISER :
 ------------------------------------------------------------------------
-1. Copiez ce dossier complet ("GymDesk_USB") sur votre clé USB.
+1. Copiez ce dossier complet ("GymDesk_USB") sur votre clé USB
+   (TOUS les fichiers, pas seulement le .bat).
 2. Branchez la clé USB sur le laptop de réception ou d'accueil.
-3. Branchez votre lecteur d'empreintes (Suprema BioMini, DigitalPersona...).
-4. Double-cliquez sur "Lancer_GymDesk.bat".
-5. L'application démarre automatiquement en mode application bureau dédié
+3. Installez le pilote du lecteur BioMini sur ce PC (livré avec le
+   lecteur ou BioStar) — OBLIGATOIRE, sinon Windows ne voit pas le lecteur.
+4. Branchez votre lecteur d'empreintes (Suprema BioMini Plus 2).
+5. Double-cliquez sur "Lancer_GymDesk.bat".
+   - Si Windows affiche "Windows protected your PC" (SmartScreen),
+     cliquez "More info" puis "Run anyway". C'est normal : le programme
+     n'est pas signé numériquement.
+   - Si un pare-feu demande une autorisation, choisissez "Autoriser"
+     (l'agent écoute uniquement en local, 127.0.0.1).
+6. L'application démarre automatiquement en mode application bureau dédié
    (sans barre d'adresse de navigateur, sans onglets, 100% comme un logiciel PC).
+
+------------------------------------------------------------------------
+FICHIERS IMPORTANTS (ne pas supprimer) :
+------------------------------------------------------------------------
+- access_agent.exe        : agent local (HTTP 127.0.0.1:47811 + pilote lecteur)
+- suprema_bridge32.exe    : pont 32 bits OBLIGATOIRE pour les DLL BioMini
+                            32 bits (l'agent est 64 bits)
+- biostar_tool.exe        : outil pour le terminal IP (BioEntry W2)
+- UFScanner.dll/UFMatcher.dll : SDK Suprema BioMini (32 bits)
+- Lib\Window\lib\x64\     : SDK BioStar (BS_SDK_V2.dll + OpenSSL)
+- terminal.json           : IP/port du terminal de porte (défaut 192.168.1.41:51211)
+- web\                    : application GymDesk (Flutter web)
+- data\                   : profil navigateur local
 
 ------------------------------------------------------------------------
 FONCTIONNALITÉS INTÉGRÉES & MATÉRIEL SUPPORTÉ :
 ------------------------------------------------------------------------
-- ACCUEIL (USB) : Lecteur Suprema BioMini Plus 2 (BMP-2 V01A)
-  * Pour activer le lecteur physique, placez les DLLs officielles Suprema (UFScanner.dll, UFMatcher.dll) dans ce dossier à côté de access_agent.exe (ou dans un sous-dossier sdk/).
+- ACCUEIL (USB) : Lecteur Suprema BioMini Plus 2 (VID 16D1 / PID 0409)
   * Enrôlement 2 empreintes (Doigt principal + Doigt de secours)
-  * Détection faux doigts (LFD) et qualité d'empreinte réelle
-  * Anti-doublons biométriques automatiques 1:N via l'algorithme Suprema
+  * Qualité d'empreinte réelle, anti-doublons biométriques 1:N
 
-- PORTE (IP ETHERNET) : Terminal mural Suprema BioEntry W2 (192.168.1.105:51211)
-  * Reconnaissance autonome 1:N et pilotage direct du relais gâche
-  * Synchronisation automatique des membres, dates d'expiration et gabarits
-  * Accès refusé automatiquement lorsque l'abonnement expire
+- PORTE (IP ETHERNET) : Terminal mural Suprema BioEntry W2
+  * Configuration : éditez terminal.json (ip/port du terminal)
+  * Le PC et le terminal doivent être sur le même sous-réseau
+    (ex. 192.168.1.x) ou branchés via le même routeur/switch.
+  * Test : ouvrez http://127.0.0.1:47811/api/terminals (recherche)
+    et POST /api/terminals/ping pour vérifier la connexion.
 
-- MESSAGERIE & BREVO :
-  * Email de bienvenue immédiat dès l'inscription d'un membre
-  * Prévisualisation des campagnes avec liste complète des membres (actifs, inactifs, etc.)
-  * Filtre WhatsApp et envoi automatique des emails (réponses reçues sur l'email de la salle)
+- MESSAGERIE :
+  * Email de bienvenue immédiat dès l'inscription d'un membre,
+    renouvellements et rappels d'expiration automatiques
+    (envoyés par la plateforme — nécessite une connexion internet
+    au moment de la synchronisation).
 
 - CAISSE & SESSIONS :
   * Encaissements en Gourdes haïtiennes (HTG), reçus et clôtures journalières
   * Mode Hors-Ligne (Offline First) avec base de données SQLite locale Drift
+
+------------------------------------------------------------------------
+DÉPANNAGE :
+------------------------------------------------------------------------
+- "0 lecteur" : vérifiez le pilote USB (Gestionnaire de périphériques),
+  puis que UFScanner.dll + suprema_bridge32.exe sont bien dans ce dossier.
+  Diagnostic : http://127.0.0.1:47811/health
+- L'application ne se lance pas : voir étape 5 (SmartScreen / copie complète).
+- Pas d'Internet ? L'application fonctionne hors-ligne ; les emails et la
+  synchronisation reprennent automatiquement au retour de la connexion.
 
 ------------------------------------------------------------------------
 SUPPORT TECHNIQUE :

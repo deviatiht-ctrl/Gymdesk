@@ -214,7 +214,7 @@ class AccessAgentClient {
       final res = await http.post(
         Uri.parse('$baseUrl/api/terminals/ping'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'ip': terminalIp ?? '192.168.1.105'}),
+        body: jsonEncode({'ip': terminalIp ?? '192.168.1.41'}),
       ).timeout(const Duration(seconds: 3));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;

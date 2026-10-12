@@ -48,6 +48,7 @@ class ReaderRegistry {
 
     const knownPairs = {
       // Suprema
+      '16d1:0409',
       '1612:0001', '1612:0002', '1612:0005', '1612:000b', '1612:000c', '1612:0011', '1612:0012',
       // DigitalPersona
       '05ba:000a', '05ba:000c',

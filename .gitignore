@@ -20,3 +20,18 @@ android/local.properties
 .flutter-plugins-dependencies
 GymDesk_USB/data/
 supabase/.temp/
+
+# GymDesk_USB: fichye dev/instalè BioStar SDK (pa nesesè nan runtime)
+GymDesk_USB/web_old/
+GymDesk_USB/BioStarDeviceSDK_*.exe
+GymDesk_USB/Example/
+GymDesk_USB/Document/
+GymDesk_USB/Include/
+GymDesk_USB/ApprovalRecord.json
+GymDesk_USB/ResidualRisk.*.md
+GymDesk_USB/SECURITY.md
+GymDesk_USB/SecurityAssessment.*.md
+GymDesk_USB/SBOM.*
+GymDesk_USB/SHA256SUMS.txt
+GymDesk_USB/VulnerabilityReport.*
+nul

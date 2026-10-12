@@ -178,6 +178,38 @@ class SupremaCapture {
   final int quality;
 }
 
+/// Sa agent la bezwen nan yon lektè, kit DLL yo chaje dirèkteman (x64),
+/// kit atravè pon 32-bit la (`suprema_bridge32.exe`).
+abstract class ReaderBackend {
+  String? get scannerId;
+  int get scannerCount;
+  bool get readerConnected => scannerCount > 0;
+  String get mode;
+  Future<void> refresh();
+  Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50});
+  Future<bool> verify(String aB64, String bB64);
+
+  /// Endèks premye kandida ki koresponn, oswa -1.
+  Future<int> identify(String probeB64, List<String> candidatesB64) async {
+    for (var i = 0; i < candidatesB64.length; i++) {
+      if (candidatesB64[i].isNotEmpty && await verify(probeB64, candidatesB64[i])) return i;
+    }
+    return -1;
+  }
+}
+
+/// Achitekti yon DLL Windows (lekti antèt PE a): 32 oswa 64, null si enkoni.
+int? dllBits(String path) {
+  try {
+    final b = File(path).readAsBytesSync();
+    final pe = ByteData.sublistView(b).getUint32(0x3c, Endian.little);
+    final machine = ByteData.sublistView(b).getUint16(pe + 4, Endian.little);
+    return machine == 0x8664 ? 64 : machine == 0x14c ? 32 : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 class SupremaException implements Exception {
   SupremaException(this.code, this.message);
   final String code;
@@ -186,24 +218,34 @@ class SupremaException implements Exception {
   String toString() => message;
 }
 
-/// Kontwolè SDK Suprema pou agent la.
-class SupremaSdk {
+/// Kontwolè SDK Suprema pou agent la (DLL ki gen menm achitekti ak agent la).
+class SupremaSdk extends ReaderBackend {
   SupremaSdk._(this.dir, this._api);
 
   final String dir;
   final _Api _api;
   Pointer<Void> _matcher = nullptr;
+  @override
   String? scannerId;
+  @override
   int scannerCount = 0;
+  @override
+  String get mode => 'ffi';
 
   /// Erè chajman dènye tantativ la (pou /health).
   static String? lastLoadError;
 
   /// Chèche DLL yo nan kandida yo epi inisyalize SDK a.
   static SupremaSdk? load(List<String> candidateDirs) {
+    final agentBits = sizeOf<IntPtr>() * 8;
     for (final dir in candidateDirs) {
       final f = File('$dir${Platform.pathSeparator}UFScanner.dll');
       if (!f.existsSync()) continue;
+      final bits = dllBits(f.path);
+      if (bits != null && bits != agentBits) {
+        lastLoadError = 'UFScanner.dll ($dir) se $bits-bit, agent la se $agentBits-bit.';
+        continue;
+      }
       try {
         final api = _Api(dir);
         final rc = api.init();
@@ -213,7 +255,7 @@ class SupremaSdk {
         }
         final sdk = SupremaSdk._(dir, api);
         sdk._initMatcher();
-        sdk.refresh();
+        sdk._refreshSync();
         lastLoadError = null;
         print('[SUPREMA] SDK chaje depi $dir');
         return sdk;
@@ -237,8 +279,11 @@ class SupremaSdk {
     }
   }
 
+  @override
+  Future<void> refresh() async => _refreshSync();
+
   /// Rafrechi lis lektè yo (USB plug-and-play).
-  void refresh() {
+  void _refreshSync() {
     final pn = _alloc<Int32>(4);
     try {
       _api.update();
@@ -265,10 +310,9 @@ class SupremaSdk {
     }
   }
 
-  bool get readerConnected => scannerCount > 0;
-
   /// Kaptire yon anprent. Bloke jiskaske yon dwèt poze oswa timeout.
   /// Egzekite nan yon isolate separe pou sèvè HTTP a pa bloke.
+  @override
   Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50}) async {
     final dirCopy = dir;
     final result = await Isolate.run(() => _captureWorker(dirCopy, timeoutMs));
@@ -282,8 +326,11 @@ class SupremaSdk {
     return SupremaCapture(templateB64: result['template'] as String, quality: quality);
   }
 
+  @override
+  Future<bool> verify(String aB64, String bB64) async => _verifySync(aB64, bB64);
+
   /// Verifikasyon 1:1 pa algorit Suprema a.
-  bool verify(String aB64, String bB64) {
+  bool _verifySync(String aB64, String bB64) {
     final a = base64Decode(aB64.trim());
     final b = base64Decode(bB64.trim());
     if (a.isEmpty || b.isEmpty) return false;
