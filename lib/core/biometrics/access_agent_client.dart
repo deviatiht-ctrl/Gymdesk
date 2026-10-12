@@ -224,12 +224,12 @@ class AccessAgentClient {
     return false;
   }
 
-  Future<bool> pulseTerminalRelay() async {
+  Future<bool> pulseTerminalRelay({String? terminalIp}) async {
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/api/terminals/pulse'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'terminal': 'BioEntry W2'}),
+        body: jsonEncode({'terminal': 'BioEntry W2', 'ip': terminalIp ?? '192.168.1.41'}),
       ).timeout(const Duration(seconds: 4));
       return res.statusCode == 200;
     } catch (_) {

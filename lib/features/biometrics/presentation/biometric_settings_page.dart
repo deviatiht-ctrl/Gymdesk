@@ -22,7 +22,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
   String _relayMode = 'usb_serial_relay'; // 'none', 'usb_serial_relay', 'http_relay'
   final _relayPortController = TextEditingController(text: 'COM3');
   final _relayUrlController = TextEditingController(text: 'http://192.168.1.50/relay/0?turn=on');
-  final _terminalIpController = TextEditingController(text: '192.168.1.105');
+  final _terminalIpController = TextEditingController(text: '192.168.1.41');
   double _pulseDurationSeconds = 3.0;
 
   bool _loading = true;
@@ -61,7 +61,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
           _relayMode = cfg['relay_mode'] as String? ?? 'terminal_bew2';
           _relayPortController.text = cfg['relay_port'] as String? ?? 'COM3';
           _relayUrlController.text = cfg['relay_url'] as String? ?? 'http://192.168.1.50/relay/0?turn=on';
-          _terminalIpController.text = cfg['terminal_ip'] as String? ?? '192.168.1.105';
+          _terminalIpController.text = cfg['terminal_ip'] as String? ?? '192.168.1.41';
           _pulseDurationSeconds = (cfg['pulse_duration_seconds'] as num?)?.toDouble() ?? 3.0;
           _loading = false;
         });
@@ -148,7 +148,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     setState(() => _testingTerminal = true);
     final isFr = AppStrings.of(context).locale.languageCode == 'fr';
     final client = AccessAgentClient();
-    final ok = await client.pulseTerminalRelay();
+    final ok = await client.pulseTerminalRelay(terminalIp: _terminalIpController.text.trim());
     if (mounted) {
       setState(() => _testingTerminal = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -368,7 +368,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                           controller: _terminalIpController,
                           decoration: InputDecoration(
                             labelText: isFr ? 'Adresse IP du Terminal BioEntry W2' : 'Adrès IP Tèminal la',
-                            hintText: '192.168.1.105',
+                            hintText: '192.168.1.41',
                             prefixIcon: const Icon(LucideIcons.network),
                             suffixText: 'Port: 51211',
                             border: const OutlineInputBorder(),

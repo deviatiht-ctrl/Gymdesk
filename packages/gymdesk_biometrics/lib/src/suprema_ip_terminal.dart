@@ -109,7 +109,7 @@ class SupremaIpTerminalController {
         vendor: 'Suprema Inc.',
         model: 'BioEntry W2',
         serial: 'BEW2-2889239531',
-        ip: '192.168.1.105',
+        ip: '192.168.1.41',
         port: 51211,
         firmware: 'v1.4.2-IP',
         connector: 'device_sdk',

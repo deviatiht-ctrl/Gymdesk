@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../core/sync/sync_models.dart';
@@ -169,7 +170,13 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       final relayMode = cfg['relay_mode'] as String? ?? 'usb_serial_relay';
       final port = cfg['relay_port'] as String? ?? 'COM3';
       final url = cfg['relay_url'] as String? ?? 'http://192.168.1.50/relay/0?turn=on';
+      final terminalIp = cfg['terminal_ip'] as String? ?? '192.168.1.41';
       final dur = (cfg['pulse_duration_seconds'] as num?)?.toInt() ?? 3;
+
+      if (relayMode == 'terminal_bew2') {
+        await AccessAgentClient().pulseTerminalRelay(terminalIp: terminalIp);
+        return;
+      }
 
       DoorController controller;
       if (relayMode == 'usb_serial_relay') {

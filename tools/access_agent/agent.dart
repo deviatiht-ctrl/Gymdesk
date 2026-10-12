@@ -358,9 +358,11 @@ Future<void> _handleRequest(HttpRequest request) async {
     if (path == '/api/terminals/pulse' && request.method == 'POST') {
       final body = await _readJson(request);
       final cfg = terminalConfig();
+      final ip = body['ip']?.toString() ?? cfg['ip'] as String;
+      final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
       final seconds = ((body['seconds'] as num?)?.toInt() ?? 3).clamp(1, 30);
       try {
-        final lines = await _biostarCall(['pulse', cfg['ip'] as String, '${cfg['port']}', '$seconds'],
+        final lines = await _biostarCall(['pulse', ip, '$port', '$seconds'],
             timeout: const Duration(seconds: 25));
         if (lines.any((l) => l.first == 'ok')) {
           broadcastEvent({
