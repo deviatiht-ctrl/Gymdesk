@@ -3,6 +3,8 @@
 //   biostar_tool.exe <dllDir> search              -> count\tN, apre device\tid\ttype\tip\tport
 //   biostar_tool.exe <dllDir> ping <ip> [port]    -> ok\t<id>\t<type>\t<ip> | err\t<code>\t<msg>
 //   biostar_tool.exe <dllDir> pulse <ip> [port] [sec] -> ok\t<numDoors> | err\t<code>\t<msg>
+//   biostar_tool.exe <dllDir> release <ip> [port]   -> fòse pòt la fèmen (retire tout flag)
+//   biostar_tool.exe <dllDir> lock <ip> [port]      -> kòmand lock eksplisit
 // Rechèch broadcast la jwenn aparèy yo menm si IP yo pa nan menm sou-rezo ak PC la.
 // Bati: csc -platform:x64 -target:exe biostar_tool.cs
 using System;
@@ -37,7 +39,11 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_UnlockDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_LockDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_TimedUnlockDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount, uint timeout);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_ReleaseDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseObject(IntPtr obj);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
@@ -171,10 +177,13 @@ static class Program
         try
         {
             Marshal.WriteInt32(doorIds, 0, firstDoorId);
-            const byte DoorFlagAll = 0xFF;
+            // Flag OPERATOR (0x04) tankou egzanp Suprema yo: pa janm itilize 0xFF
+            // (ALL) paske li make pòt la "déverrouillée par opérateur" epi relè a
+            // rete louvri san fen menm apre timeout la.
+            const byte DoorFlagOperator = 0x04;
             rc = seconds > 0
-                ? Native.BS2_TimedUnlockDoor(ctx, id, DoorFlagAll, doorIds, 1, seconds)
-                : Native.BS2_UnlockDoor(ctx, id, DoorFlagAll, doorIds, 1);
+                ? Native.BS2_TimedUnlockDoor(ctx, id, DoorFlagOperator, doorIds, 1, seconds)
+                : Native.BS2_UnlockDoor(ctx, id, DoorFlagOperator, doorIds, 1);
         }
         finally { Marshal.FreeHGlobal(doorIds); }
         if (doorObj != IntPtr.Zero) Native.BS2_ReleaseObject(doorObj);
@@ -184,11 +193,44 @@ static class Program
         return 0;
     }
 
+    // Fòse pòt la fèmen touswit: retire tout flag unlock/lock (release) oswa
+    // voye yon kòmand lock eksplisit. Itil pou pòt ki rete louvri apre yon
+    // unlock ak move flag (ex. 0xFF).
+    static int ReleaseOrLock(string ip, ushort port, bool lockOnly)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        IntPtr doorObj; uint numDoor;
+        rc = Native.BS2_GetAllDoor(ctx, id, out doorObj, out numDoor);
+        if (rc < 0 || numDoor == 0)
+        {
+            Console.WriteLine("err\tno_door\tOkenn pòt pa konfigire sou tèminal la (code " + rc + ")");
+            Native.BS2_DisconnectDevice(ctx, id);
+            return -1;
+        }
+        var firstDoorId = Marshal.ReadInt32(doorObj, 0);
+        var doorIds = Marshal.AllocHGlobal(4);
+        try
+        {
+            Marshal.WriteInt32(doorIds, 0, firstDoorId);
+            rc = lockOnly
+                ? Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1)
+                : Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+        }
+        finally { Marshal.FreeHGlobal(doorIds); }
+        if (doorObj != IntPtr.Zero) Native.BS2_ReleaseObject(doorObj);
+        Native.BS2_DisconnectDevice(ctx, id);
+        if (rc < 0) { Console.WriteLine("err\tlock_failed\t" + (lockOnly ? "LockDoor" : "ReleaseDoor") + ": " + rc); return rc; }
+        Console.WriteLine("ok\t" + numDoor);
+        return 0;
+    }
+
     static int Main(string[] args)
     {
         if (args.Length < 2)
         {
-            Console.WriteLine("err\tusage\tbiostar_tool.exe <dllDir> <search|ping|pulse> [arg...]");
+            Console.WriteLine("err\tusage\tbiostar_tool.exe <dllDir> <search|ping|pulse|release|lock> [arg...]");
             return 1;
         }
         var rc = Init(args[0]);
@@ -207,6 +249,12 @@ static class Program
                     return Pulse(args[2],
                         args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,
                         args.Length > 4 ? uint.Parse(args[4]) : 3);
+                case "release":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\trelease <ip> [port]"); return 1; }
+                    return ReleaseOrLock(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211, false);
+                case "lock":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tlock <ip> [port]"); return 1; }
+                    return ReleaseOrLock(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211, true);
                 default:
                     Console.WriteLine("err\tunknown_command\t" + args[1]);
                     return 1;

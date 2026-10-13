@@ -237,6 +237,19 @@ class AccessAgentClient {
     }
   }
 
+  Future<bool> releaseTerminalDoor({String? terminalIp}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/terminals/release'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'ip': terminalIp ?? '192.168.1.41'}),
+      ).timeout(const Duration(seconds: 5));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void dispose() {
     _pollTimer?.cancel();
     status.dispose();

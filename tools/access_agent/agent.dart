@@ -381,6 +381,24 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
+    // Fòse pòt la fèmen: release retire tout flag unlock/lock ki te ka rete
+    // (ex. yon ansyen unlock ak flag 0xFF ki kenbe relè a louvri).
+    if ((path == '/api/terminals/lock' || path == '/api/terminals/release') && request.method == 'POST') {
+      final body = await _readJson(request);
+      final cfg = terminalConfig();
+      final ip = body['ip']?.toString() ?? cfg['ip'] as String;
+      final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
+      final verb = path.endsWith('/lock') ? 'lock' : 'release';
+      try {
+        final lines = await _biostarCall([verb, ip, '$port'], timeout: const Duration(seconds: 20));
+        final ok = lines.any((l) => l.first == 'ok');
+        await _json(res, {'success': ok, 'online': ok, 'ip': ip, 'command': verb});
+      } on SupremaException catch (e) {
+        await _json(res, {'success': false, 'error': e.code, 'message': e.message});
+      }
+      return;
+    }
+
     if (path == '/api/terminals/sync' && request.method == 'POST') {
       await _json(res, {
         'success': false,
