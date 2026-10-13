@@ -162,6 +162,24 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     }
   }
 
+  Future<void> _lockTerminalDoor() async {
+    setState(() => _testingTerminal = true);
+    final isFr = AppStrings.of(context).locale.languageCode == 'fr';
+    final client = AccessAgentClient();
+    final ok = await client.releaseTerminalDoor(terminalIp: _terminalIpController.text.trim());
+    if (mounted) {
+      setState(() => _testingTerminal = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? (isFr ? 'Porte verrouillée.' : 'Pòt la fèmen.')
+              : (isFr ? 'Échec du verrouillage.' : 'Pòt la pa fèmen.')),
+          backgroundColor: ok ? const Color(0xFF059669) : Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _testDoorRelay() async {
     setState(() => _testingRelay = true);
     final s = AppStrings.of(context);
@@ -434,6 +452,14 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                                 onPressed: _testingTerminal ? null : _testTerminalDoorPulse,
                                 icon: const Icon(LucideIcons.doorOpen, size: 16),
                                 label: Text(isFr ? 'Tester Relais Porte' : 'Teste Relè Pòt'),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _testingTerminal ? null : _lockTerminalDoor,
+                                icon: const Icon(LucideIcons.doorClosed, size: 16),
+                                label: Text(isFr ? 'Fermer la Porte' : 'Fèmen Pòt la'),
                               ),
                             ),
                           ],

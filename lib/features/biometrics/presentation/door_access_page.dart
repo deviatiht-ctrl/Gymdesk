@@ -221,6 +221,29 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     }
   }
 
+  Future<void> _lockDoorManually() async {
+    final s = AppStrings.of(context);
+    final isFr = s.locale.languageCode == 'fr';
+    try {
+      final runtime = ref.read(appRuntimeProvider);
+      final gymId = runtime.session?.gymId;
+      if (gymId == null) return;
+      final client = Supabase.instance.client;
+      final gym = await client.from('gyms').select('biometric_config').eq('id', gymId).maybeSingle();
+      final cfg = Map<String, dynamic>.from(gym?['biometric_config'] as Map? ?? {});
+      final terminalIp = cfg['terminal_ip'] as String? ?? '192.168.1.41';
+      final ok = await AccessAgentClient().releaseTerminalDoor(terminalIp: terminalIp);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok
+              ? (isFr ? 'Porte verrouillée.' : 'Pòt la fèmen kounye a.')
+              : (isFr ? 'Échec du verrouillage de la porte.' : 'Pòt la pa fèmen.')),
+          backgroundColor: ok ? const Color(0xFF059669) : Colors.red,
+        ));
+      }
+    } catch (_) {}
+  }
+
   void _scheduleDismiss(Duration duration) {
     _dismissTimer?.cancel();
     _dismissTimer = Timer(duration, () {
@@ -274,6 +297,11 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
             tooltip: s.text('open_door_manual'),
             icon: const Icon(LucideIcons.doorOpen),
             onPressed: _openDoorManually,
+          ),
+          IconButton(
+            tooltip: s.locale.languageCode == 'fr' ? 'Fermer la porte' : 'Fèmen pòt la',
+            icon: const Icon(LucideIcons.doorClosed),
+            onPressed: _lockDoorManually,
           ),
         ],
       ),

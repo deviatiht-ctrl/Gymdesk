@@ -45,6 +45,8 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_ReleaseDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetAllDoorStatus(IntPtr context, uint deviceId, out IntPtr doorStatusObj, out uint numDoorStatus);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseObject(IntPtr obj);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseContext(IntPtr context);
@@ -226,6 +228,45 @@ static class Program
         return 0;
     }
 
+    // Li eta reyèl pòt la sou tèminal lan: BS2DoorStatus (16 bytes, pack=1):
+    //   id u32 | opened u8 | unlocked u8 | heldOpened u8 | unlockFlags u8 |
+    //   lockFlags u8 | alarmFlags u8 | reserved u16 | lastOpenTime u32
+    // Itil pou dyagnostike pòt ki rete louvri: si unlocked=1 apre yon lock,
+    // gade unlockFlags (0x01 schedule, 0x04 operator, 0x02 emergency).
+    static int Status(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        IntPtr statusObj; uint numStatus;
+        rc = Native.BS2_GetAllDoorStatus(ctx, id, out statusObj, out numStatus);
+        if (rc < 0 || numStatus == 0)
+        {
+            Console.WriteLine("err\tno_status\tGetAllDoorStatus: " + rc);
+            Native.BS2_DisconnectDevice(ctx, id);
+            return rc < 0 ? rc : -1;
+        }
+        for (uint i = 0; i < numStatus; i++)
+        {
+            var p = new IntPtr(statusObj.ToInt64() + i * 16);
+            var doorId = Marshal.ReadInt32(p, 0);
+            var opened = Marshal.ReadByte(p, 4);
+            var unlocked = Marshal.ReadByte(p, 5);
+            var held = Marshal.ReadByte(p, 6);
+            var unlockFlags = Marshal.ReadByte(p, 7);
+            var lockFlags = Marshal.ReadByte(p, 8);
+            var alarm = Marshal.ReadByte(p, 9);
+            var lastOpen = Marshal.ReadInt32(p, 12);
+            Console.WriteLine("door\t" + doorId + "\topened=" + opened + "\tunlocked=" + unlocked
+                + "\theld=" + held + "\tunlockFlags=0x" + unlockFlags.ToString("X2")
+                + "\tlockFlags=0x" + lockFlags.ToString("X2") + "\talarm=0x" + alarm.ToString("X2")
+                + "\tlastOpen=" + lastOpen);
+        }
+        if (statusObj != IntPtr.Zero) Native.BS2_ReleaseObject(statusObj);
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
     static int Main(string[] args)
     {
         if (args.Length < 2)
@@ -255,6 +296,9 @@ static class Program
                 case "lock":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tlock <ip> [port]"); return 1; }
                     return ReleaseOrLock(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211, true);
+                case "status":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tstatus <ip> [port]"); return 1; }
+                    return Status(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
                 default:
                     Console.WriteLine("err\tunknown_command\t" + args[1]);
                     return 1;
