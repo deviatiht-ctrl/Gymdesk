@@ -93,9 +93,18 @@ static class Program
         return "ok\t" + Convert.ToBase64String(bytes) + "\t" + quality;
     }
 
+    // ISO 19794-2 templates kòmanse ak majik "FMR\0"; natif Suprema yo non.
+    // Deteksyon sa a pèmèt vye ak nouvo anprent yo viv ansanm.
+    static int DetectTpl(byte[] t)
+    {
+        return (t.Length >= 4 && t[0] == (byte)'F' && t[1] == (byte)'M' && t[2] == (byte)'R' && t[3] == 0)
+            ? Iso19794_2 : SupremaNative;
+    }
+
     static bool Verify(byte[] a, byte[] b)
     {
         if (a.Length == 0 || b.Length == 0) return false;
+        try { Native.UFM_SetTemplateType(matcher, DetectTpl(a)); } catch (EntryPointNotFoundException) { }
         int verified;
         return Native.UFM_Verify(matcher, a, a.Length, b, b.Length, out verified) == Ok && verified != 0;
     }

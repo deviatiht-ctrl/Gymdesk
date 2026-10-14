@@ -335,6 +335,11 @@ class SupremaSdk extends ReaderBackend {
     final a = base64Decode(aB64.trim());
     final b = base64Decode(bB64.trim());
     if (a.isEmpty || b.isEmpty) return false;
+    // ISO 19794-2 templates kòmanse ak majik "FMR\0"; natif Suprema yo non.
+    final type = (a.length >= 4 && a[0] == 0x46 && a[1] == 0x4D && a[2] == 0x52 && a[3] == 0)
+        ? templateTypeIso19794_2
+        : templateTypeSuprema;
+    _api.ufmSetTemplateType?.call(_matcher, type);
     final pa = _bytesToNative(a);
     final pb = _bytesToNative(b);
     final pr = _alloc<Int32>(4);

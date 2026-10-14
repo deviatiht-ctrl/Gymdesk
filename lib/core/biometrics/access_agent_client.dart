@@ -93,6 +93,8 @@ class AccessAgentClient {
   Future<Map<String, dynamic>> capture({
     Duration timeout = const Duration(seconds: 10),
     int minQuality = 50,
+    // 'suprema' = fòma natif 384B (konpatib BioEntry W2); defo ISO 19794-2.
+    String? tpl,
   }) async {
     try {
       final res = await http
@@ -102,6 +104,7 @@ class AccessAgentClient {
             body: jsonEncode({
               'timeout_ms': timeout.inMilliseconds,
               'min_quality': minQuality,
+              if (tpl != null) 'tpl': tpl,
             }),
           )
           .timeout(timeout + const Duration(seconds: 5));

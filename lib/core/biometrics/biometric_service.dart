@@ -196,7 +196,7 @@ class BiometricService {
       }
 
       state.value = BiometricSensorState.waitingFinger;
-      final res = await agent.capture(timeout: const Duration(seconds: 10));
+      final res = await agent.capture(timeout: const Duration(seconds: 10), tpl: 'suprema');
       if (!_captureLoopActive || _disposed) break;
 
       if (res['success'] == true && res['template'] is String) {
@@ -266,7 +266,7 @@ class BiometricService {
     }
 
     state.value = BiometricSensorState.waitingFinger;
-    final res = await agent.capture(timeout: timeout);
+    final res = await agent.capture(timeout: timeout, tpl: 'suprema');
     if (res['success'] == true && res['template'] is String) {
       state.value = BiometricSensorState.ready;
       return FingerprintCapture(

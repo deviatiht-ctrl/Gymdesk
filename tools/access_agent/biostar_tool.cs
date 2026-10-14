@@ -55,6 +55,14 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_EnrollUser(IntPtr context, uint deviceId, [In, Out] BS2UserBlob[] userBlobs, uint userCount, byte overwrite);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetFingerprintConfig(IntPtr context, uint deviceId, IntPtr config);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetUserDatas(IntPtr context, uint deviceId, IntPtr uids, uint uidCount, [In, Out] BS2UserBlob[] userBlobs, uint userMask);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_RemoveUser(IntPtr context, uint deviceId, IntPtr uids, uint uidCount);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetFilteredLog(IntPtr context, uint deviceId, IntPtr uid, ushort eventCode, uint start, uint end, byte tnaKey, out IntPtr logsObj, out uint numLog);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseObject(IntPtr obj);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseContext(IntPtr context);
@@ -381,11 +389,16 @@ static class Program
         rc = Native.BS2_GetUserList(ctx, id, out uidsObj, out numUid, IntPtr.Zero);
         if (rc >= 0 && uidsObj != IntPtr.Zero)
         {
+            // uidsObj se yon blòk kontig: 32 bytes (BS2_USER_ID_SIZE) pa ID.
+            var buf = new byte[32];
+            var shown = 0u;
             for (uint i = 0; i < numUid; i++)
             {
-                var p = Marshal.ReadIntPtr(uidsObj, (int)i * IntPtr.Size);
-                if (p != IntPtr.Zero) Console.WriteLine("uid\t" + Marshal.PtrToStringAnsi(p));
+                Marshal.Copy(new IntPtr(uidsObj.ToInt64() + i * 32), buf, 0, 32);
+                var uid = System.Text.Encoding.ASCII.GetString(buf).TrimEnd('\0').Trim();
+                if (shown++ < 5000) Console.WriteLine("uid\t" + uid);
             }
+            if (numUid > shown) Console.WriteLine("uid\t... +" + (numUid - shown) + " lòt");
             Native.BS2_ReleaseObject(uidsObj);
         }
         Native.BS2_DisconnectDevice(ctx, id);
@@ -402,6 +415,7 @@ static class Program
         var users = new Dictionary<string, BS2UserBlob>();
         var fingers = new Dictionary<string, List<BS2Fingerprint>>();
         var order = new List<string>();
+        var skipped = new List<string>();
         foreach (var raw in System.IO.File.ReadAllLines(file))
         {
             var line = raw.Trim();
@@ -427,19 +441,24 @@ static class Program
                     reserved = 0,
                     data = new byte[2 * 384],
                 };
+                var skip = false;
                 for (var t = 0; t < 2 && 3 + t < f.Length && f[3 + t].Length > 0; t++)
                 {
                     var tpl = Convert.FromBase64String(f[3 + t]);
                     if (tpl.Length > 384)
                     {
-                        Console.WriteLine("err\ttpl_size\t" + f[1] + " template " + tpl.Length + "B > 384B (ISO pa fòma Suprema)");
-                        return -1;
+                        // Template ISO pa fòma natif Suprema: sote manm sa a
+                        // san pa anpeche rès batch la.
+                        Console.WriteLine("skip\t" + f[1] + "\ttemplate " + tpl.Length + "B > 384B (ISO — re-kaptire an fòma suprema)");
+                        skip = true;
+                        break;
                     }
                     Array.Copy(tpl, 0, fp.data, t * 384, tpl.Length);
                 }
-                fingers[f[1]].Add(fp);
+                if (skip) skipped.Add(f[1]); else fingers[f[1]].Add(fp);
             }
         }
+        order.RemoveAll(u => skipped.Contains(u));
         if (order.Count == 0) { Console.WriteLine("err\tempty\tOkenn itilizatè nan fichye a"); return -1; }
 
         uint id;
@@ -512,6 +531,172 @@ static class Program
         return blob;
     }
 
+    // Li BS2FingerprintConfig tèminal la: templateFormat @ offset 4
+    // (0=SUPREMA, 1=ISO, 2=ANSI). Enroll bezwen template nan menm fòma —
+    // chanje l ta kraze tout anprent ki deja sou tèminal la.
+    static int FpConfig(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var buf = Marshal.AllocHGlobal(64);
+        try
+        {
+            for (var i = 0; i < 64; i++) Marshal.WriteByte(buf, i, 0);
+            rc = Native.BS2_GetFingerprintConfig(ctx, id, buf);
+            if (rc < 0) { Console.WriteLine("err\tfpconfig\tGetFingerprintConfig: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+            var fmt = Marshal.ReadByte(buf, 4);
+            var name = fmt == 0 ? "SUPREMA" : fmt == 1 ? "ISO" : fmt == 2 ? "ANSI" : "?";
+            Console.WriteLine("fpconfig\ttemplateFormat=" + fmt + "(" + name + ")"
+                + "\tsecurityLevel=" + Marshal.ReadByte(buf, 0)
+                + "\tfastMode=" + Marshal.ReadByte(buf, 1));
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
+    // Ekstrè anprent yon itilizatè ki sou tèminal la (fòma natif) —
+    // itil pou teste/tèminal → fichye enroll.
+    static int PullFp(string ip, string uid, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var uids = Marshal.AllocHGlobal(32);
+        var blobs = new BS2UserBlob[] { NewBlob("", "") };
+        try
+        {
+            var ub = System.Text.Encoding.ASCII.GetBytes(uid);
+            for (var i = 0; i < 32; i++) Marshal.WriteByte(uids, i, i < ub.Length ? ub[i] : (byte)0);
+            rc = Native.BS2_GetUserDatas(ctx, id, uids, 1, blobs, 0xFFFF); // ALL mask
+            if (rc < 0) { Console.WriteLine("err\tget_user\t" + uid + ": " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+            var name = System.Text.Encoding.UTF8.GetString(blobs[0].name).TrimEnd('\0').Trim();
+            Console.WriteLine("user\t" + uid + "\t" + name + "\tnumFingers=" + blobs[0].user.numFingers);
+            if (blobs[0].fingerObjs != IntPtr.Zero && blobs[0].user.numFingers > 0)
+            {
+                var n = blobs[0].user.numFingers;
+                for (var i = 0; i < n && i < 10; i++)
+                {
+                    var fp = new IntPtr(blobs[0].fingerObjs.ToInt64() + i * 772);
+                    var idx = Marshal.ReadByte(fp, 0);
+                    var data = new byte[768];
+                    Marshal.Copy(new IntPtr(fp.ToInt64() + 4), data, 0, 768);
+                    var t1 = new byte[384]; Array.Copy(data, 0, t1, 0, 384);
+                    var t2 = new byte[384]; Array.Copy(data, 384, t2, 0, 384);
+                    var used1 = t1.Any(b => b != 0);
+                    var used2 = t2.Any(b => b != 0);
+                    Console.WriteLine("finger\t" + uid + "\t" + idx
+                        + "\t" + (used1 ? Convert.ToBase64String(t1) : "")
+                        + (used2 ? "\t" + Convert.ToBase64String(t2) : ""));
+                }
+                Native.BS2_ReleaseObject(blobs[0].fingerObjs);
+            }
+            if (blobs[0].cardObjs != IntPtr.Zero) Native.BS2_ReleaseObject(blobs[0].cardObjs);
+            if (blobs[0].faceObjs != IntPtr.Zero) Native.BS2_ReleaseObject(blobs[0].faceObjs);
+        }
+        finally { Marshal.FreeHGlobal(uids); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
+    // Dènye evènman yo sou tèminal la (dyagnostik auth: verify fail vs
+    // access denied vs pa gen scan ditou). BS2Event = 48 bytes (pack=1):
+    //   id u32 @0 | ts u32 @4 | deviceID u32 @8 | userID[32] @12 |
+    //   code u16 @44 (mainCode hi, subCode lo) | param u8 @46 | image u8 @47
+    static string EvName(ushort code)
+    {
+        switch (code & 0xFF00)
+        {
+            case 0x1000: return "VERIFY_SUCCESS";
+            case 0x1100: return "VERIFY_FAIL";
+            case 0x1200: return "VERIFY_DURESS";
+            case 0x1300: return "IDENTIFY_SUCCESS";
+            case 0x1400: return "IDENTIFY_FAIL";
+            case 0x1500: return "IDENTIFY_DURESS";
+            case 0x1600: return "DUAL_AUTH_SUCCESS";
+            case 0x1700: return "DUAL_AUTH_FAIL";
+            case 0x1800: return "AUTH_FAILED";
+            case 0x1900: return "ACCESS_DENIED";
+            case 0x1A00: return "FAKE_FINGER";
+            case 0x2000: return "ENROLL_SUCCESS";
+            case 0x2100: return "ENROLL_FAIL";
+            case 0x2200: return "USER_UPDATE";
+            case 0x2400: return "USER_DELETE";
+            case 0x2800: return "DUPLICATE_CREDENTIAL";
+            case 0x5000: return "DOOR_UNLOCKED";
+            case 0x5100: return "DOOR_LOCKED";
+            case 0x5200: return "DOOR_OPENED";
+            case 0x5300: return "DOOR_CLOSED";
+            case 0x5400: return "DOOR_FORCED_OPEN";
+            case 0x5500: return "DOOR_HELD_OPEN";
+            case 0x5D00: return "DOOR_LOCK_REQ";
+            case 0x5E00: return "DOOR_UNLOCK_REQ";
+            case 0x5F00: return "DOOR_SEND";
+            case 0x3100: return "SYSTEM_STARTED";
+            case 0x3900: return "COMM_LOCKED";
+            case 0x3A00: return "COMM_UNLOCKED";
+            case 0x3B00: return "TCP_CONNECTED";
+            case 0x3C00: return "TCP_DISCONNECTED";
+            case 0x4400: return "AUTH_MODE";       // dev auth config change
+            case 0x4600: return "INPUT_CLEAR";
+            case 0x4700: return "INPUT_DETECTED";
+            default: return "EV_0x" + (code & 0xFF00).ToString("X4");
+        }
+    }
+
+    static int Logs(string ip, ushort port, uint amount)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var uidPtr = Marshal.StringToHGlobalAnsi(""); // vid = tout itilizatè
+        IntPtr logsObj; uint numLog;
+        try { rc = Native.BS2_GetFilteredLog(ctx, id, uidPtr, 0, 0, 0, 0, out logsObj, out numLog); }
+        finally { Marshal.FreeHGlobal(uidPtr); }
+        if (rc < 0) { Console.WriteLine("err\tlogs\tGetFilteredLog: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+        var n = Math.Min(numLog, amount);
+        // GetFilteredLog retounen nan lòd ansyen → resan; nou pran N dènye yo.
+        var startIdx = numLog > n ? numLog - n : 0u;
+        for (var i = startIdx; i < numLog; i++)
+        {
+            var p = new IntPtr(logsObj.ToInt64() + i * 48);
+            var evId = Marshal.ReadInt32(p, 0);
+            var ts = (uint)Marshal.ReadInt32(p, 4);
+            var dev = (uint)Marshal.ReadInt32(p, 8);
+            var uidBytes = new byte[32];
+            Marshal.Copy(new IntPtr(p.ToInt64() + 12), uidBytes, 0, 32);
+            var uid = System.Text.Encoding.ASCII.GetString(uidBytes).TrimEnd('\0').Trim();
+            var code = (ushort)Marshal.ReadInt16(p, 44);
+            var param = Marshal.ReadByte(p, 46);
+            var dt = ts == 0 ? "-" : new DateTime(1970, 1, 1).AddSeconds(ts).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            Console.WriteLine("log\t" + evId + "\t" + dt + "\tdev=" + dev + "\tuid=" + (uid.Length > 0 ? uid : "-")
+                + "\tcode=0x" + code.ToString("X4") + "\t" + EvName(code) + "\tparam=" + param);
+        }
+        if (logsObj != IntPtr.Zero) Native.BS2_ReleaseObject(logsObj);
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
+    static int RmUser(string ip, string uid, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var uids = Marshal.AllocHGlobal(32);
+        try
+        {
+            var ub = System.Text.Encoding.ASCII.GetBytes(uid);
+            for (var i = 0; i < 32; i++) Marshal.WriteByte(uids, i, i < ub.Length ? ub[i] : (byte)0);
+            rc = Native.BS2_RemoveUser(ctx, id, uids, 1);
+        }
+        finally { Marshal.FreeHGlobal(uids); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        if (rc < 0) { Console.WriteLine("err\tremove\t" + uid + ": " + rc); return rc; }
+        Console.WriteLine("ok\t" + uid);
+        return 0;
+    }
+
     static int Main(string[] args)
     {
         if (args.Length < 2)
@@ -550,6 +735,19 @@ static class Program
                 case "enroll":
                     if (args.Length < 4) { Console.WriteLine("err\tusage\tenroll <ip> <file> [port]"); return 1; }
                     return Enroll(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);
+                case "fpconfig":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tfpconfig <ip> [port]"); return 1; }
+                    return FpConfig(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "pullfp":
+                    if (args.Length < 4) { Console.WriteLine("err\tusage\tpullfp <ip> <uid> [port]"); return 1; }
+                    return PullFp(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);
+                case "rmuser":
+                    if (args.Length < 4) { Console.WriteLine("err\tusage\trmuser <ip> <uid> [port]"); return 1; }
+                    return RmUser(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);
+                case "logs":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tlogs <ip> [port] [count]"); return 1; }
+                    return Logs(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,
+                        args.Length > 4 ? uint.Parse(args[4]) : 30);
                 default:
                     Console.WriteLine("err\tunknown_command\t" + args[1]);
                     return 1;
