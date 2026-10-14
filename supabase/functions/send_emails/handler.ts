@@ -12,6 +12,7 @@ export interface EmailGateway {
   claim(): Promise<EmailJob | null>;
   finish(job: EmailJob, result: string, messageId?: string, error?: string): Promise<void>;
   logo(job: EmailJob): Promise<string | null>;
+  receipt(job: EmailJob): Promise<string | null>;
 }
 interface Config {
   workerToken: string;
@@ -60,7 +61,16 @@ export function createEmailHandler(gateway: EmailGateway, config: Config, send: 
           await gateway.finish(job, 'retry', undefined, 'logo_unavailable');
           continue;
         }
-        const content = renderEmail(job, logo);
+        let receipt: string | null = null;
+        if (typeof job.payload.receipt_path === 'string' && job.payload.receipt_path !== '') {
+          try {
+            receipt = await gateway.receipt(job);
+          } catch {
+            await gateway.finish(job, 'retry', undefined, 'receipt_unavailable');
+            continue;
+          }
+        }
+        const content = renderEmail(job, logo, receipt);
         let response: Response;
         try {
           response = await send('https://api.brevo.com/v3/smtp/email', {

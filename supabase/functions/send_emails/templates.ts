@@ -3,7 +3,7 @@ import type { EmailJob } from './handler.ts';
 const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const line = (value: unknown) => String(value ?? '').replace(/[\r\n]/g, ' ').slice(0, 200);
 
-export function renderEmail(job: EmailJob, logoUrl: string | null) {
+export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: string | null = null) {
   const p = job.payload;
   const platform = job.kind === 'gym_welcome';
   const brand = platform ? 'GymDesk' : String(p.gym_name ?? 'Votre salle de sport');
@@ -16,7 +16,8 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
   const money = (amount: unknown, currency: unknown) => `${amount ?? 0} ${currency ?? 'HTG'}`;
   // Lang manm yo (gyms.settings.member_language). Sèlman rapèl yo tradui pou
   // kounye a; lòt imèl yo rete an fransè pou pa melanje lang nan yon mesaj.
-  const lang = job.kind === 'renewal_reminder' && (p.language === 'ht' || p.language === 'en') ? p.language : 'fr';
+  const lang = (job.kind === 'renewal_reminder' || job.kind === 'payment_receipt')
+    && (p.language === 'ht' || p.language === 'en') ? p.language : 'fr';
   const t = (fr: string, ht: string, en: string) => lang === 'ht' ? ht : lang === 'en' ? en : fr;
 
   let title = 'Bienvenue dans votre salle';
@@ -96,15 +97,55 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
     subject = String(p.subject || title);
     intro = String(p.body_text || '');
   } else if (job.kind === 'payment_receipt') {
-    title = 'Reçu de paiement';
-    intro = `Votre paiement a bien été reçu par ${brand}.`;
-    rows = [
-      ['Montant reçu', money(p.amount, p.currency)],
-      ['Mode de règlement', String(p.method ?? 'Cash').toUpperCase()],
-      ['Référence', p.reference || 'Paiement en caisse'],
-      ['Date', date(p.paid_at)],
-    ];
-    note = 'Conservez cet email comme justificatif de paiement.';
+    const credit = Number(p.credit_amount ?? 0);
+    const balance = Number(p.credit_balance ?? 0);
+    if (lang === 'ht') {
+      title = 'Resi peman w lan';
+      subject = `Resi peman #${p.receipt_no ?? ''}`;
+      intro = `Peman w lan te resevwa pa ${brand}. Ou jwenn resi PDF a nan lyen ki anba a.`;
+      rows = [
+        ['Nimewo resi', `#${p.receipt_no ?? ''}`],
+        ['Fòmil', p.plan_name],
+        ['Montan peman', money(p.amount, p.currency)],
+        ['Montan ou te bay', money(p.received_amount ?? p.amount, p.currency)],
+        credit > 0 ? ['Balans ki rete sou kont ou', money(credit, p.currency)] : ['', ''],
+        ['Metòd peman', String(p.method ?? 'cash').toUpperCase()],
+        ['Dat', date(p.paid_at)],
+        balance > 0 ? ['Total balans kont ou', money(balance, p.currency)] : ['', ''],
+      ];
+      note = 'Kenbe resi sa a kòm prèv peman w lan.';
+    } else if (lang === 'en') {
+      title = 'Your payment receipt';
+      subject = `Payment receipt #${p.receipt_no ?? ''}`;
+      intro = `Your payment was received by ${brand}. Download the PDF receipt below.`;
+      rows = [
+        ['Receipt no.', `#${p.receipt_no ?? ''}`],
+        ['Plan', p.plan_name],
+        ['Amount paid', money(p.amount, p.currency)],
+        ['Amount received', money(p.received_amount ?? p.amount, p.currency)],
+        credit > 0 ? ['Credited to your balance', money(credit, p.currency)] : ['', ''],
+        ['Payment method', String(p.method ?? 'cash').toUpperCase()],
+        ['Date', date(p.paid_at)],
+        balance > 0 ? ['Your total balance', money(balance, p.currency)] : ['', ''],
+      ];
+      note = 'Keep this receipt as proof of payment.';
+    } else {
+      title = 'Reçu de paiement';
+      subject = `Reçu de paiement #${p.receipt_no ?? ''}`;
+      intro = `Votre paiement a bien été reçu par ${brand}. Téléchargez le reçu PDF ci-dessous.`;
+      rows = [
+        ['N° de reçu', `#${p.receipt_no ?? ''}`],
+        ['Formule', p.plan_name],
+        ['Montant du paiement', money(p.amount, p.currency)],
+        ['Montant remis', money(p.received_amount ?? p.amount, p.currency)],
+        credit > 0 ? ['Crédité sur votre balance', money(credit, p.currency)] : ['', ''],
+        ['Mode de règlement', String(p.method ?? 'cash').toUpperCase()],
+        ['Date', date(p.paid_at)],
+        balance > 0 ? ['Votre balance totale', money(balance, p.currency)] : ['', ''],
+      ];
+      note = 'Conservez ce reçu comme justificatif de paiement.';
+    }
+    rows = rows.filter(([label]) => label !== '');
   }
   const greet = p.name && !/^\s*(bonjour|bonjou|bonsoir|hello|hi|salut|cher|chère)(?![a-zà-ÿ])/i.test(intro);
 
@@ -122,7 +163,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
 
   const details = rows.filter(([, value]) => value != null && value !== '');
   const contact = platform
-    ? 'GymDesk — Logiciel de gestion de salles'
+    ? 'SecurGYM — Sécurité et gestion de votre gym'
     : [p.gym_phone, p.gym_address].filter(Boolean).join(' · ');
   const reply = platform
     ? 'Une question ? Répondez simplement à cet email, notre équipe vous répondra.'
@@ -167,13 +208,18 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
                 </tr>`).join('')}
               </table>` : ''}
               ${note ? `<p style="margin:0 0 16px;font-size:14px;color:#4b5563">${escape(note)}</p>` : ''}
+              ${receiptUrl ? `
+              <p style="margin:0 0 20px;text-align:center">
+                <a href="${escape(receiptUrl)}" style="display:inline-block;padding:12px 28px;background:${color};color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;border-radius:8px">${escape(t('Télécharger le reçu (PDF)', 'Telechaje resi a (PDF)', 'Download receipt (PDF)'))}</a>
+              </p>` : ''}
               <p style="margin:0 0 16px;font-size:14px;color:#4b5563">${escape(reply)}</p>
               <p style="margin:0 0 20px">${t('Cordialement', 'Mèsi', 'Best regards')},<br>${escape(brand)}</p>
             </td>
           </tr>
           <tr>
             <td style="padding:16px 28px 20px;border-top:1px solid #f0f1f3;text-align:center;font-size:12px;line-height:1.5;color:#9ca3af">
-              ${contact ? `${escape(contact)}<br>` : ''}${footer ? escape(footer) : ''}
+              ${contact ? `${escape(contact)}<br>` : ''}${footer ? `${escape(footer)}<br>` : ''}
+              <div style="margin-top:8px;font-size:11px;color:#9ca3af">Système sécurisé par <a href="https://securgym.com" style="color:#ff6600;text-decoration:none;font-weight:600">SecurGYM</a> · <a href="https://securgym.com" style="color:#9ca3af;text-decoration:underline">securgym.com</a></div>
             </td>
           </tr>
         </table>
@@ -191,6 +237,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
       intro,
       details.map(([label, value]) => `${label} : ${value}`).join('\n'),
       note,
+      receiptUrl ? `${t('Reçu PDF', 'Resi PDF', 'PDF receipt')} : ${receiptUrl}` : '',
       reply,
       `${t('Cordialement', 'Mèsi', 'Best regards')},\n${brand}`,
       contact,

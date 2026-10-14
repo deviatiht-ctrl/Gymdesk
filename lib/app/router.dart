@@ -501,9 +501,29 @@ class _AppShell extends StatelessWidget {
               );
             }
             final wide = constraints.maxWidth >= 800;
+            final isExtended = constraints.maxWidth >= 1200;
             return Scaffold(
               appBar: AppBar(
-                title: Text(runtime.session?.name ?? 'GymDesk'),
+                title: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        runtime.session?.name ?? 'SecurGYM',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Tooltip(
+                      message: 'Sécurisé par SecurGYM',
+                      child: Image.asset(
+                        'assets/brand/icon_securgym.png',
+                        width: 20,
+                        height: 20,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ],
+                ),
                 actions: [
                   if (runtime.sync != null)
                     ListenableBuilder(
@@ -538,9 +558,58 @@ class _AppShell extends StatelessWidget {
                   if (wide) ...[
                     NavigationRail(
                       selectedIndex: selected,
-                      extended: constraints.maxWidth >= 1200,
+                      extended: isExtended,
                       minExtendedWidth: 220,
-                      labelType: constraints.maxWidth >= 1200
+                      leading: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: isExtended
+                            ? Image.asset(
+                                'assets/brand/logo_horizontal.png',
+                                width: 150,
+                                fit: BoxFit.contain,
+                              )
+                            : Image.asset(
+                                'assets/brand/icon_securgym.png',
+                                width: 34,
+                                height: 34,
+                                fit: BoxFit.contain,
+                              ),
+                      ),
+                      trailing: Expanded(
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 16),
+                            child: isExtended
+                                ? Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Image.asset(
+                                        'assets/brand/icon_securgym.png',
+                                        width: 16,
+                                        height: 16,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      const Text(
+                                        'SecurGYM',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xff9ca3af),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Image.asset(
+                                    'assets/brand/icon_securgym.png',
+                                    width: 16,
+                                    height: 16,
+                                  ),
+                          ),
+                        ),
+                      ),
+                      labelType: isExtended
                           ? NavigationRailLabelType.none
                           : NavigationRailLabelType.all,
                       onDestinationSelected: (index) =>

@@ -60,7 +60,7 @@ class BiometricService {
   String get unavailableReason {
     final st = agent.status.value;
     if (!st.connected) {
-      return 'Agent GymDesk (access_agent.exe) non démarré. Lancez "Lancer_GymDesk.bat".';
+      return 'Agent SecurGYM (access_agent.exe) non démarré. Lancez "Lancer_SecurGYM.bat".';
     }
     if (st.sdkError != null && st.sdkError!.isNotEmpty) return st.sdkError!;
     return 'Aucun lecteur d’empreintes détecté. Branchez le lecteur USB.';

@@ -5,7 +5,7 @@ ThemeData gymTheme(String? accentHex) {
   final parsed = RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(accentHex ?? '')
       ? int.tryParse(accentHex!.substring(1), radix: 16)
       : null;
-  final accent = Color(0xff000000 | (parsed ?? 0x1f6f4a));
+  final accent = Color(0xff000000 | (parsed ?? 0xff6600));
   final foreground = accent.computeLuminance() > 0.179
       ? Colors.black
       : Colors.white;

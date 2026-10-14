@@ -272,7 +272,13 @@ class MembersRepository {
     String? paymentId;
     await db.transaction(() async {
       number = await db.nextMemberNumber();
-      final memberRow = _memberRow(id, draft, number, changedAt);
+      final memberRow = {
+        ..._memberRow(id, draft, number, changedAt),
+        if ((payment?.creditAdded ?? 0) > 0)
+          'credit_balance': double.parse(
+            payment!.creditAdded.toStringAsFixed(2),
+          ),
+      };
       await db.save(SyncEntity.members, memberRow, changedAt: changedAt);
       if (draft.photo != null) await db.enqueuePhoto(id, draft.photo!);
       if (subscription != null) {
@@ -283,7 +289,7 @@ class MembersRepository {
           changedAt: changedAt,
         );
         if (payment != null && payment.amount > 0) {
-          paymentId = _uuid.v4();
+          paymentId = payment.id ?? _uuid.v4();
           await db.save(
             SyncEntity.payments,
             _paymentRow(
@@ -433,7 +439,7 @@ class MembersRepository {
         await db.save(
           SyncEntity.payments,
           _paymentRow(
-            _uuid.v4(),
+            payment.id ?? _uuid.v4(),
             payment.copyWith(
               memberId: member.id,
               subscriptionId: subscriptionId,
@@ -442,10 +448,49 @@ class MembersRepository {
           ),
           changedAt: changedAt,
         );
+        if (payment.creditAdded > 0 || payment.creditUsed > 0) {
+          await _applyCredit(
+            member.row,
+            payment.creditAdded - payment.creditUsed,
+            changedAt,
+          );
+        }
       }
     });
     return subscription;
   });
+
+  /// Mete `credit_balance` manm nan ajou nan menm tranzaksyon an.
+  /// [delta] = kredi ajoute - kredi itilize (ka negatif).
+  Future<void> _applyCredit(
+    Json memberRow,
+    double delta,
+    DateTime changedAt,
+  ) async {
+    final balance =
+        ((memberRow['credit_balance'] as num?)?.toDouble() ?? 0) + delta;
+    if (balance < -0.001) throw const MemberFailure('insufficient_credit');
+    await db.save(
+      SyncEntity.members,
+      {
+        ...memberRow,
+        'credit_balance': double.parse(balance.toStringAsFixed(2)),
+      },
+      changedAt: changedAt,
+    );
+  }
+
+  Future<Json> _memberRowFor(String memberId) async {
+    final rows = await db
+        .watchRecords(SyncEntity.members, limit: 50000)
+        .first;
+    for (final row in rows) {
+      if (row.id == memberId) {
+        return Map<String, dynamic>.from(jsonDecode(row.payload) as Map);
+      }
+    }
+    throw const MemberFailure('invalid_record');
+  }
 
   Future<void> collectPayment(
     GymSubscription subscription,
@@ -476,11 +521,16 @@ class MembersRepository {
     if (payment.amount <= 0 || payment.amount > remaining + 0.001) {
       throw const MemberFailure('invalid_record');
     }
+    final memberRow = await _memberRowFor(subscription.memberId);
+    final balance = (memberRow['credit_balance'] as num?)?.toDouble() ?? 0;
+    if (payment.creditUsed > balance + 0.001) {
+      throw const MemberFailure('insufficient_credit');
+    }
     await db.transaction(() async {
       await db.save(
         SyncEntity.payments,
         _paymentRow(
-          _uuid.v4(),
+          payment.id ?? _uuid.v4(),
           payment.copyWith(
             memberId: subscription.memberId,
             subscriptionId: subscription.id,
@@ -489,6 +539,13 @@ class MembersRepository {
         ),
         changedAt: changedAt,
       );
+      if (payment.creditAdded > 0 || payment.creditUsed > 0) {
+        await _applyCredit(
+          memberRow,
+          payment.creditAdded - payment.creditUsed,
+          changedAt,
+        );
+      }
       if (subscription.status == 'pending' &&
           subscription.openingCredit + paid + payment.amount >=
               subscription.price - 0.001 &&
@@ -619,13 +676,41 @@ class MembersRepository {
           'natcash',
           'bank',
           'other',
+          'credit',
         }.contains(payment.method) ||
+        payment.creditUsed < 0 ||
+        payment.creditUsed > payment.amount + 0.001 ||
+        payment.effectiveReceived < payment.cashDue - 0.001 ||
         !{'HTG', 'USD'}.contains(payment.currency) ||
         payment.reference.length > 120 ||
         payment.notes.length > 500) {
       throw const MemberFailure('invalid_record');
     }
   }
+
+  /// Retounen ranje peman an tankou li ta estoke — pou afiche resi a apre
+  /// anrejistreman an san nou pa bezwen rekijere baz la.
+  Json _paymentRow(String id, PaymentCommand command, DateTime changedAt) => {
+    'id': id,
+    'gym_id': session.gymId,
+    'member_id': command.memberId,
+    'subscription_id': command.subscriptionId,
+    'amount': command.amount,
+    'currency': command.currency,
+    'method': command.creditUsed >= command.amount ? 'credit' : command.method,
+    'reference': command.reference.trim().isEmpty
+        ? null
+        : command.reference.trim(),
+    'received_amount': command.effectiveReceived,
+    'credit_used': command.creditUsed,
+    'credit_amount': command.creditAdded,
+    'paid_at': changedAt.toUtc().toIso8601String(),
+    'received_by': session.staffId,
+    'notes': command.notes.trim().isEmpty ? null : command.notes.trim(),
+    'created_at': changedAt.toUtc().toIso8601String(),
+    'updated_at': changedAt.toUtc().toIso8601String(),
+    'deleted_at': null,
+  };
 
   Json _memberRow(
     String id,
@@ -697,22 +782,4 @@ class MembersRepository {
     'deleted_at': null,
   };
 
-  Json _paymentRow(String id, PaymentCommand command, DateTime changedAt) => {
-    'id': id,
-    'gym_id': session.gymId,
-    'member_id': command.memberId,
-    'subscription_id': command.subscriptionId,
-    'amount': command.amount,
-    'currency': command.currency,
-    'method': command.method,
-    'reference': command.reference.trim().isEmpty
-        ? null
-        : command.reference.trim(),
-    'paid_at': changedAt.toUtc().toIso8601String(),
-    'received_by': session.staffId,
-    'notes': command.notes.trim().isEmpty ? null : command.notes.trim(),
-    'created_at': changedAt.toUtc().toIso8601String(),
-    'updated_at': changedAt.toUtc().toIso8601String(),
-    'deleted_at': null,
-  };
 }

@@ -48,7 +48,7 @@ class _IdentifyReaderPageState extends ConsumerState<IdentifyReaderPage> {
 
   void _copyReport(AppStrings s) {
     final buffer = StringBuffer();
-    buffer.writeln('=== GYMDESK RAPPORT MATÉRIEL USB BIOMÉTRIQUE ===');
+    buffer.writeln('=== SECURGYM RAPPORT MATÉRIEL USB BIOMÉTRIQUE ===');
     buffer.writeln('Date : ${DateTime.now().toIso8601String()}');
     buffer.writeln('Nombre d\'appareils détectés : ${_detectedDevices.length}');
     buffer.writeln('--------------------------------------------------');

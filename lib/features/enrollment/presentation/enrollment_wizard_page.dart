@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/biometrics/biometric_service.dart';
@@ -15,7 +16,9 @@ import '../../../l10n/app_strings.dart';
 import '../../members/data/member_photo_codec.dart';
 import '../../members/data/members_repository.dart';
 import '../../members/domain/member.dart';
+import '../../payments/data/receipt_pdf.dart';
 import '../../payments/domain/payment.dart';
+import '../../payments/presentation/receipt_sheet.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
@@ -58,8 +61,15 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   // Step 3: Peman
   String _paymentMethod = 'cash';
   final _paymentAmountController = TextEditingController();
+  final _paymentReceivedController = TextEditingController();
   final _referenceController = TextEditingController();
   bool _paymentConfirmed = false;
+  bool _keepChangeAsCredit = false;
+  String _lastPaymentId = '';
+  String _lastMemberNumber = '';
+  double _lastAmount = 0;
+  double _lastReceived = 0;
+  double _lastCreditAdded = 0;
 
   // Step 4: Anprent (2 Doigts + Konsantman)
   late final BiometricService _biometricService;
@@ -251,6 +261,12 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       final plan = _selectedPlan!;
       final endDate = subscriptionEnd(_startDate, plan.durationDays);
       final amt = double.tryParse(_paymentAmountController.text) ?? plan.price;
+      final received =
+          double.tryParse(_paymentReceivedController.text.replaceAll(',', '.')) ??
+              amt;
+      final creditAdded =
+          _keepChangeAsCredit && received > amt ? received - amt : 0.0;
+      final paymentId = const Uuid().v4();
 
       final draft = MemberRegistration(
         firstName: _firstNameController.text.trim(),
@@ -280,16 +296,24 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           status: 'active',
         ),
         payment: PaymentCommand(
+          id: paymentId,
           memberId: '',
           subscriptionId: '',
           amount: amt,
           currency: 'HTG',
           method: _paymentMethod,
           reference: _referenceController.text.trim(),
+          receivedAmount: received,
+          keepChangeAsCredit: _keepChangeAsCredit,
           notes: _paymentConfirmed ? 'Paiement confirmé en caisse' : '',
         ),
         changedAt: now,
       );
+      _lastPaymentId = paymentId;
+      _lastAmount = amt;
+      _lastReceived = received;
+      _lastCreditAdded = creditAdded;
+      _lastMemberNumber = result.memberNumber;
 
       if (_primaryTemplate != null && runtime.database != null) {
         await runtime.database!.save(
@@ -349,6 +373,47 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     }
   }
 
+  /// Resi PDF peman enskripsyon an (download / print / email / WhatsApp).
+  Future<void> _openReceipt(
+    String fullName,
+    String planName,
+    String memberId,
+    DateTime endDate,
+  ) async {
+    final runtime = ref.read(appRuntimeProvider);
+    final gym = runtime.session?.gym ?? const <String, dynamic>{};
+    if (!mounted) return;
+    await showReceiptSheet(
+      context,
+      ref,
+      ReceiptData(
+        paymentId: _lastPaymentId,
+        memberName: fullName,
+        memberNumber: _lastMemberNumber,
+        planName: planName,
+        amount: _lastAmount,
+        currency: gym['currency'] as String? ?? 'HTG',
+        method: _paymentMethod,
+        paidAt: DateTime.now().toUtc(),
+        gymName: gym['name'] as String? ?? 'GymDesk',
+        accentColor: gym['accent_color'] as String? ?? '#0F766E',
+        periodStart: _startDate,
+        periodEnd: endDate,
+        receivedAmount: _lastReceived,
+        creditAdded: _lastCreditAdded,
+        creditBalance: _lastCreditAdded,
+        memberEmail: _emailController.text.trim(),
+        memberPhone: _whatsappController.text.trim().isNotEmpty
+            ? _whatsappController.text.trim()
+            : _phoneController.text.trim(),
+        gymAddress: gym['address'] as String?,
+        gymPhone: gym['phone'] as String?,
+        gymEmail: gym['email'] as String?,
+        reference: _referenceController.text.trim(),
+      ),
+    );
+  }
+
   void _showSuccessDialog(AppStrings s, String memberId, String fullName, String planName, DateTime endDate, String email) {
     final gymName = ref.read(appRuntimeProvider).session?.name ?? 'GymDesk';
     final wa = _whatsappController.text.trim();
@@ -396,6 +461,15 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               icon: const Icon(LucideIcons.messageCircle, size: 18),
               label: Text(s.text('send_whatsapp_btn')),
             ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                _openReceipt(fullName, planName, memberId, endDate);
+              },
+              icon: const Icon(LucideIcons.receipt, size: 18),
+              label: Text(s.text('view_receipt')),
+            ),
           ],
         ),
         actions: [
@@ -430,6 +504,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     _emergencyNameController.dispose();
     _emergencyPhoneController.dispose();
     _paymentAmountController.dispose();
+    _paymentReceivedController.dispose();
     _referenceController.dispose();
     _pinController.dispose();
     _biometricService.dispose();
@@ -779,9 +854,43 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                   labelText: '${s.text('amount_paid')} (HTG) *',
                   border: const OutlineInputBorder(),
                 ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _paymentReceivedController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: '${s.text('amount_received')} (HTG)',
+                  border: const OutlineInputBorder(),
+                  hintText: _paymentAmountController.text,
+                ),
+                onChanged: (_) => setState(() {}),
               ),
             ),
           ],
+        ),
+        Builder(
+          builder: (context) {
+            final due =
+                double.tryParse(_paymentAmountController.text.replaceAll(',', '.')) ??
+                    0;
+            final got = double.tryParse(
+              _paymentReceivedController.text.replaceAll(',', '.'),
+            );
+            final rest = (got ?? due) - due;
+            if (rest <= 0.004) return const SizedBox.shrink();
+            return CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(s.text('keep_change_as_credit')),
+              subtitle: Text('+${rest.toStringAsFixed(2)} HTG'),
+              value: _keepChangeAsCredit,
+              onChanged: (v) =>
+                  setState(() => _keepChangeAsCredit = v == true),
+            );
+          },
         ),
         const SizedBox(height: 16),
         TextField(

@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../../app/providers.dart';
 import '../../../app/runtime.dart';
 
+import '../../../core/widgets/securgym_background.dart';
+
 class SplashPage extends ConsumerStatefulWidget {
   const SplashPage({super.key});
 
@@ -64,64 +66,70 @@ class _SplashPageState extends ConsumerState<SplashPage> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
+    const brandOrange = Color(0xffff6600);
 
     return Scaffold(
-      backgroundColor: colors.surface,
-      body: Center(
-        child: AnimatedBuilder(
-          animation: _animController,
-          builder: (context, child) => FadeTransition(
-            opacity: _opacityAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Logo ou Icône de marque
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(24),
-                    child: Image.asset(
-                      'assets/images/app_icon.png',
-                      width: 110,
-                      height: 110,
+      backgroundColor: const Color(0xff121417),
+      body: SecurGymBackground(
+        useSafeArea: false,
+        child: Center(
+          child: AnimatedBuilder(
+            animation: _animController,
+            builder: (context, child) => FadeTransition(
+              opacity: _opacityAnimation,
+              child: ScaleTransition(
+                scale: _scaleAnimation,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Anblèm Boukliye SecurGYM
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: brandOrange.withValues(alpha: 0.35),
+                            blurRadius: 36,
+                            spreadRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Image.asset(
+                        'assets/brand/icon_securgym.png',
+                        width: 120,
+                        height: 120,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    // Logo Orizontal SecurGYM
+                    Image.asset(
+                      'assets/brand/logo_horizontal.png',
+                      width: 250,
                       fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => Container(
-                        width: 110,
-                        height: 110,
-                        decoration: BoxDecoration(
-                          color: colors.primary.withAlpha(24),
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Icon(Icons.fitness_center, size: 54, color: colors.primary),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Sécurité et gestion de votre gym',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.8,
+                        color: Color(0xffc5cad4),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  Image.asset(
-                    'assets/images/gymdesk_logo.png',
-                    width: 220,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => Text(
-                      'GymDesk',
-                      style: theme.textTheme.headlineLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        color: colors.primary,
-                        letterSpacing: 1.2,
+                    const SizedBox(height: 36),
+                    const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(brandOrange),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 36),
-                  SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: colors.primary,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

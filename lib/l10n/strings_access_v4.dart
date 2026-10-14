@@ -159,9 +159,9 @@ const stringsAccessV4 = <String, List<String>>{
   'access_granted_short': ['Aksè otorize', 'Accès autorisé', 'Access granted'],
   'access_denied_short': ['Aksè refize', 'Accès refusé', 'Access denied'],
   'agent_offline_banner': [
-    'Agent GymDesk la pa konekte — lanse Lancer_GymDesk.bat sou laptop la.',
-    'Agent GymDesk non connecté — lancez Lancer_GymDesk.bat sur le PC.',
-    'GymDesk agent offline — run Lancer_GymDesk.bat on the PC.',
+    'Ajan SecurGYM la pa konekte — lanse Lancer_SecurGYM.bat sou laptop la.',
+    'Agent SecurGYM non connecté — lancez Lancer_SecurGYM.bat sur le PC.',
+    'SecurGYM agent offline — run Lancer_SecurGYM.bat on the PC.',
   ],
   'terminal_offline_banner': [
     'Tèminal pòt la pa konekte (verifye kab rezo a).',

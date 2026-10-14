@@ -116,7 +116,7 @@ class AccessAgentClient {
     return {
       'success': false,
       'error': 'agent_offline',
-      'message': 'Agent GymDesk (access_agent.exe) injoignable.',
+      'message': 'Agent SecurGYM (access_agent.exe) injoignable.',
     };
   }
 

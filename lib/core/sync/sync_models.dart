@@ -81,7 +81,7 @@ class StaffSession {
       staff['deleted_at'] == null &&
       (isPlatformAdmin ||
           {'active', 'trial', 'grace'}.contains(gym?['status']));
-  String get name => gym?['name'] as String? ?? 'GymDesk';
+  String get name => gym?['name'] as String? ?? 'SecurGYM';
   String get timezone =>
       gym?['timezone'] as String? ?? 'America/Port-au-Prince';
   Json get settings =>

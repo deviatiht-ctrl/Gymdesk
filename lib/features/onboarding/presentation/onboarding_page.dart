@@ -6,6 +6,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../app/providers.dart';
 import '../../../l10n/app_strings.dart';
 
+import '../../../core/widgets/securgym_background.dart';
+
 class OnboardingPage extends ConsumerStatefulWidget {
   const OnboardingPage({super.key});
   @override
@@ -41,100 +43,95 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
   }
 
   Widget _buildSlideVisual(int index, ThemeData theme) {
+    const brandOrange = Color(0xffff6600);
+
     switch (index) {
       case 0:
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Image.asset(
-            'assets/images/onboarding_badges.jpg',
-            height: 220,
-            width: double.infinity,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => _fallbackHero(theme, LucideIcons.idCard, 'GymDesk Badges'),
-          ),
-        );
-      case 1:
-        // Visual Finance & Revenus
+        // Visual 1: SecurGYM — Jesyon & Sekirite Total
         return Container(
-          height: 200,
+          height: 210,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                theme.colorScheme.primaryContainer,
-                theme.colorScheme.surfaceContainerHighest,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: const Color(0xff181b22),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
+            border: Border.all(color: brandOrange.withValues(alpha: 0.3)),
+            boxShadow: [
+              BoxShadow(
+                color: brandOrange.withValues(alpha: 0.15),
+                blurRadius: 24,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Icon(LucideIcons.wallet, color: theme.colorScheme.primary, size: 28),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Revenu Mensuel & Annuel',
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withAlpha(40),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      '+24% ce mois',
-                      style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                  ),
-                ],
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: brandOrange.withValues(alpha: 0.15),
+                ),
+                child: Image.asset(
+                  'assets/brand/icon_securgym.png',
+                  width: 58,
+                  height: 58,
+                  fit: BoxFit.contain,
+                ),
               ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _statCol('Mois en cours', '250,000 HTG', LucideIcons.trendingUp, theme),
-                  Container(width: 1, height: 40, color: theme.colorScheme.outlineVariant),
-                  _statCol('Cumul Annuel', '1,850,000 HTG', LucideIcons.calendarCheck, theme),
-                ],
+              const SizedBox(height: 12),
+              Image.asset(
+                'assets/brand/logo_horizontal.png',
+                width: 170,
+                fit: BoxFit.contain,
               ),
+              const SizedBox(height: 12),
               Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(LucideIcons.shieldCheck, size: 16, color: theme.colorScheme.outline),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Suivi en temps réel des abonnements actifs',
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-                  ),
+                  _badgeTag(LucideIcons.shieldCheck, 'Sekirite Avanse', brandOrange),
+                  const SizedBox(width: 8),
+                  _badgeTag(LucideIcons.monitorSmartphone, 'PC · Tablèt · Telefòn', const Color(0xff9ca3af)),
                 ],
               ),
             ],
           ),
         );
-      case 2:
-        // Visual Pointage QR + PIN
+
+      case 1:
+        // Visual 2: Kontwòl Aksè Byometrik (Anprent Dijital)
         return Container(
-          height: 200,
+          height: 210,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
+            color: const Color(0xff181b22),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: Row(
             children: [
+              // Scanner Byometrik
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: brandOrange.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: brandOrange, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: brandOrange.withValues(alpha: 0.3),
+                      blurRadius: 16,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(LucideIcons.fingerprint, size: 54, color: brandOrange),
+                ),
+              ),
+              const SizedBox(width: 18),
               Expanded(
-                flex: 5,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -142,94 +139,210 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withAlpha(30),
+                        color: Colors.green.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.withValues(alpha: 0.5)),
                       ),
-                      child: Text(
-                        '✓ SCAN VALIDÉ',
-                        style: TextStyle(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                        ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.check, size: 14, color: Colors.green),
+                          SizedBox(width: 4),
+                          Text(
+                            'ANPRENT VALIDE · 0.2s',
+                            style: TextStyle(
+                              color: Colors.green,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 10),
-                    Text(
-                      '« Bienvenue, Marc ! »',
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    const Text(
+                      '« Aksè Pòt Debloke »',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      'Code PIN vérifié · Entrée #1 aujourd’hui',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+                    const Text(
+                      'Lektè USB Byometrik · San kat pou pèdi',
+                      style: TextStyle(color: Color(0xff9ca3af), fontSize: 12),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                width: 90,
-                height: 90,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: theme.colorScheme.primary, width: 2),
-                ),
-                child: Icon(LucideIcons.qrCode, size: 54, color: theme.colorScheme.primary),
               ),
             ],
           ),
         );
-      case 3:
-      default:
-        // Visual Activation & Photo ID
+
+      case 2:
+        // Visual 3: Jesyon Manm & Notifikasyon Imèl Otomatik
         return Container(
-          height: 200,
+          height: 210,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest,
+            color: const Color(0xff181b22),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 24,
+                    backgroundColor: brandOrange.withValues(alpha: 0.2),
+                    child: const Icon(LucideIcons.user, color: brandOrange, size: 24),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Marc Jean-Baptiste',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Abònman Aktif · Fòmil VIP 30 Jou',
+                          style: TextStyle(color: Color(0xff9ca3af), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'ACTIF',
+                      style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 10),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(color: Color(0xff2a2e39), height: 24),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: brandOrange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(LucideIcons.mailCheck, size: 20, color: brandOrange),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Notifikasyon Imèl Otomatik',
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Resi peman PDF & rapèl voye otomatikman bay manm lan',
+                          style: TextStyle(color: Color(0xff9ca3af), fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+
+      case 3:
+      default:
+        // Visual 4: Suivi Finans & Resi Sekirize SecurGYM
+        return Container(
+          height: 210,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xff181b22),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           ),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 44,
-                backgroundColor: theme.colorScheme.primary.withAlpha(30),
-                child: Icon(LucideIcons.camera, size: 40, color: theme.colorScheme.primary),
-              ),
-              const SizedBox(width: 20),
               Expanded(
+                flex: 6,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Photo Instantanée',
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Capturez le visage du membre, attribuez le badge et exportez vos lots sur clé USB.',
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-                    ),
-                    const SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(LucideIcons.usb, size: 16, color: theme.colorScheme.primary),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Export Planche A4 / USB',
-                          style: TextStyle(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
+                        const Icon(LucideIcons.wallet, color: brandOrange, size: 20),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Revni Mwa Sa a',
+                          style: TextStyle(color: Color(0xff9ca3af), fontSize: 12),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            '+24%',
+                            style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 11),
                           ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      '250,000 HTG',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(LucideIcons.fileCheck2, size: 14, color: brandOrange),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Resi PDF ak Kòd QR SecurGYM',
+                          style: TextStyle(color: Color(0xff9ca3af), fontSize: 11),
+                        ),
+                      ],
+                    ),
                   ],
+                ),
+              ),
+              const SizedBox(width: 14),
+              // Mini QR Preview
+              Container(
+                width: 80,
+                height: 80,
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 10,
+                    ),
+                  ],
+                ),
+                child: Image.asset(
+                  'assets/brand/securegymqr.png',
+                  fit: BoxFit.contain,
                 ),
               ),
             ],
@@ -238,40 +351,21 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
     }
   }
 
-  Widget _statCol(String title, String value, IconData icon, ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 14, color: theme.colorScheme.primary),
-            const SizedBox(width: 4),
-            Text(title, style: theme.textTheme.labelSmall),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(value, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-
-  Widget _fallbackHero(ThemeData theme, IconData icon, String label) {
+  Widget _badgeTag(IconData icon, String text, Color color) {
     return Container(
-      height: 200,
-      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(20),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 48, color: theme.colorScheme.primary),
-            const SizedBox(height: 10),
-            Text(label, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-          ],
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 6),
+          Text(text, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+        ],
       ),
     );
   }
@@ -279,6 +373,10 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
   void _showLanguagePicker() {
     showModalBottomSheet<void>(
       context: context,
+      backgroundColor: const Color(0xff1a1d24),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) {
         final current = ref.watch(appLanguageProvider).languageCode;
         return SafeArea(
@@ -289,8 +387,8 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
               children: [
                 ListTile(
                   leading: const Text('🇭🇹', style: TextStyle(fontSize: 24)),
-                  title: const Text('Kreyòl Ayisyen'),
-                  trailing: current == 'ht' ? const Icon(Icons.check, color: Colors.green) : null,
+                  title: const Text('Kreyòl Ayisyen', style: TextStyle(color: Colors.white)),
+                  trailing: current == 'ht' ? const Icon(Icons.check, color: Color(0xffff6600)) : null,
                   onTap: () {
                     ref.read(appLanguageProvider.notifier).change('ht');
                     Navigator.pop(context);
@@ -298,8 +396,8 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                 ),
                 ListTile(
                   leading: const Text('🇫🇷', style: TextStyle(fontSize: 24)),
-                  title: const Text('Français'),
-                  trailing: current == 'fr' ? const Icon(Icons.check, color: Colors.green) : null,
+                  title: const Text('Français', style: TextStyle(color: Colors.white)),
+                  trailing: current == 'fr' ? const Icon(Icons.check, color: Color(0xffff6600)) : null,
                   onTap: () {
                     ref.read(appLanguageProvider.notifier).change('fr');
                     Navigator.pop(context);
@@ -307,8 +405,8 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                 ),
                 ListTile(
                   leading: const Text('🇺🇸', style: TextStyle(fontSize: 24)),
-                  title: const Text('English'),
-                  trailing: current == 'en' ? const Icon(Icons.check, color: Colors.green) : null,
+                  title: const Text('English', style: TextStyle(color: Colors.white)),
+                  trailing: current == 'en' ? const Icon(Icons.check, color: Color(0xffff6600)) : null,
                   onTap: () {
                     ref.read(appLanguageProvider.notifier).change('en');
                     Navigator.pop(context);
@@ -328,14 +426,29 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
     final theme = Theme.of(context);
     final last = _index == _titles.length - 1;
     final currentLang = ref.watch(appLanguageProvider).languageCode;
+    const brandOrange = Color(0xffff6600);
 
     return Scaffold(
-      body: SafeArea(
+      backgroundColor: const Color(0xff121417),
+      body: SecurGymBackground(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 620),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              decoration: BoxDecoration(
+                color: const Color(0xff1a1d24).withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    blurRadius: 32,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
               child: Column(
                 children: [
                   // En-tête avec changement de langue et passer
@@ -343,19 +456,21 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       ActionChip(
+                        backgroundColor: const Color(0xff222630),
+                        side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
                         avatar: Text(
                           currentLang == 'ht' ? '🇭🇹' : currentLang == 'fr' ? '🇫🇷' : '🇺🇸',
                           style: const TextStyle(fontSize: 16),
                         ),
                         label: Text(
                           currentLang == 'ht' ? 'Kreyòl' : currentLang == 'fr' ? 'Français' : 'English',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                         ),
                         onPressed: _showLanguagePicker,
                       ),
                       TextButton(
                         onPressed: () => _finish(signup: false),
-                        child: Text(s.text('skip')),
+                        child: Text(s.text('skip'), style: const TextStyle(color: Color(0xff9ca3af))),
                       ),
                     ],
                   ),
@@ -369,20 +484,23 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 12),
                             _buildSlideVisual(i, theme),
-                            const SizedBox(height: 28),
+                            const SizedBox(height: 24),
                             Text(
                               s.text(_titles[i]),
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 12),
                             Text(
                               s.text(_bodies[i]),
                               textAlign: TextAlign.center,
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: theme.colorScheme.outline,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xff9ca3af),
                                 height: 1.5,
                               ),
                             ),
@@ -401,9 +519,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                         width: i == _index ? 28 : 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: i == _index
-                              ? theme.colorScheme.primary
-                              : theme.colorScheme.outlineVariant,
+                          color: i == _index ? brandOrange : const Color(0xff374151),
                           borderRadius: BorderRadius.circular(4),
                         ),
                       ),
@@ -415,12 +531,24 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: brandOrange,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size.fromHeight(50),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
                           onPressed: () => _finish(signup: true),
                           icon: const Icon(LucideIcons.sparkles),
-                          label: Text(s.text('create_gym_trial')),
+                          label: Text(s.text('create_gym_trial'), style: const TextStyle(fontWeight: FontWeight.bold)),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 10),
                         OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Color(0xff374151)),
+                            minimumSize: const Size.fromHeight(48),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
                           onPressed: () => _finish(signup: false),
                           child: Text(s.text('i_have_account')),
                         ),
@@ -429,13 +557,18 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                   else
                     SizedBox(
                       width: double.infinity,
-                      height: 48,
+                      height: 50,
                       child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: brandOrange,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
                         onPressed: () => _controller.nextPage(
                           duration: const Duration(milliseconds: 250),
                           curve: Curves.easeOut,
                         ),
-                        child: Text(s.text('next')),
+                        child: Text(s.text('next'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                       ),
                     ),
                   const SizedBox(height: 8),

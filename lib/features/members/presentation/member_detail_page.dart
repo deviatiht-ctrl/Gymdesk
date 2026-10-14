@@ -12,7 +12,12 @@ import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../badges/data/badges_repository.dart';
+import 'package:uuid/uuid.dart';
+
+import '../../payments/data/receipt_pdf.dart';
 import '../../payments/domain/payment.dart';
+import '../../payments/presentation/collect_payment_dialog.dart';
+import '../../payments/presentation/receipt_sheet.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
 import '../../subscriptions/data/subscriptions_repository.dart';
@@ -258,7 +263,9 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     final paid = TextEditingController(
       text: plan?.price.toStringAsFixed(2) ?? '',
     );
+    final received = TextEditingController();
     String method = 'cash';
+    var keepCredit = false;
     DateTime start = DateTime.now();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -318,6 +325,38 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                     decoration: InputDecoration(
                       labelText: s.text('paid_amount'),
                     ),
+                    onChanged: (_) => setDialog(() {}),
+                  ),
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: received,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: s.text('amount_received'),
+                      hintText: paid.text,
+                    ),
+                    onChanged: (_) => setDialog(() {}),
+                  ),
+                  Builder(
+                    builder: (context) {
+                      final due =
+                          double.tryParse(paid.text.replaceAll(',', '.')) ?? 0;
+                      final got = double.tryParse(
+                        received.text.replaceAll(',', '.'),
+                      );
+                      final rest = (got ?? due) - due;
+                      if (rest <= 0.004) return const SizedBox.shrink();
+                      return CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(s.text('keep_change_as_credit')),
+                        subtitle: Text('+${rest.toStringAsFixed(2)}'),
+                        value: keepCredit,
+                        onChanged: (v) =>
+                            setDialog(() => keepCredit = v == true),
+                      );
+                    },
                   ),
                   const SizedBox(height: 14),
                   DropdownButtonFormField<String>(
@@ -356,33 +395,42 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     );
     if (confirmed != true || plan == null) {
       paid.dispose();
+      received.dispose();
       return;
     }
     final amount = double.tryParse(paid.text.replaceAll(',', '.')) ?? 0;
+    final got = double.tryParse(received.text.replaceAll(',', '.')) ?? amount;
     final selected = plan!;
     paid.dispose();
+    received.dispose();
     if (amount < 0 || amount > selected.price) {
       _error('invalid_record');
       return;
     }
-    await _run(
-      () => _members
-          .renew(
-            member,
-            selected,
-            start: start,
-            changedAt: _now,
-            payment: amount > 0
-                ? PaymentCommand(
-                    memberId: member.id,
-                    amount: amount,
-                    currency: selected.currency,
-                    method: method,
-                  )
-                : null,
+    final command = amount > 0
+        ? PaymentCommand(
+            id: const Uuid().v4(),
+            memberId: member.id,
+            amount: amount,
+            currency: selected.currency,
+            method: method,
+            receivedAmount: got,
+            keepChangeAsCredit: keepCredit,
           )
-          .then((_) {}),
-    );
+        : null;
+    GymSubscription? created;
+    await _run(() async {
+      created = await _members.renew(
+        member,
+        selected,
+        start: start,
+        changedAt: _now,
+        payment: command,
+      );
+    });
+    if (mounted && command != null) {
+      await _openReceipt(member, created, command);
+    }
   }
 
   Future<void> _collect(Member member, GymSubscription subscription) async {
@@ -394,77 +442,116 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
         .fold<double>(0, (total, payment) => total + payment.amount);
     final remaining = subscription.remainingAfter(paid);
     if (remaining <= 0) return;
-    final amount = TextEditingController(text: remaining.toStringAsFixed(2));
-    String method = 'cash';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
-          title: Text(s.text('collect_payment')),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: amount,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: InputDecoration(labelText: s.text('amount')),
-                ),
-                const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  initialValue: method,
-                  decoration: InputDecoration(
-                    labelText: s.text('payment_method'),
-                  ),
-                  items: ['cash', 'moncash', 'natcash', 'bank', 'other']
-                      .map(
-                        (m) => DropdownMenuItem(
-                          value: m,
-                          child: Text(s.text('method_$m')),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) => method = v ?? 'cash',
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(s.text('cancel')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(s.text('save')),
-            ),
-          ],
-        ),
+    final result = await showCollectPaymentDialog(
+      context,
+      title: '${s.text('collect_payment')} · ${member.fullName}',
+      due: remaining,
+      balance: member.creditBalance,
+    );
+    if (result == null || !mounted) return;
+    final command = result.command(
+      id: const Uuid().v4(),
+      memberId: member.id,
+      subscriptionId: subscription.id,
+      currency:
+          ref.read(appRuntimeProvider).session?.gym?['currency']
+              as String? ??
+          'HTG',
+    );
+    await _run(
+      () => _members
+          .collectPayment(subscription, command, changedAt: _now)
+          .then((_) {}),
+    );
+    if (mounted) {
+      await _openReceipt(member, subscription, command);
+    }
+  }
+
+  /// Louvri dyalòg resi a apre yon peman (download / print / email / WhatsApp).
+  Future<void> _openReceipt(
+    Member member,
+    GymSubscription? subscription,
+    PaymentCommand command,
+  ) async {
+    final s = AppStrings.of(context);
+    final gym =
+        ref.read(appRuntimeProvider).session?.gym ?? const <String, dynamic>{};
+    GymPlan? plan;
+    for (final p in await _plans.watch().first) {
+      if (p.id == subscription?.planId) plan = p;
+    }
+    if (!mounted) return;
+    await showReceiptSheet(
+      context,
+      ref,
+      ReceiptData(
+        paymentId: command.id ?? '',
+        memberName: member.fullName,
+        memberNumber: member.memberNumber,
+        planName: plan?.name ?? s.text('plan'),
+        amount: command.amount,
+        currency: command.currency,
+        method: command.method,
+        paidAt: _now,
+        gymName: gym['name'] as String? ?? 'GymDesk',
+        accentColor: gym['accent_color'] as String? ?? '#0F766E',
+        periodStart: subscription?.startDate,
+        periodEnd: subscription?.endDate,
+        receivedAmount: command.effectiveReceived,
+        creditUsed: command.creditUsed,
+        creditAdded: command.creditAdded,
+        creditBalance:
+            member.creditBalance + command.creditAdded - command.creditUsed,
+        memberEmail: member.email,
+        memberPhone: member.whatsapp ?? member.phone,
+        gymAddress: gym['address'] as String?,
+        gymPhone: gym['phone'] as String?,
+        gymEmail: gym['email'] as String?,
       ),
     );
-    if (confirmed != true) {
-      amount.dispose();
-      return;
+  }
+
+  /// Re-ouvri resi a pou yon peman nan istorik manm nan.
+  Future<void> _receiptForPayment(Member member, GymPayment payment) async {
+    final s = AppStrings.of(context);
+    final gym =
+        ref.read(appRuntimeProvider).session?.gym ?? const <String, dynamic>{};
+    GymSubscription? subscription;
+    for (final sub in await _subscriptions.watchForMember(member.id).first) {
+      if (sub.id == payment.subscriptionId) subscription = sub;
     }
-    final value = double.tryParse(amount.text.replaceAll(',', '.')) ?? 0;
-    amount.dispose();
-    await _run(
-      () => _members.collectPayment(
-        subscription,
-        PaymentCommand(
-          memberId: member.id,
-          subscriptionId: subscription.id,
-          amount: value,
-          currency:
-              ref.read(appRuntimeProvider).session?.gym?['currency']
-                  as String? ??
-              'HTG',
-          method: method,
-        ),
-        changedAt: _now,
+    GymPlan? plan;
+    for (final p in await _plans.watch().first) {
+      if (p.id == subscription?.planId) plan = p;
+    }
+    if (!mounted) return;
+    await showReceiptSheet(
+      context,
+      ref,
+      ReceiptData(
+        paymentId: payment.id,
+        memberName: member.fullName,
+        memberNumber: member.memberNumber,
+        planName: plan?.name ?? s.text('plan'),
+        amount: payment.amount,
+        currency: payment.currency,
+        method: payment.method,
+        paidAt: payment.paidAt,
+        gymName: gym['name'] as String? ?? 'GymDesk',
+        accentColor: gym['accent_color'] as String? ?? '#0F766E',
+        periodStart: subscription?.startDate,
+        periodEnd: subscription?.endDate,
+        receivedAmount: payment.receivedAmount,
+        creditUsed: payment.creditUsed,
+        creditAdded: payment.creditAmount,
+        creditBalance: member.creditBalance,
+        memberEmail: member.email,
+        memberPhone: member.whatsapp ?? member.phone,
+        gymAddress: gym['address'] as String?,
+        gymPhone: gym['phone'] as String?,
+        gymEmail: gym['email'] as String?,
+        reference: payment.reference,
       ),
     );
   }
@@ -878,6 +965,15 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                     ),
                                     subtitle: Text(
                                       '${DateFormat.yMMMd(locale).add_Hm().format(payment.paidAt.toLocal())}${payment.reference == null ? '' : ' · ${payment.reference}'}',
+                                    ),
+                                    trailing: IconButton(
+                                      tooltip: s.text('view_receipt'),
+                                      icon: const Icon(
+                                        LucideIcons.receipt,
+                                        size: 18,
+                                      ),
+                                      onPressed: () =>
+                                          _receiptForPayment(member, payment),
                                     ),
                                   ),
                               ],

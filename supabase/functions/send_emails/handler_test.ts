@@ -15,6 +15,7 @@ class Gateway implements EmailGateway {
   claim(): Promise<EmailJob | null> { return Promise.resolve(this.claims++ === 0 ? job : null); }
   finish(_job: EmailJob, result: string): Promise<void> { this.results.push(result); return Promise.resolve(); }
   logo(): Promise<string | null> { return Promise.resolve(null); }
+  receipt(): Promise<string | null> { return Promise.resolve(null); }
 }
 const config = { workerToken: 'test-worker-token', apiKey: 'test-api-key', senderEmail: 'noreply@example.invalid', senderName: 'GymDesk' };
 const request = (token = config.workerToken) => new Request('https://example.invalid/send_emails', { method: 'POST', headers: { 'x-email-worker-token': token } });
@@ -94,4 +95,24 @@ Deno.test('renewal reminders follow the gym member language; other emails stay F
   assert(fr.subject.includes('7 jours') && fr.html.includes('lang="fr"'));
   const welcome = renderEmail({ ...job, payload: { ...job.payload, language: 'ht' } }, null);
   assert(welcome.html.includes('lang="fr"') && welcome.text.includes('Cordialement'));
+});
+Deno.test('payment receipt is localized and carries the PDF download button', () => {
+  const receipt = (language: string) => renderEmail({
+    ...job, kind: 'payment_receipt',
+    payload: {
+      ...job.payload, language, receipt_no: 'AB12CD34', amount: 80,
+      received_amount: 100, credit_amount: 20, credit_balance: 20,
+      method: 'cash', paid_at: '2026-10-14',
+    },
+  }, null, 'https://example.invalid/receipt.pdf');
+  const ht = receipt('ht');
+  assert(ht.subject.includes('Resi peman') && ht.html.includes('lang="ht"'));
+  assert(ht.html.includes('Telechaje resi a (PDF)') && ht.html.includes('https://example.invalid/receipt.pdf'));
+  assert(ht.text.includes('https://example.invalid/receipt.pdf'));
+  const en = receipt('en');
+  assert(en.subject.includes('receipt #AB12CD34') && en.html.includes('Download receipt (PDF)'));
+  const fr = receipt('fr');
+  assert(fr.subject.includes('Reçu de paiement') && fr.html.includes('Télécharger le reçu'));
+  const noLink = renderEmail({ ...job, kind: 'payment_receipt', payload: { ...job.payload, language: 'en', method: 'cash', paid_at: '2026-10-14' } }, null, null);
+  assert(!noLink.html.includes('Download receipt'));
 });

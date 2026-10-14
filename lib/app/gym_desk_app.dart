@@ -52,7 +52,7 @@ class _GymDeskAppState extends ConsumerState<GymDeskApp> {
     return ListenableBuilder(
       listenable: _runtime,
       builder: (context, _) => MaterialApp.router(
-        title: 'GymDesk',
+        title: 'SecurGYM',
         debugShowCheckedModeBanner: false,
         routerConfig: _router,
         locale: locale,

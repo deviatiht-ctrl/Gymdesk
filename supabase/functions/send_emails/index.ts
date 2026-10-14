@@ -21,6 +21,16 @@ class EmailGateway extends SupabaseGateway {
     if (!result.signedURL?.startsWith('/object/sign/gym-assets/')) throw new Error('logo_unavailable');
     return `${url}/storage/v1${result.signedURL}`;
   }
+  async receipt(job: EmailJob) {
+    const path = job.payload.receipt_path;
+    if (typeof path !== 'string' || path === '') return null;
+    if (!path.startsWith(`${job.gym_id}/receipts/`) || path.includes('..')) throw new Error('receipt_invalid');
+    const result = await this.request(`/storage/v1/object/sign/receipts/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      body: { expiresIn: 60 * 60 * 24 * 365 },
+    }) as { signedURL?: string };
+    if (!result.signedURL?.startsWith('/object/sign/receipts/')) throw new Error('receipt_unavailable');
+    return `${url}/storage/v1${result.signedURL}`;
+  }
   async providerConfig() {
     try {
       return await this.rpc('email_worker_config', {}) as { api_key?: string; sender_email?: string; sender_name?: string } | null;

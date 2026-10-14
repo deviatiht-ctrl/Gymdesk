@@ -1,0 +1,80 @@
+/// Tradiksyon resi peman + balans manm (kredi). [ht, fr, en].
+const stringsReceipts = <String, List<String>>{
+  'receipt': ['Resi', 'Reçu', 'Receipt'],
+  'receipt_paid': ['PEYE', 'PAYÉ', 'PAID'],
+  'receipt_plan': ['Fòmil', 'Formule', 'Plan'],
+  'receipt_period': ['Peryòd', 'Période', 'Period'],
+  'receipt_amount': ['Montan peman', 'Montant du paiement', 'Payment amount'],
+  'receipt_received': ['Montan li te bay', 'Montant remis', 'Amount received'],
+  'receipt_credited': [
+    'Mete sou balans',
+    'Crédité sur la balance',
+    'Credited to balance',
+  ],
+  'receipt_paid_by_balance': [
+    'Peye ak balans',
+    'Réglé avec la balance',
+    'Paid with balance',
+  ],
+  'receipt_change': ['Monnay rann', 'Monnaie rendue', 'Change returned'],
+  'receipt_balance': ['Balans manm nan', 'Balance du membre', 'Member balance'],
+  'receipt_reference': ['Referans', 'Référence', 'Reference'],
+  'receipt_signature': ['Siyati', 'Signature', 'Signature'],
+  'receipt_thanks': [
+    'Mèsi poutèt konfyans w lan!',
+    'Merci de votre confiance !',
+    'Thank you for your trust!',
+  ],
+  'receipt_download': ['Telechaje PDF', 'Télécharger le PDF', 'Download PDF'],
+  'receipt_print': ['Enprime', 'Imprimer', 'Print'],
+  'receipt_send_email': ['Voye pa imèl', 'Envoyer par email', 'Send by email'],
+  'receipt_send_whatsapp': [
+    'Voye pa WhatsApp',
+    'Envoyer par WhatsApp',
+    'Send via WhatsApp',
+  ],
+  'receipt_email_queued': [
+    'Resi a ap voye pa imèl.',
+    'Le reçu part par email.',
+    'The receipt is being emailed.',
+  ],
+  'receipt_no_email': [
+    'Manm nan pa gen imèl — telechaje oswa voye l pa WhatsApp.',
+    'Le membre n’a pas d’email — téléchargez ou envoyez par WhatsApp.',
+    'The member has no email — download or send via WhatsApp.',
+  ],
+  'receipt_no_phone': [
+    'Manm nan pa gen nimewo WhatsApp.',
+    'Le membre n’a pas de numéro WhatsApp.',
+    'The member has no WhatsApp number.',
+  ],
+  'receipt_send_failed': [
+    'Voye a pa mache — verifye entènèt la epi eseye ankò.',
+    'L’envoi a échoué — vérifiez la connexion et réessayez.',
+    'Sending failed — check the connection and retry.',
+  ],
+  'amount_received': ['Montan resi', 'Montant remis', 'Amount received'],
+  'keep_change_as_credit': [
+    'Kite rès la kòm balans',
+    'Garder le reste comme balance',
+    'Keep the rest as balance',
+  ],
+  'use_balance': ['Itilize balans lan', 'Utiliser la balance', 'Use balance'],
+  'balance_available': [
+    'Balans disponib',
+    'Balance disponible',
+    'Available balance',
+  ],
+  'method_credit': ['Balans', 'Balance', 'Balance'],
+  'insufficient_credit': [
+    'Balans manm nan pa ase.',
+    'La balance du membre est insuffisante.',
+    'The member’s balance is insufficient.',
+  ],
+  'view_receipt': ['Wè resi a', 'Voir le reçu', 'View receipt'],
+  'receipt_auto_email_hint': [
+    'Resi a voye otomatikman si manm nan gen yon imèl.',
+    'Le reçu est envoyé automatiquement si le membre a un email.',
+    'The receipt is emailed automatically if the member has an email.',
+  ],
+};

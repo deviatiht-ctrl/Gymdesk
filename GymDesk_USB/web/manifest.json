@@ -1,11 +1,11 @@
 {
-    "name": "GymDesk",
-    "short_name": "GymDesk",
+    "name": "SecurGYM",
+    "short_name": "SecurGYM",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "Gestion de salles de sport, hors ligne et synchronisée.",
+    "background_color": "#121417",
+    "theme_color": "#FF6600",
+    "description": "SecurGYM — Sécurité et gestion de votre gym.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

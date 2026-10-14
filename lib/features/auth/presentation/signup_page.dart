@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/widgets/securgym_background.dart';
 import '../../../l10n/app_strings.dart';
 import '../../gyms/data/gyms_repository.dart';
 
@@ -142,22 +143,45 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     final theme = Theme.of(context);
     if (_done) return _success(s, theme);
     return Scaffold(
+      backgroundColor: const Color(0xff121417),
       appBar: AppBar(
-        title: Text(s.text('signup_title')),
+        backgroundColor: const Color(0xff1a1d24),
+        elevation: 0,
+        title: Image.asset(
+          'assets/brand/logo_horizontal.png',
+          height: 32,
+          fit: BoxFit.contain,
+        ),
+        centerTitle: true,
         leading: IconButton(
-          icon: const Icon(LucideIcons.arrowLeft),
+          icon: const Icon(LucideIcons.arrowLeft, color: Colors.white),
           onPressed: () => context.go('/login'),
         ),
       ),
-      body: SafeArea(
+      body: SecurGymBackground(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 680),
-            child: ListView(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               padding: const EdgeInsets.all(24),
-              children: [
-                _steps(theme),
-                const SizedBox(height: 24),
+              decoration: BoxDecoration(
+                color: const Color(0xff1a1d24).withValues(alpha: 0.94),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    blurRadius: 32,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  _steps(theme),
+                  const SizedBox(height: 24),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
@@ -202,7 +226,8 @@ class _SignupPageState extends ConsumerState<SignupPage> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _steps(ThemeData theme) => Row(
@@ -431,24 +456,41 @@ class _SignupPageState extends ConsumerState<SignupPage> {
   );
 
   Widget _success(AppStrings s, ThemeData theme) => Scaffold(
-    body: SafeArea(
+    backgroundColor: const Color(0xff121417),
+    body: SecurGymBackground(
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: const Color(0xff1a1d24).withValues(alpha: 0.94),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.4),
+                  blurRadius: 32,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   LucideIcons.circleCheck,
                   size: 72,
-                  color: theme.colorScheme.primary,
+                  color: Color(0xffff6600),
                 ),
                 const SizedBox(height: 24),
                 Text(
                   s.text('signup_done_title'),
-                  style: theme.textTheme.headlineMedium,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
@@ -456,13 +498,22 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                   s.text('signup_done_body'),
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(
-                    color: theme.colorScheme.outline,
+                    color: const Color(0xff9ca3af),
                   ),
                 ),
                 const SizedBox(height: 32),
-                FilledButton(
-                  onPressed: () => context.go('/login'),
-                  child: Text(s.text('sign_in')),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xffff6600),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => context.go('/login'),
+                    child: Text(s.text('sign_in'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
                 ),
               ],
             ),

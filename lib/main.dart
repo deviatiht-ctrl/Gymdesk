@@ -68,7 +68,7 @@ class _BootstrapState extends State<_Bootstrap> {
         return GymDeskApp(passwordRecovery: _passwordRecovery);
       }
       return MaterialApp(
-        title: 'GymDesk',
+        title: 'SecurGYM',
         debugShowCheckedModeBanner: false,
         theme: gymTheme(null),
         locale: const Locale('ht'),

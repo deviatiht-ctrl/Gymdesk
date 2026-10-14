@@ -5,11 +5,14 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
+import '../../payments/data/receipt_pdf.dart';
 import '../../payments/domain/payment.dart';
+import '../../payments/presentation/receipt_sheet.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
@@ -39,6 +42,7 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
   DateTime _startDate = DateTime.now();
   GymPlan? _plan;
   String _method = 'cash';
+  bool _keepChangeAsCredit = false;
   bool _withSubscription = true;
   bool _busy = false;
   bool _loaded = false;
@@ -67,6 +71,7 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
       'guardian_name',
       'notes',
       'paid_amount',
+      'received_amount',
     ]) {
       _fields[key] = TextEditingController();
     }
@@ -293,11 +298,19 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
           status: amount >= plan.registrationPrice ? 'active' : 'pending',
         );
         if (amount > 0) {
+          final received =
+              double.tryParse(
+                _fields['received_amount']!.text.replaceAll(',', '.'),
+              ) ??
+              amount;
           payment = PaymentCommand(
+            id: const Uuid().v4(),
             memberId: '',
             amount: amount,
             currency: plan.currency,
             method: _method,
+            receivedAmount: received,
+            keepChangeAsCredit: _keepChangeAsCredit,
           );
         }
       }
@@ -309,6 +322,38 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
       );
       await runtime.sync?.synchronize();
       await HapticFeedback.lightImpact();
+      if (mounted && payment != null && subscription != null) {
+        final gym = runtime.session?.gym ?? const <String, dynamic>{};
+        await showReceiptSheet(
+          context,
+          ref,
+          ReceiptData(
+            paymentId: payment.id!,
+            memberName:
+                '${draft.firstName.trim()} ${draft.lastName.trim()}'.trim(),
+            memberNumber: result.memberNumber,
+            planName: _plan?.name ?? s.text('plan'),
+            amount: payment.amount,
+            currency: payment.currency,
+            method: payment.method,
+            paidAt: changedAt,
+            gymName: gym['name'] as String? ?? 'GymDesk',
+            accentColor: gym['accent_color'] as String? ?? '#0F766E',
+            periodStart: subscription.startDate,
+            periodEnd: subscription.endDate,
+            receivedAmount: payment.effectiveReceived,
+            creditAdded: payment.creditAdded,
+            creditBalance: payment.creditAdded,
+            memberEmail: draft.email,
+            memberPhone: draft.whatsapp.isNotEmpty
+                ? draft.whatsapp
+                : draft.phone,
+            gymAddress: gym['address'] as String?,
+            gymPhone: gym['phone'] as String?,
+            gymEmail: gym['email'] as String?,
+          ),
+        );
+      }
       if (mounted) context.go('/members/${result.memberId}');
     } on MemberFailure catch (e) {
       if (mounted) {
@@ -628,6 +673,7 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
                                             decimal: true,
                                           ),
                                       decoration: _decoration(s, 'paid_amount'),
+                                      onChanged: (_) => setState(() {}),
                                       validator: (v) =>
                                           !_withSubscription ||
                                               (double.tryParse(
@@ -640,6 +686,20 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
                                                   0
                                           ? null
                                           : s.text('invalid_record'),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 220,
+                                    child: TextFormField(
+                                      controller: _fields['received_amount'],
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      decoration: InputDecoration(
+                                        labelText: s.text('amount_received'),
+                                      ),
+                                      onChanged: (_) => setState(() {}),
                                     ),
                                   ),
                                   SizedBox(
@@ -680,6 +740,34 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
                           );
                         },
                       ),
+                    if (_withSubscription)
+                      Builder(
+                        builder: (context) {
+                          final due =
+                            double.tryParse(
+                              _fields['paid_amount']!.text
+                                  .replaceAll(',', '.'),
+                            ) ??
+                            0;
+                        final got = double.tryParse(
+                          _fields['received_amount']!.text
+                              .replaceAll(',', '.'),
+                        );
+                        final rest = (got ?? due) - due;
+                        if (rest <= 0.004) {
+                          return const SizedBox.shrink();
+                        }
+                        return CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(s.text('keep_change_as_credit')),
+                          subtitle: Text('+${rest.toStringAsFixed(2)}'),
+                          value: _keepChangeAsCredit,
+                          onChanged: (v) => setState(
+                            () => _keepChangeAsCredit = v == true,
+                          ),
+                        );
+                      },
+                    ),
                   ],
                   const SizedBox(height: 28),
                   Wrap(
