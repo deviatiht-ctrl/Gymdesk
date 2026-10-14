@@ -29,11 +29,18 @@ pause
 exit /b 1
 
 :agent_ready
-echo [2/2] Ouverture de l'application SecurGYM (Mode Bureau Dedie)...
+echo [2/2] Ouverture de l'application SecurGYM...
 timeout /t 1 /nobreak >nul
 
 set "DATA_DIR=%~dp0data\profile"
 
+rem --- Application native Windows (icone SecurGYM, pas de navigateur) ---
+if exist "%~dp0app\SecurGYM.exe" (
+    start "" "%~dp0app\SecurGYM.exe"
+    goto :launched
+)
+
+rem --- Sinon : navigateur en mode app ---
 if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
     start "" "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --app=http://127.0.0.1:47811 --user-data-dir="%DATA_DIR%" --no-first-run --window-size=1280,800
 ) else if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" (
@@ -46,6 +53,7 @@ if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
     start "" http://127.0.0.1:47811
 )
 
+:launched
 echo.
 echo SecurGYM est lance !
 echo Gardez cette fenetre reduite ou fermez-la.
