@@ -123,7 +123,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
     final member = decision.person?.entry?.member;
     if (member != null) {
-      await _evaluateMemberAccess(member);
+      await _evaluateMemberAccess(member, recordToCloud: false);
     } else if (decision.outcome == AccessOutcome.legacy) {
       if (mounted) {
         setState(() {
@@ -150,11 +150,12 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   Future<void> _handleRealtimeAccessEvent(Map<String, dynamic> row) async {
     final memberId = row['member_id']?.toString();
     if (memberId == null) return;
+    if (_matchedMember?.id == memberId && _status != AccessStatus.none) return;
     try {
       final entries = await _membersRepo.watch().first;
       final entry = entries.where((e) => e.member.id == memberId).firstOrNull;
       if (entry != null && mounted) {
-        await _evaluateMemberAccess(entry.member);
+        await _evaluateMemberAccess(entry.member, recordToCloud: false);
       }
     } catch (_) {}
   }
@@ -200,12 +201,16 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
           _matchedMember = null;
           _processing = false;
         });
+        unawaited(_terminalService.recordAccessEvent(
+          decision: const AccessDecision(AccessOutcome.unrecognized),
+          source: 'app',
+        ));
         _scheduleDismiss(const Duration(seconds: 4));
         return;
       }
 
       // Vérification du statut d'abonnement
-      await _evaluateMemberAccess(matched);
+      await _evaluateMemberAccess(matched, recordToCloud: true);
     } catch (_) {
       setState(() {
         _status = AccessStatus.deniedUnrecognized;
@@ -215,7 +220,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     }
   }
 
-  Future<void> _evaluateMemberAccess(Member member) async {
+  Future<void> _evaluateMemberAccess(Member member, {bool recordToCloud = true}) async {
     final now = DateTime.now();
 
     // Récupérer les abonnements de ce membre
@@ -225,6 +230,14 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     final validity = entry?.validity ?? const MemberValidity(valid: false, reason: 'no_subscription');
     final isAccessOk = validity.valid;
     final daysRemaining = validity.daysLeft ?? -1;
+
+    if (recordToCloud) {
+      final decision = AccessDecision(
+        isAccessOk ? AccessOutcome.granted : AccessOutcome.denied,
+        person: entry != null ? AccessPerson.member(entry) : null,
+      );
+      unawaited(_terminalService.recordAccessEvent(decision: decision, source: 'app'));
+    }
 
     if (isAccessOk) {
       setState(() {
@@ -429,6 +442,11 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         foregroundColor: Colors.white,
         title: Text(s.text('door_access_kiosk')),
         actions: [
+          IconButton(
+            tooltip: 'Mòd Tablèt Wi-Fi (Ekran devan pòt)',
+            icon: const Icon(LucideIcons.tablet, color: Color(0xFF2DD4BF)),
+            onPressed: () => openAccessDisplayWindow(context, true),
+          ),
           IconButton(
             tooltip: s.text('open_access_display'),
             icon: const Icon(LucideIcons.monitor),

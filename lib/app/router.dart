@@ -200,6 +200,11 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
       path: '/access-display',
       builder: (context, state) => const AccessDisplayPage(),
     ),
+    // Ekran aksè devan pòt la nan mòd Tablèt Wi-Fi (san fil, an dirèk ak nwaj la).
+    GoRoute(
+      path: '/tablet-access',
+      builder: (context, state) => const AccessDisplayPage(isTabletMode: true),
+    ),
     GoRoute(
       path: '/reset-password',
       builder: (context, state) => const PasswordResetPage(),

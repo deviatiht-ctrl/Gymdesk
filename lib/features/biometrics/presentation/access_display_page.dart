@@ -22,13 +22,14 @@ import '../../members/data/members_repository.dart';
 import '../../settings/data/settings_repository.dart';
 
 /// Ouvri ekran aksè a nan yon fenèt apa (web) pou li ka ale sou 2yèm ekran
-/// ki devan pòt la. Sou lòt platfòm, li ouvri nan menm fenèt la.
-Future<void> openAccessDisplayWindow([BuildContext? context]) async {
+/// ki devan pòt la oswa sou yon tablèt Wi-Fi.
+Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = false]) async {
+  final target = isTablet ? '/tablet-access' : '/access-display';
   if (kIsWeb) {
-    final uri = Uri.base.replace(fragment: '/access-display', query: null);
-    await launchUrl(uri, webOnlyWindowName: 'gymdesk_access_display');
+    final uri = Uri.base.replace(fragment: target, query: null);
+    await launchUrl(uri, webOnlyWindowName: isTablet ? 'gymdesk_tablet_access' : 'gymdesk_access_display');
   } else if (context != null && context.mounted) {
-    context.push('/access-display');
+    context.push(target);
   }
 }
 
@@ -37,7 +38,8 @@ Future<void> openAccessDisplayWindow([BuildContext? context]) async {
 /// Se fenèt sa a tou ki ka vewouye nan mòd Kiosk pou sekirite sou tablèt,
 /// epi ki gen bouton pou manm yo ka verifye rès tan yo san yo pa louvri pòt la.
 class AccessDisplayPage extends ConsumerStatefulWidget {
-  const AccessDisplayPage({super.key});
+  const AccessDisplayPage({super.key, this.isTabletMode = false});
+  final bool isTabletMode;
   @override
   ConsumerState<AccessDisplayPage> createState() => _AccessDisplayPageState();
 }
@@ -49,6 +51,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   late final AttendanceRepository _attendance;
   late final MembersRepository _members;
   TerminalAccessConfig _cfg = const TerminalAccessConfig();
+  late bool _isTabletWifiMode = widget.isTabletMode;
 
   StreamSubscription<Map<String, dynamic>>? _events;
   RealtimeChannel? _realtimeSub;
@@ -247,6 +250,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     final memberId = row['member_id']?.toString();
     final eventType = row['event_type']?.toString() ?? 'granted';
     final isGranted = eventType == 'granted';
+    final snapshot = Map<String, dynamic>.from(row['member_snapshot'] as Map? ?? {});
 
     final bool checkOnly = _inquiryActive;
     if (checkOnly && _inquiryContext != null && _inquiryContext!.mounted) {
@@ -255,20 +259,16 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       _inquiryActive = false;
     }
 
-    if (memberId == null) {
-      if (mounted) {
-        setState(() {
-          _isCheckOnly = checkOnly;
-          _decision = AccessDecision(
-            isGranted ? AccessOutcome.granted : AccessOutcome.denied,
-          );
-        });
-        _scheduleDismiss(const Duration(seconds: 5));
-      }
-      return;
+    AccessPerson? person;
+    if (memberId != null) {
+      try {
+        person = await _service.resolve(terminalUid(memberId)).timeout(const Duration(seconds: 2));
+      } catch (_) {}
+    }
+    if (person == null && snapshot.isNotEmpty) {
+      person = AccessPerson.fromSnapshot(snapshot);
     }
 
-    final person = await _service.resolve(terminalUid(memberId));
     Uint8List? photo;
     if (person?.entry?.member != null) {
       try {
@@ -277,9 +277,13 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     }
 
     if (!mounted) return;
+    final outcome = isGranted
+        ? (snapshot['is_legacy'] == true ? AccessOutcome.legacy : AccessOutcome.granted)
+        : (eventType == 'denied_unknown' ? AccessOutcome.unrecognized : AccessOutcome.denied);
+
     setState(() {
       _decision = AccessDecision(
-        isGranted ? AccessOutcome.granted : AccessOutcome.denied,
+        outcome,
         person: person,
       );
       _photo = photo;
@@ -371,7 +375,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
                   ]),
                 ]),
               ),
-              if (!_agentOnline || !_terminalOnline)
+              if (!_isTabletWifiMode && (!_agentOnline || !_terminalOnline))
                 Container(
                   margin: const EdgeInsets.fromLTRB(32, 16, 32, 0),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -387,6 +391,47 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
                       child: Text(s.text(!_agentOnline ? 'agent_offline_banner' : 'terminal_offline_banner'),
                           style: const TextStyle(color: Colors.orangeAccent)),
                     ),
+                    const SizedBox(width: 12),
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF2DD4BF),
+                        backgroundColor: const Color(0xFF0F766E).withAlpha(60),
+                      ),
+                      icon: const Icon(LucideIcons.tablet, size: 16),
+                      label: const Text('Mòd Tablèt Wi-Fi'),
+                      onPressed: () => setState(() => _isTabletWifiMode = true),
+                    ),
+                  ]),
+                )
+              else if (_isTabletWifiMode)
+                Container(
+                  margin: const EdgeInsets.fromLTRB(32, 16, 32, 0),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F766E).withAlpha(40),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF14B8A6).withAlpha(100)),
+                  ),
+                  child: Row(children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF10B981),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: Color(0xFF10B981), blurRadius: 6, spreadRadius: 1),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Mòd Tablèt Wi-Fi · SecurGYM Cloud Live (Koneksyon an dirèk ak nwaj la pou resevwa tout eskanè yo san fil)',
+                        style: TextStyle(color: Color(0xFF5EEAD4), fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const Icon(LucideIcons.wifi, color: Color(0xFF2DD4BF), size: 18),
                   ]),
                 ),
               Expanded(
@@ -692,9 +737,9 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
               if (person?.isEmployee == true) ...[
                 const SizedBox(height: 6),
                 Text(
-                  person!.employee!.jobTitle?.isNotEmpty == true
+                  person!.employee?.jobTitle?.isNotEmpty == true
                       ? person.employee!.jobTitle!
-                      : s.text('job_${person.employee!.jobType}'),
+                      : (person.employee != null ? s.text('job_${person.employee!.jobType}') : 'Anplwaye'),
                   style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 20, fontWeight: FontWeight.w600),
                 ),
               ] else if (person?.planName?.isNotEmpty == true) ...[
@@ -744,7 +789,9 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
 
   Widget _avatar(AccessPerson? person, Color accent, bool granted, bool unrecognized) {
     final photo = _photo;
+    final photoUrl = person?.photoUrl;
     final initials = person?.name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join();
+    final hasNetworkImage = photo == null && photoUrl != null && photoUrl.isNotEmpty;
     return Container(
       width: 180,
       height: 180,
@@ -752,9 +799,11 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
         shape: BoxShape.circle,
         border: Border.all(color: accent, width: 5),
         color: accent.withAlpha(40),
-        image: photo != null ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover) : null,
+        image: photo != null
+            ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
+            : (hasNetworkImage ? DecorationImage(image: NetworkImage(photoUrl), fit: BoxFit.cover) : null),
       ),
-      child: photo != null
+      child: photo != null || hasNetworkImage
           ? null
           : Center(
               child: initials != null && initials.isNotEmpty

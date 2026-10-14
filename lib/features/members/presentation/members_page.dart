@@ -9,6 +9,7 @@ import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
 import '../data/members_repository.dart';
+import 'fingerprint_transfer_dialog.dart';
 import 'members_stats_panel.dart';
 
 class MembersPage extends ConsumerStatefulWidget {
@@ -85,13 +86,38 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                 icon: Icon(_showStats ? LucideIcons.chevronUp : LucideIcons.chartColumn, size: 18),
                 label: Text(s.text(_showStats ? 'hide_stats' : 'show_stats')),
               ),
+              StreamBuilder<List<MemberListEntry>>(
+                stream: _all,
+                builder: (context, snapshot) {
+                  final entries = snapshot.data ?? const <MemberListEntry>[];
+                  return FilledButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F46E5),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    onPressed: () {
+                      FingerprintTransferDialog.show(
+                        context,
+                        entries: entries,
+                        onDone: () {
+                          setState(() {});
+                        },
+                      );
+                    },
+                    icon: const Icon(LucideIcons.fingerprint, size: 18),
+                    label: const Text('Transfere / Senkronize Anprent'),
+                  );
+                },
+              ),
               FilledButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF0F766E),
                   foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 onPressed: () => context.go('/members/new'),
-                icon: const Icon(LucideIcons.userPlus),
+                icon: const Icon(LucideIcons.userPlus, size: 18),
                 label: const Text('Enskri Nouvo Manm (Anprent)'),
               ),
             ],

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -47,21 +48,71 @@ class TerminalAccessConfig {
 enum AccessOutcome { granted, denied, unrecognized, legacy }
 
 class AccessPerson {
-  const AccessPerson.member(MemberListEntry this.entry, {this.planName}) : employee = null;
-  const AccessPerson.employee(Employee this.employee) : entry = null, planName = null;
+  const AccessPerson.member(MemberListEntry this.entry, {this.planName})
+      : employee = null,
+        _snapshotId = null,
+        _snapshotName = null,
+        _snapshotFirstName = null,
+        _snapshotIsEmployee = null,
+        _snapshotAllowed = null,
+        _snapshotReason = null,
+        _snapshotDaysLeft = null,
+        _snapshotEndDate = null,
+        _snapshotPhotoUrl = null;
+
+  const AccessPerson.employee(Employee this.employee)
+      : entry = null,
+        planName = null,
+        _snapshotId = null,
+        _snapshotName = null,
+        _snapshotFirstName = null,
+        _snapshotIsEmployee = null,
+        _snapshotAllowed = null,
+        _snapshotReason = null,
+        _snapshotDaysLeft = null,
+        _snapshotEndDate = null,
+        _snapshotPhotoUrl = null;
+
+  AccessPerson.fromSnapshot(Map<String, dynamic> snapshot)
+      : entry = null,
+        employee = null,
+        planName = snapshot['plan_name']?.toString(),
+        _snapshotId = snapshot['member_id']?.toString() ?? snapshot['id']?.toString(),
+        _snapshotName = snapshot['name']?.toString(),
+        _snapshotFirstName = snapshot['first_name']?.toString() ??
+            (snapshot['name']?.toString().split(' ').firstOrNull),
+        _snapshotIsEmployee = snapshot['is_employee'] == true,
+        _snapshotAllowed = snapshot['allowed'] != false,
+        _snapshotReason = snapshot['reason']?.toString() ?? 'ok',
+        _snapshotDaysLeft = (snapshot['days_left'] as num?)?.toInt(),
+        _snapshotEndDate = snapshot['end_date'] != null
+            ? DateTime.tryParse(snapshot['end_date'].toString())
+            : null,
+        _snapshotPhotoUrl = snapshot['photo_url']?.toString();
 
   final MemberListEntry? entry;
   final Employee? employee;
   final String? planName;
 
-  bool get isEmployee => employee != null;
-  String get id => entry?.member.id ?? employee!.id;
-  String get name => entry?.member.fullName ?? employee!.fullName;
-  String get firstName => entry?.member.firstName ?? employee!.firstName;
-  bool get allowed => isEmployee ? employee!.active : entry!.validity.valid;
-  String get reason => isEmployee ? (employee!.active ? 'ok' : 'suspended') : entry!.validity.reason;
-  int? get daysLeft => entry?.validity.daysLeft;
-  DateTime? get endDate => entry?.validity.endDate;
+  final String? _snapshotId;
+  final String? _snapshotName;
+  final String? _snapshotFirstName;
+  final bool? _snapshotIsEmployee;
+  final bool? _snapshotAllowed;
+  final String? _snapshotReason;
+  final int? _snapshotDaysLeft;
+  final DateTime? _snapshotEndDate;
+  final String? _snapshotPhotoUrl;
+
+  bool get isEmployee => _snapshotIsEmployee ?? (employee != null);
+  String get id => _snapshotId ?? (entry?.member.id ?? employee!.id);
+  String get name => _snapshotName ?? (entry?.member.fullName ?? employee!.fullName);
+  String get firstName => _snapshotFirstName ?? (entry?.member.firstName ?? employee!.firstName);
+  bool get allowed => _snapshotAllowed ?? (isEmployee ? employee!.active : entry!.validity.valid);
+  String get reason => _snapshotReason ?? (isEmployee ? (employee!.active ? 'ok' : 'suspended') : entry!.validity.reason);
+  int? get daysLeft => _snapshotDaysLeft ?? entry?.validity.daysLeft;
+  DateTime? get endDate => _snapshotEndDate ?? entry?.validity.endDate;
+  String? get photoUrl => _snapshotPhotoUrl ?? entry?.member.photoUrl;
 }
 
 class AccessDecision {
@@ -265,6 +316,70 @@ class TerminalAccessService {
     );
   }
 
+  /// Pibliye evènman aksè a sou Supabase Realtime (tablo `access_events`)
+  /// pou tout aparèy (tablèt Wi-Fi, lòt ekran) resevwa l an tan reyèl.
+  Future<void> recordAccessEvent({
+    required AccessDecision decision,
+    String source = 'terminal',
+  }) async {
+    final gymId = session.gymId;
+    if (gymId == null) return;
+    try {
+      final isGranted = decision.outcome == AccessOutcome.granted || decision.outcome == AccessOutcome.legacy;
+      final person = decision.person;
+      final member = person?.entry?.member;
+
+      String eventType;
+      if (isGranted) {
+        eventType = 'granted';
+      } else {
+        final reason = person?.reason ?? '';
+        if (reason == 'expired') {
+          eventType = 'denied_expired';
+        } else if (reason == 'suspended') {
+          eventType = 'denied_suspended';
+        } else if (reason == 'no_subscription') {
+          eventType = 'denied_no_subscription';
+        } else {
+          eventType = 'denied_unknown';
+        }
+      }
+
+      final snapshot = <String, dynamic>{
+        'name': person?.name ??
+            (decision.outcome == AccessOutcome.legacy
+                ? 'Itilizatè BioStar (Ansyen)'
+                : 'Anprent pa rekonèt'),
+        'is_employee': person?.isEmployee ?? false,
+        'allowed': person?.allowed ?? isGranted,
+        'reason': person?.reason ??
+            (isGranted
+                ? 'ok'
+                : (decision.outcome == AccessOutcome.legacy ? 'legacy_biostar' : 'unrecognized')),
+        if (person?.firstName != null) 'first_name': person!.firstName,
+        if (person?.planName != null) 'plan_name': person!.planName,
+        if (person?.endDate != null) 'end_date': person!.endDate!.toIso8601String(),
+        if (person?.daysLeft != null) 'days_left': person!.daysLeft,
+        if (person?.photoUrl != null) 'photo_url': person!.photoUrl,
+        if (member?.memberNumber != null) 'member_number': member!.memberNumber,
+        if (member?.phone != null) 'phone': member!.phone,
+        if (member?.id != null) 'member_id': member!.id,
+      };
+
+      await client.from('access_events').insert({
+        'gym_id': gymId,
+        if (member != null) 'member_id': member.id,
+        'event_type': eventType,
+        'source': source,
+        'reason': snapshot['reason'],
+        'member_snapshot': snapshot,
+        'occurred_at': DateTime.now().toUtc().toIso8601String(),
+      }).timeout(const Duration(seconds: 4));
+    } catch (_) {
+      // Pa bloke operasyon aksè si rezo a ralanti
+    }
+  }
+
   /// Deside sa pou fè ak yon evènman W2 (via agent la). Retounen null pou
   /// evènman ki pa konsène aksè (pòt, sistèm) oswa doublon.
   Future<AccessDecision?> handleTerminalEvent(Json event, TerminalAccessConfig cfg) async {
@@ -274,7 +389,12 @@ class TerminalAccessService {
     if (!_authEvents.contains(main)) return null;
     final uid = event['uid'] as String?;
     if (uid == null || uid.isEmpty) {
-      return main == 0x1400 || main == 0x1100 ? AccessDecision(AccessOutcome.unrecognized, code: code) : null;
+      if (main == 0x1400 || main == 0x1100) {
+        final d = AccessDecision(AccessOutcome.unrecognized, code: code);
+        unawaited(recordAccessEvent(decision: d, source: 'terminal'));
+        return d;
+      }
+      return null;
     }
     final now = DateTime.now();
     final last = _recent[uid];
@@ -284,21 +404,26 @@ class TerminalAccessService {
 
     final person = await resolve(uid);
     final terminalOpened = _successEvents.contains(main);
+    AccessDecision decision;
     if (person == null) {
       // Ansyen itilizatè BioStar (pa nan GymDesk).
-      return AccessDecision(terminalOpened ? AccessOutcome.legacy : AccessOutcome.denied, uid: uid, code: code);
-    }
-    if (terminalOpened) return AccessDecision(AccessOutcome.granted, person: person, uid: uid, code: code);
-    if (cfg.appControls && person.allowed) {
+      decision = AccessDecision(terminalOpened ? AccessOutcome.legacy : AccessOutcome.denied, uid: uid, code: code);
+    } else if (terminalOpened) {
+      decision = AccessDecision(AccessOutcome.granted, person: person, uid: uid, code: code);
+    } else if (cfg.appControls && person.allowed) {
       final opened = await agent.pulseTerminalRelay(terminalIp: cfg.terminalIp, seconds: cfg.pulseSeconds);
-      return AccessDecision(
+      decision = AccessDecision(
         opened ? AccessOutcome.granted : AccessOutcome.denied,
         person: person,
         openedByApp: opened,
         uid: uid,
         code: code,
       );
+    } else {
+      decision = AccessDecision(AccessOutcome.denied, person: person, uid: uid, code: code);
     }
-    return AccessDecision(AccessOutcome.denied, person: person, uid: uid, code: code);
+
+    unawaited(recordAccessEvent(decision: decision, source: 'terminal'));
+    return decision;
   }
 }
