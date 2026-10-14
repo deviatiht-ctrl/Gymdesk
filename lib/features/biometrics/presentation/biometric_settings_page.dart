@@ -5,8 +5,11 @@ import 'package:gymdesk_biometrics/gymdesk_biometrics.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'dart:convert';
+
 import '../../../app/providers.dart';
 import '../../../core/biometrics/access_agent_client.dart';
+import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
 
 class BiometricSettingsPage extends ConsumerStatefulWidget {
@@ -177,6 +180,71 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
           backgroundColor: ok ? const Color(0xFF059669) : Colors.red,
         ),
       );
+    }
+  }
+
+  /// Pouse tout anprent manm yo sou tèminal BioEntry W2 a (BS2_EnrollUser).
+  /// Apre sa, tèminal la rekonèt manm GymDesk yo menm lè PC la fèmen.
+  /// Atansyon: W2 a atann fòma natif Suprema — si template ISO yo pa matche,
+  /// re-anrejistre dwèt yo apre kaptire an fòma "suprema".
+  Future<void> _syncFingerprintsToTerminal() async {
+    setState(() {
+      _testingTerminal = true;
+      _terminalStatusText = null;
+    });
+    final isFr = AppStrings.of(context).locale.languageCode == 'fr';
+    try {
+      final db = ref.read(appRuntimeProvider).database;
+      if (db == null) return;
+      final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
+      final members = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        try {
+          final row = Map<String, dynamic>.from(jsonDecode(r.payload) as Map);
+          final id = row['id'] as String?;
+          if (id == null) continue;
+          final fingers = <List<String>>[
+            if ((row['fingerprint_template'] as String?)?.isNotEmpty == true)
+              [row['fingerprint_template'] as String],
+            if ((row['fingerprint_backup_template'] as String?)?.isNotEmpty == true)
+              [row['fingerprint_backup_template'] as String],
+          ];
+          if (fingers.isEmpty) continue;
+          final name = '${row['first_name'] ?? ''} ${row['last_name'] ?? ''}'.trim();
+          members.add({'id': id, 'name': name, 'fingers': fingers});
+        } catch (_) {}
+      }
+      if (members.isEmpty) {
+        if (mounted) {
+          setState(() => _testingTerminal = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(isFr
+                ? 'Aucun membre avec empreinte enregistrée.'
+                : 'Okenn manm pa gen anprent anrejistre.'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+        return;
+      }
+      final result = await AccessAgentClient()
+          .syncTerminalMembers(members, terminalIp: _terminalIpController.text.trim());
+      final ok = result?['success'] == true;
+      final enrolled = result?['enrolled'] ?? 0;
+      if (mounted) {
+        setState(() => _testingTerminal = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok
+              ? (isFr
+                  ? '$enrolled utilisateur(s) synchronisés sur le terminal !'
+                  : '$enrolled manm senkronize sou tèminal la !')
+              : (isFr
+                  ? 'Échec de la synchronisation vers le terminal.'
+                  : 'Senkronizasyon an echwe.')),
+          backgroundColor: ok ? const Color(0xFF059669) : Colors.red,
+        ));
+      }
+    } catch (_) {
+      if (mounted) setState(() => _testingTerminal = false);
     }
   }
 
@@ -463,6 +531,17 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                               ),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _testingTerminal ? null : _syncFingerprintsToTerminal,
+                            icon: const Icon(LucideIcons.refreshCcw, size: 16),
+                            label: Text(isFr
+                                ? 'Synchroniser les empreintes vers le terminal'
+                                : 'Senkronize anprent yo sou tèminal la'),
+                          ),
                         ),
                       ],
                     ),

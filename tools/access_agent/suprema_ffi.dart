@@ -16,6 +16,7 @@ import 'dart:typed_data';
 const int ufsOk = 0;
 const int ufsParamTimeout = 201;
 const int templateTypeIso19794_2 = 2002;
+const int templateTypeSuprema = 2001;
 const int maxTemplateSize = 1024;
 
 // ---------------------------------------------------------------------------
@@ -186,7 +187,7 @@ abstract class ReaderBackend {
   bool get readerConnected => scannerCount > 0;
   String get mode;
   Future<void> refresh();
-  Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50});
+  Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50, int tplType = templateTypeIso19794_2});
   Future<bool> verify(String aB64, String bB64);
 
   /// Endèks premye kandida ki koresponn, oswa -1.
@@ -313,9 +314,9 @@ class SupremaSdk extends ReaderBackend {
   /// Kaptire yon anprent. Bloke jiskaske yon dwèt poze oswa timeout.
   /// Egzekite nan yon isolate separe pou sèvè HTTP a pa bloke.
   @override
-  Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50}) async {
+  Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50, int tplType = templateTypeIso19794_2}) async {
     final dirCopy = dir;
-    final result = await Isolate.run(() => _captureWorker(dirCopy, timeoutMs));
+    final result = await Isolate.run(() => _captureWorker(dirCopy, timeoutMs, tplType));
     if (result['ok'] != true) {
       throw SupremaException(result['code'] as String, result['message'] as String);
     }
@@ -351,7 +352,7 @@ class SupremaSdk extends ReaderBackend {
 
 /// Travay kapti nan isolate. DLL yo deja chaje nan pwosesis la, kidonk
 /// `DynamicLibrary.open` retounen menm modil la epi eta UFS_Init pataje.
-Map<String, Object> _captureWorker(String dir, int timeoutMs) {
+Map<String, Object> _captureWorker(String dir, int timeoutMs, int tplType) {
   final api = _Api(dir);
   final ph = _alloc<Pointer<Void>>(sizeOf<Pointer<Void>>());
   final pTimeout = _alloc<Int32>(4);
@@ -366,7 +367,7 @@ Map<String, Object> _captureWorker(String dir, int timeoutMs) {
     final h = ph.value;
     pTimeout.value = timeoutMs;
     api.setParameter(h, ufsParamTimeout, pTimeout.cast<Void>());
-    api.setTemplateType?.call(h, templateTypeIso19794_2);
+    api.setTemplateType?.call(h, tplType);
     api.clearBuffer(h);
 
     rc = api.captureSingle(h);

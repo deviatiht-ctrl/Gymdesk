@@ -102,8 +102,8 @@ class SupremaBridge extends ReaderBackend {
   }
 
   @override
-  Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50}) async {
-    final r = await _call(['capture', '$timeoutMs'], timeout: Duration(milliseconds: timeoutMs + 15000));
+  Future<SupremaCapture> capture({int timeoutMs = 10000, int minQuality = 50, int tplType = templateTypeIso19794_2}) async {
+    final r = await _call(['capture', '$timeoutMs', '$tplType'], timeout: Duration(milliseconds: timeoutMs + 15000));
     final quality = int.tryParse(r[2]) ?? 0;
     if (quality < minQuality) {
       throw SupremaException('low_quality', 'Qualité insuffisante ($quality%). Reposez le doigt bien à plat.');

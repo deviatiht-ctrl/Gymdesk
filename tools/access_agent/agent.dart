@@ -218,6 +218,10 @@ Future<void> _handleCapture(HttpRequest request, HttpResponse res) async {
   final body = await _readJson(request);
   final timeoutMs = ((body['timeout_ms'] as num?)?.toInt() ?? 10000).clamp(1000, 30000);
   final minQuality = ((body['min_quality'] as num?)?.toInt() ?? 50).clamp(0, 100);
+  // 'suprema' = fòma natif 384B pou enroll sou tèminal W2; default ISO.
+  final tplType = body['tpl']?.toString() == 'suprema'
+      ? templateTypeSuprema
+      : (body['tpl_type'] as num?)?.toInt() ?? templateTypeIso19794_2;
 
   await _ensureSdk();
   final sdk = _sdk;
@@ -234,13 +238,13 @@ Future<void> _handleCapture(HttpRequest request, HttpResponse res) async {
   _captureBusy = true;
   broadcastEvent({'type': 'waiting_finger'});
   try {
-    final cap = await sdk.capture(timeoutMs: timeoutMs, minQuality: minQuality);
+    final cap = await sdk.capture(timeoutMs: timeoutMs, minQuality: minQuality, tplType: tplType);
     broadcastEvent({'type': 'fingerprint_captured', 'quality': cap.quality});
     await _json(res, {
       'success': true,
       'template': cap.templateB64,
       'quality': cap.quality,
-      'format': 'iso_19794_2',
+      'format': tplType == templateTypeSuprema ? 'suprema_native' : 'iso_19794_2',
     });
   } on SupremaException catch (e) {
     await _json(res, {'success': false, 'error': e.code, 'message': e.message});
@@ -399,12 +403,49 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
+    // Pouse anprent manm GymDesk yo sou tèminal W2 a (BS2_EnrollUser).
+    // Body: {members:[{id, name, fingers:[[b64 t1, b64 t2?], ...]}], ip?}
+    // Template yo dwe fòma natif Suprema (384B) — capture ak tpl:'suprema'.
     if (path == '/api/terminals/sync' && request.method == 'POST') {
-      await _json(res, {
-        'success': false,
-        'error': 'not_implemented',
-        'message': 'Synchronisation des empreintes vers le terminal: à activer sur place (test requis).',
-      }, status: HttpStatus.notImplemented);
+      final body = await _readJson(request);
+      final cfg = terminalConfig();
+      final ip = body['ip']?.toString() ?? cfg['ip'] as String;
+      final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
+      final members = (body['members'] as List?) ?? const [];
+      if (members.isEmpty) {
+        await _json(res, {'success': false, 'error': 'empty', 'message': 'Okenn manm yo voye.'});
+        return;
+      }
+      try {
+        final lines = <String>[];
+        for (final m in members) {
+          final mm = Map<String, dynamic>.from(m as Map);
+          final uid = (mm['id']?.toString() ?? '').replaceAll('-', '');
+          if (uid.isEmpty) continue;
+          lines.add('user\t$uid\t${(mm['name']?.toString() ?? '').replaceAll('\t', ' ')}');
+          var idx = 0;
+          for (final f in (mm['fingers'] as List? ?? const [])) {
+            final tpls = (f as List).map((t) => t.toString()).toList();
+            lines.add('finger\t$uid\t${idx++}\t${tpls.join('\t')}');
+          }
+        }
+        final exeDir = File(Platform.resolvedExecutable).parent.path;
+        final tmp = File('$exeDir${Platform.pathSeparator}enroll_${DateTime.now().millisecondsSinceEpoch}.tsv');
+        try {
+          await tmp.writeAsString(lines.join('\n'), flush: true);
+          final out = await _biostarCall(['enroll', ip, tmp.path, '$port'], timeout: const Duration(seconds: 60));
+          final ok = out.any((l) => l.first == 'ok');
+          await _json(res, {
+            'success': ok,
+            'enrolled': ok ? int.tryParse(out.firstWhere((l) => l.first == 'ok')[1]) ?? 0 : 0,
+            'errors': [for (final l in out) if (l.first == 'err') l.skip(1).join(': ')],
+          });
+        } finally {
+          try { await tmp.delete(); } catch (_) {}
+        }
+      } on SupremaException catch (e) {
+        await _json(res, {'success': false, 'error': e.code, 'message': e.message});
+      }
       return;
     }
 

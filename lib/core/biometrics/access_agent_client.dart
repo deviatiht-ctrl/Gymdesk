@@ -237,6 +237,24 @@ class AccessAgentClient {
     }
   }
 
+  /// Pouse anprent manm yo sou tèminal BioEntry W2 a (BS2_EnrollUser).
+  /// [members]: [{id, name, fingers: [[b64 t1, b64 t2?], ...]}]
+  /// Template yo dwe fòma natif Suprema (384B) — capture ak tpl:'suprema'.
+  Future<Map<String, dynamic>?> syncTerminalMembers(
+    List<Map<String, dynamic>> members, {
+    String? terminalIp,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/terminals/sync'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'members': members, 'ip': terminalIp ?? '192.168.1.41'}),
+      ).timeout(const Duration(seconds: 45));
+      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {}
+    return null;
+  }
+
   Future<bool> releaseTerminalDoor({String? terminalIp}) async {
     try {
       final res = await http.post(

@@ -37,7 +37,7 @@ static class Native
 
 static class Program
 {
-    const int Ok = 0, ParamTimeout = 201, Iso19794_2 = 2002, MaxTemplate = 1024;
+    const int Ok = 0, ParamTimeout = 201, Iso19794_2 = 2002, SupremaNative = 2001, MaxTemplate = 1024;
     static IntPtr matcher = IntPtr.Zero;
     static bool matcherReady = false;
 
@@ -71,14 +71,16 @@ static class Program
         return "ok\t" + count + "\t" + Clean(id);
     }
 
-    static string Capture(int timeoutMs)
+    static string Capture(int timeoutMs, int tplType)
     {
         IntPtr h;
         var rc = Native.UFS_GetScannerHandle(0, out h);
         if (rc != Ok) return "err\tno_reader\tLecteur non détecté (" + Clean(Describe(rc)) + ").";
         var timeout = timeoutMs;
         Native.UFS_SetParameter(h, ParamTimeout, ref timeout);
-        try { Native.UFS_SetTemplateType(h, Iso19794_2); } catch (EntryPointNotFoundException) { }
+        // tplType: 2002 = ISO 19794-2 (defo), 2001 = fòma natif Suprema (384B,
+        // sa tèminal BioEntry W2 a konnen pou enroll sou li).
+        try { Native.UFS_SetTemplateType(h, tplType); } catch (EntryPointNotFoundException) { }
         Native.UFS_ClearCaptureImageBuffer(h);
         rc = Native.UFS_CaptureSingleImage(h);
         if (rc != Ok) return "err\tcapture_failed\tAucun doigt détecté ou capture échouée: " + Clean(Describe(rc));
@@ -149,7 +151,9 @@ static class Program
             switch (p[0])
             {
                 case "status": return Status();
-                case "capture": return Capture(p.Length > 1 ? int.Parse(p[1]) : 10000);
+                case "capture": return Capture(
+                    p.Length > 1 ? int.Parse(p[1]) : 10000,
+                    p.Length > 2 ? int.Parse(p[2]) : Iso19794_2);
                 case "verify":
                     if (!matcherReady) return "err\tmatcher_init\tUFM_Create a échoué (lecteur connecté ?)";
                     return "ok\t" + (p.Length > 2 && Verify(B64(p[1]), B64(p[2])) ? "1" : "0");

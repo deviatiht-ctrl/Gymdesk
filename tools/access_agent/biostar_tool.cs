@@ -8,6 +8,8 @@
 // Rechèch broadcast la jwenn aparèy yo menm si IP yo pa nan menm sou-rezo ak PC la.
 // Bati: csc -platform:x64 -target:exe biostar_tool.cs
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Runtime.InteropServices;
 
@@ -46,6 +48,12 @@ static class Native
     public static extern int BS2_ReleaseDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetAllDoorStatus(IntPtr context, uint deviceId, out IntPtr doorStatusObj, out uint numDoorStatus);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetUserDatabaseInfo(IntPtr context, uint deviceId, out uint numUsers, out uint numCards, out uint numFingers, out uint numFaces, IntPtr cb);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetUserList(IntPtr context, uint deviceId, out IntPtr uidsObj, out uint numUid, IntPtr cb);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_EnrollUser(IntPtr context, uint deviceId, [In, Out] BS2UserBlob[] userBlobs, uint userCount, byte overwrite);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseObject(IntPtr obj);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
@@ -87,6 +95,69 @@ public struct BS2SimpleDeviceInfo
     public byte voipSupported;
     public byte rs485ExSupported;
     public byte cardExSupported;
+}
+
+// Estrikti itilizatè yo (Pack=1, menm layout ak SFStruct.cs nan SDK a).
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BS2User
+{
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+    public byte[] userID;
+    public byte formatVersion;
+    public byte flag;
+    public ushort version;
+    public byte numCards;
+    public byte numFingers;
+    public byte numFaces;
+    public byte infoMask;
+    public uint authGroupID;
+    public uint faceChecksum;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BS2UserSetting
+{
+    public uint startTime;
+    public uint endTime;
+    public byte fingerAuthMode;   // 0 = BIOMETRIC_ONLY, 254 = PROHIBITED, 255 = NONE
+    public byte cardAuthMode;
+    public byte idAuthMode;
+    public byte securityLevel;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BS2UserPhoto
+{
+    public uint size;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16 * 1024)]
+    public byte[] data;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BS2Fingerprint
+{
+    public byte index;
+    public byte flag;
+    public ushort reserved;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 2 * 384)]
+    public byte[] data;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BS2UserBlob
+{
+    public BS2User user;
+    public BS2UserSetting setting;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 48 * 4)]
+    public byte[] name;
+    public BS2UserPhoto photo;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+    public byte[] pin;
+    public IntPtr cardObjs;
+    public IntPtr fingerObjs;
+    public IntPtr faceObjs;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+    public uint[] accessGroupId;
 }
 
 static class Program
@@ -186,6 +257,15 @@ static class Program
             rc = seconds > 0
                 ? Native.BS2_TimedUnlockDoor(ctx, id, DoorFlagOperator, doorIds, 1, seconds)
                 : Native.BS2_UnlockDoor(ctx, id, DoorFlagOperator, doorIds, 1);
+            // SOU TÈMINAL SAN KAPTEUR PÒT (sensorDevice=0), timed unlock la PA
+            // ekspire: unlockFlags rete 0x04 epi relè a rete louvri san fen.
+            // Nou tann dire a epi nou retire flag operatè a pou relè a tounen
+            // nan eta "locked". 20s max pou ajan an pa touye pwosesis la (timeout 25s).
+            if (rc >= 0 && seconds > 0)
+            {
+                System.Threading.Thread.Sleep((int)Math.Min(seconds, 20) * 1000);
+                Native.BS2_ReleaseDoor(ctx, id, DoorFlagOperator, doorIds, 1);
+            }
         }
         finally { Marshal.FreeHGlobal(doorIds); }
         if (doorObj != IntPtr.Zero) Native.BS2_ReleaseObject(doorObj);
@@ -238,6 +318,25 @@ static class Program
         uint id;
         var rc = Connect(ip, port, out id);
         if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        // Konfig pòt la (BS2Door, pack=1): relay.deviceID @156, relay.port @160,
+        // sensor.deviceID @164, sensor.port @168, sensor.switchType @169,
+        // autoLockTimeout @180, unconditionalLock @191. Si relay.deviceID pa
+        // id tèminal lan, pòt la kondwi yon relè remote (SIO) — pa relè entèn nan.
+        IntPtr doorCfg; uint numDoorCfg;
+        if (Native.BS2_GetAllDoor(ctx, id, out doorCfg, out numDoorCfg) >= 0 && numDoorCfg > 0)
+        {
+            var relayDev = Marshal.ReadInt32(doorCfg, 156);
+            var relayPort = Marshal.ReadByte(doorCfg, 160);
+            var sensorDev = Marshal.ReadInt32(doorCfg, 164);
+            var sensorSw = Marshal.ReadByte(doorCfg, 169);
+            var autoLock = Marshal.ReadInt32(doorCfg, 180);
+            var uncondLock = Marshal.ReadByte(doorCfg, 191);
+            Console.WriteLine("config\trelayDevice=" + (uint)relayDev + "\trelayPort=" + relayPort
+                + "\tsensorDevice=" + (uint)sensorDev + "\tsensorSwitch=" + sensorSw
+                + "\tautoLockTimeout=" + autoLock + "\tunconditionalLock=" + uncondLock
+                + "\tterminalId=" + id);
+            Native.BS2_ReleaseObject(doorCfg);
+        }
         IntPtr statusObj; uint numStatus;
         rc = Native.BS2_GetAllDoorStatus(ctx, id, out statusObj, out numStatus);
         if (rc < 0 || numStatus == 0)
@@ -267,11 +366,157 @@ static class Program
         return 0;
     }
 
+    // Lis sa ki sou tèminal la: kantite + ID itilizatè yo.
+    // Sa montre si ansyen baz BioStar la toujou la.
+    static int Users(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        uint nu, nc, nf, nfa;
+        rc = Native.BS2_GetUserDatabaseInfo(ctx, id, out nu, out nc, out nf, out nfa, IntPtr.Zero);
+        if (rc < 0) { Console.WriteLine("err\tdb_info\tGetUserDatabaseInfo: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+        Console.WriteLine("db\tusers=" + nu + "\tcards=" + nc + "\tfingers=" + nf + "\tfaces=" + nfa);
+        IntPtr uidsObj; uint numUid;
+        rc = Native.BS2_GetUserList(ctx, id, out uidsObj, out numUid, IntPtr.Zero);
+        if (rc >= 0 && uidsObj != IntPtr.Zero)
+        {
+            for (uint i = 0; i < numUid; i++)
+            {
+                var p = Marshal.ReadIntPtr(uidsObj, (int)i * IntPtr.Size);
+                if (p != IntPtr.Zero) Console.WriteLine("uid\t" + Marshal.PtrToStringAnsi(p));
+            }
+            Native.BS2_ReleaseObject(uidsObj);
+        }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
+    // Pouse itilizatè + anprent GymDesk yo sou tèminal la.
+    // Fichye a se liy TSV:
+    //   user\t<id32>\t<non>
+    //   finger\t<id32>\t<index>\t<b64 tpl1>[\t<b64 tpl2>]
+    // id32 = id itilizatè ASCII max 32 karaktè (ex: UUID manm san tiret).
+    static int Enroll(string ip, string file, ushort port)
+    {
+        var users = new Dictionary<string, BS2UserBlob>();
+        var fingers = new Dictionary<string, List<BS2Fingerprint>>();
+        var order = new List<string>();
+        foreach (var raw in System.IO.File.ReadAllLines(file))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#")) continue;
+            var f = line.Split('\t');
+            if (f.Length >= 3 && f[0] == "user")
+            {
+                var uid = f[1];
+                if (!users.ContainsKey(uid))
+                {
+                    var blob = NewBlob(uid, f[2]);
+                    users[uid] = blob;
+                    fingers[uid] = new List<BS2Fingerprint>();
+                    order.Add(uid);
+                }
+            }
+            else if (f.Length >= 4 && f[0] == "finger" && users.ContainsKey(f[1]))
+            {
+                var fp = new BS2Fingerprint
+                {
+                    index = byte.Parse(f[2]),
+                    flag = 0,
+                    reserved = 0,
+                    data = new byte[2 * 384],
+                };
+                for (var t = 0; t < 2 && 3 + t < f.Length && f[3 + t].Length > 0; t++)
+                {
+                    var tpl = Convert.FromBase64String(f[3 + t]);
+                    if (tpl.Length > 384)
+                    {
+                        Console.WriteLine("err\ttpl_size\t" + f[1] + " template " + tpl.Length + "B > 384B (ISO pa fòma Suprema)");
+                        return -1;
+                    }
+                    Array.Copy(tpl, 0, fp.data, t * 384, tpl.Length);
+                }
+                fingers[f[1]].Add(fp);
+            }
+        }
+        if (order.Count == 0) { Console.WriteLine("err\tempty\tOkenn itilizatè nan fichye a"); return -1; }
+
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+
+        var blobs = order.Select(u => users[u]).ToArray();
+        var fingerPtrs = new List<IntPtr>();
+        try
+        {
+            for (var i = 0; i < order.Count; i++)
+            {
+                var fps = fingers[order[i]];
+                if (fps.Count == 0) continue;
+                var ptr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(BS2Fingerprint)) * fps.Count);
+                fingerPtrs.Add(ptr);
+                for (var j = 0; j < fps.Count; j++)
+                    Marshal.StructureToPtr(fps[j], new IntPtr(ptr.ToInt64() + j * Marshal.SizeOf(typeof(BS2Fingerprint))), false);
+                blobs[i].fingerObjs = ptr;
+                blobs[i].user.numFingers = (byte)fps.Count;
+            }
+            rc = Native.BS2_EnrollUser(ctx, id, blobs, (uint)blobs.Length, 1);
+        }
+        finally
+        {
+            foreach (var p in fingerPtrs) Marshal.FreeHGlobal(p);
+        }
+        Native.BS2_DisconnectDevice(ctx, id);
+        if (rc < 0) { Console.WriteLine("err\tenroll_failed\tBS2_EnrollUser: " + rc); return rc; }
+        Console.WriteLine("ok\t" + order.Count);
+        return 0;
+    }
+
+    static BS2UserBlob NewBlob(string uid, string name)
+    {
+        var blob = new BS2UserBlob
+        {
+            user = new BS2User
+            {
+                userID = new byte[32],
+                formatVersion = 0,
+                flag = 0,
+                version = 0,
+                numCards = 0,
+                numFingers = 0,
+                numFaces = 0,
+                infoMask = 0,
+            },
+            setting = new BS2UserSetting
+            {
+                startTime = 0,
+                endTime = 0xFFFFFFFF,   // pa janm ekspire
+                fingerAuthMode = 0,     // BIOMETRIC_ONLY
+                cardAuthMode = 254,     // PROHIBITED
+                idAuthMode = 254,       // PROHIBITED
+                securityLevel = 0,
+            },
+            name = new byte[48 * 4],
+            photo = new BS2UserPhoto { size = 0, data = new byte[16 * 1024] },
+            pin = new byte[32],
+            cardObjs = IntPtr.Zero,
+            fingerObjs = IntPtr.Zero,
+            faceObjs = IntPtr.Zero,
+            accessGroupId = new uint[16],
+        };
+        var uidBytes = System.Text.Encoding.ASCII.GetBytes(uid);
+        Array.Copy(uidBytes, 0, blob.user.userID, 0, Math.Min(uidBytes.Length, 32));
+        var nameBytes = System.Text.Encoding.UTF8.GetBytes(name ?? "");
+        Array.Copy(nameBytes, 0, blob.name, 0, Math.Min(nameBytes.Length, 48 * 4 - 1));
+        return blob;
+    }
+
     static int Main(string[] args)
     {
         if (args.Length < 2)
         {
-            Console.WriteLine("err\tusage\tbiostar_tool.exe <dllDir> <search|ping|pulse|release|lock> [arg...]");
+            Console.WriteLine("err\tusage\tbiostar_tool.exe <dllDir> <search|ping|pulse|release|lock|status|users|enroll> [arg...]");
             return 1;
         }
         var rc = Init(args[0]);
@@ -299,6 +544,12 @@ static class Program
                 case "status":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tstatus <ip> [port]"); return 1; }
                     return Status(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "users":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tusers <ip> [port]"); return 1; }
+                    return Users(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "enroll":
+                    if (args.Length < 4) { Console.WriteLine("err\tusage\tenroll <ip> <file> [port]"); return 1; }
+                    return Enroll(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);
                 default:
                     Console.WriteLine("err\tunknown_command\t" + args[1]);
                     return 1;
