@@ -35,3 +35,4 @@ GymDesk_USB/SBOM.*
 GymDesk_USB/SHA256SUMS.txt
 GymDesk_USB/VulnerabilityReport.*
 nul
+enroll_*.tsv
