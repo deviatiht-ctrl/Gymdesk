@@ -439,12 +439,29 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     final wa = _whatsappController.text.trim();
     final isFr = s.locale.languageCode == 'fr';
     final isEn = s.locale.languageCode == 'en';
+    final startStr = ymd(_startDate);
+    final endStr = ymd(endDate);
 
     final waMessageText = isFr
-        ? 'Bonjour $fullName ! Bienvenue chez $gymName.\nVotre inscription est confirmée pour la formule : $planName.\nValable jusqu\'au : ${ymd(endDate)}.\nVotre empreinte est activée pour l\'accès.\nMerci pour votre confiance !'
+        ? 'Bonjour $fullName ! Bienvenue chez $gymName.\n'
+          'Votre inscription est confirmée pour la formule : $planName.\n'
+          'Période : du $startStr au $endStr.\n'
+          '⚠️ RAPPEL IMPORTANT : Votre abonnement débutera officiellement le $startStr. Merci de vous présenter à la salle à cette date exacte, car c\'est à ce moment précis que votre abonnement commencera à être décompté.\n'
+          'Votre empreinte sera prête pour l\'accès.\n'
+          'Merci pour votre confiance !'
         : isEn
-            ? 'Hello $fullName! Welcome to $gymName.\nYour membership is confirmed for: $planName.\nValid until: ${ymd(endDate)}.\nYour fingerprint access is now active.\nThank you for choosing us!'
-            : 'Bonjou $fullName! Byenvini nan $gymName.\nEnskripsyon ou konfime sou plan: $planName.\nAbonman ou valid jiska: ${ymd(endDate)}.\nOu ka pase dwèt ou sou lektè a pou antre nenpòt lè.\nMèsi pou konfyans ou!';
+            ? 'Hello $fullName! Welcome to $gymName.\n'
+              'Your membership is confirmed for: $planName.\n'
+              'Period: from $startStr to $endStr.\n'
+              '⚠️ IMPORTANT REMINDER: Your membership officially begins on $startStr. Please make sure to come to the gym on this exact date, as your access begins counting down from that day.\n'
+              'Your fingerprint access will be ready.\n'
+              'Thank you for choosing us!'
+            : 'Bonjou $fullName! Byenvini nan $gymName.\n'
+              'Enskripsyon ou konfime sou fòmil : $planName.\n'
+              'Peryòd : soti $startStr rive $endStr.\n'
+              '⚠️ RAPÈL ENPÒTAN : Abònman w lan ap kòmanse ofisyèlman nan dat $startStr la. Tanpri prezante nan sal la egzakteman jou sa a, paske se jou sa a menm abònman w lan ap kòmanse konte.\n'
+              'Anprent ou ap pare pou ouvri baryè a.\n'
+              'Mèsi pou konfyans ou!';
 
     final waUrl = 'https://wa.me/${wa.replaceAll('+', '').replaceAll(' ', '')}?text=${Uri.encodeComponent(waMessageText)}';
 
@@ -465,6 +482,37 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('$fullName : ${s.text('member_enrolled_success')}'),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDFA),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF99F6E4)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.calendarClock, size: 16, color: Color(0xFF0F766E)),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${s.text('subscription_period')}: $startStr → $endStr',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E), fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isFr
+                        ? 'Rappel : Le membre doit se présenter le $startStr (date de début de son accès).'
+                        : 'Rapèl : Manm nan dwe vini jou $startStr la (se lè sa a abònman an kòmanse).',
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF134E4A)),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 10),
             if (email.contains('@'))
               Text(
@@ -752,6 +800,74 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       children: [
         if (_errorMessage != null) _buildErrorBanner(),
         Card(
+          elevation: 0,
+          color: const Color(0xFFF0FDFA),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0xFF99F6E4)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(LucideIcons.calendarDays, color: Color(0xFF0F766E), size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      s.text('start_date_exact'),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F766E)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  s.text('start_date_hint'),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  tileColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  leading: const Icon(LucideIcons.calendar, color: Color(0xFF0F766E)),
+                  title: Text(
+                    ymd(_startDate),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  subtitle: Text(
+                    _selectedPlan != null
+                        ? '${s.text('subscription_period')}: ${ymd(_startDate)} → ${ymd(subscriptionEnd(_startDate, _selectedPlan!.durationDays))}'
+                        : ymd(_startDate),
+                    style: const TextStyle(color: Color(0xFF0F766E), fontSize: 13, fontWeight: FontWeight.w500),
+                  ),
+                  trailing: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF0F766E),
+                      side: const BorderSide(color: Color(0xFF0F766E)),
+                    ),
+                    onPressed: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _startDate,
+                        firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) setState(() => _startDate = picked);
+                    },
+                    icon: const Icon(LucideIcons.calendar, size: 16),
+                    label: Text(s.text('change_date')),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
           color: _isExistingMember ? const Color(0xFFEFF6FF) : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -763,31 +879,11 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             onChanged: (val) {
               setState(() {
                 _isExistingMember = val;
-                if (!val) _startDate = DateTime.now();
               });
             },
           ),
         ),
         const SizedBox(height: 16),
-        if (_isExistingMember) ...[
-          ListTile(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade300)),
-            leading: const Icon(LucideIcons.calendar),
-            title: Text(s.text('start_date')),
-            subtitle: Text(ymd(_startDate)),
-            trailing: const Icon(LucideIcons.chevronRight),
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: _startDate,
-                firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                lastDate: DateTime.now().add(const Duration(days: 365)),
-              );
-              if (picked != null) setState(() => _startDate = picked);
-            },
-          ),
-          const SizedBox(height: 16),
-        ],
         Text(s.text('plans'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         const SizedBox(height: 10),
         ..._plans.map((plan) {
@@ -838,10 +934,16 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                   '${s.text('plans')}: ${_selectedPlan?.name ?? ''} (${_selectedPlan?.price.toStringAsFixed(0) ?? '0'} HTG)',
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${ymd(_startDate)} - ${ymd(subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30))}',
-                  style: const TextStyle(color: Colors.grey),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(LucideIcons.calendarClock, size: 16, color: Color(0xFF0F766E)),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${s.text('subscription_period')}: ${ymd(_startDate)} → ${ymd(subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30))}',
+                      style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
+                  ],
                 ),
               ],
             ),

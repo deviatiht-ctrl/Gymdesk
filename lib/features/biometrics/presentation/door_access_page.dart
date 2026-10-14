@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/biometrics/biometric_service.dart';
@@ -32,11 +33,18 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   late final BiometricService _biometricService;
   late final AttendanceRepository _attendanceRepo;
   late final MembersRepository _membersRepo;
+  final _agent = AccessAgentClient();
+  late final TerminalAccessService _terminalService;
+  TerminalAccessConfig _cfg = const TerminalAccessConfig();
 
   StreamSubscription<BiometricEvent>? _biometricSub;
+  StreamSubscription<Map<String, dynamic>>? _terminalSub;
+  RealtimeChannel? _realtimeSub;
   Timer? _dismissTimer;
 
   bool _processing = false;
+  bool _terminalOnline = false;
+  bool _agentOnline = true;
   AccessStatus _status = AccessStatus.none;
   Member? _matchedMember;
   int? _daysLeft;
@@ -51,8 +59,104 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     final runtime = ref.read(appRuntimeProvider);
     _attendanceRepo = AttendanceRepository(runtime.database!, runtime.session!);
     _membersRepo = MembersRepository(runtime.client, runtime.database!, runtime.session!);
+    _terminalService = TerminalAccessService(runtime.client, runtime.database!, runtime.session!, agent: _agent);
 
     _startBiometricListener();
+    _biometricService.checkSensorConnection();
+    _initTerminal();
+  }
+
+  Future<void> _initTerminal() async {
+    final runtime = ref.read(appRuntimeProvider);
+    try {
+      _cfg = await TerminalAccessService.loadConfig(runtime.client, runtime.session!);
+      _terminalOnline = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
+      _terminalSub = _agent.terminalEvents().listen(_onTerminalEvent);
+
+      final gymId = runtime.session?.gymId;
+      if (gymId != null) {
+        final client = Supabase.instance.client;
+        _realtimeSub = client
+            .channel('public:door_access:$gymId')
+            .onPostgresChanges(
+              event: PostgresChangeEvent.insert,
+              schema: 'public',
+              table: 'access_events',
+              filter: PostgresChangeFilter(
+                type: PostgresChangeFilterType.eq,
+                column: 'gym_id',
+                value: gymId,
+              ),
+              callback: (payload) {
+                final row = payload.newRecord;
+                _handleRealtimeAccessEvent(row);
+              },
+            )
+            .subscribe();
+      }
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _onTerminalEvent(Map<String, dynamic> event) async {
+    final type = event['type'];
+    if (type == 'agent_status') {
+      final online = event['online'] == true;
+      final term = event['terminal_watch'] == true;
+      if (online != _agentOnline || term != _terminalOnline) {
+        if (mounted) {
+          setState(() {
+            _agentOnline = online;
+            _terminalOnline = term;
+          });
+        }
+      }
+      return;
+    }
+    if (type == 'terminal_watch') {
+      if (mounted) setState(() => _terminalOnline = event['online'] == true);
+      return;
+    }
+
+    final decision = await _terminalService.handleTerminalEvent(event, _cfg);
+    if (decision == null || !mounted) return;
+
+    final member = decision.person?.entry?.member;
+    if (member != null) {
+      await _evaluateMemberAccess(member);
+    } else if (decision.outcome == AccessOutcome.legacy) {
+      if (mounted) {
+        setState(() {
+          _status = AccessStatus.granted;
+          _matchedMember = null;
+          _daysLeft = null;
+          _processing = false;
+        });
+        _scheduleDismiss(const Duration(seconds: 5));
+      }
+    } else if (decision.outcome == AccessOutcome.unrecognized) {
+      if (mounted) {
+        setState(() {
+          _status = AccessStatus.deniedUnrecognized;
+          _matchedMember = null;
+          _daysLeft = null;
+          _processing = false;
+        });
+        _scheduleDismiss(const Duration(seconds: 4));
+      }
+    }
+  }
+
+  Future<void> _handleRealtimeAccessEvent(Map<String, dynamic> row) async {
+    final memberId = row['member_id']?.toString();
+    if (memberId == null) return;
+    try {
+      final entries = await _membersRepo.watch().first;
+      final entry = entries.where((e) => e.member.id == memberId).firstOrNull;
+      if (entry != null && mounted) {
+        await _evaluateMemberAccess(entry.member);
+      }
+    } catch (_) {}
   }
 
   void _startBiometricListener() {
@@ -165,8 +269,22 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       if (gymId == null) return;
 
       final client = Supabase.instance.client;
-      final gym = await client.from('gyms').select('biometric_config').eq('id', gymId).maybeSingle();
-      final cfg = Map<String, dynamic>.from(gym?['biometric_config'] as Map? ?? {});
+      Map<String, dynamic> cfg = {};
+      try {
+        final gym = await client.from('gyms').select('settings').eq('id', gymId).maybeSingle();
+        if (gym != null && gym['settings'] is Map) {
+          final settings = Map<String, dynamic>.from(gym['settings'] as Map);
+          if (settings['biometric_config'] is Map) {
+            cfg = Map<String, dynamic>.from(settings['biometric_config'] as Map);
+          }
+        }
+      } catch (_) {}
+      if (cfg.isEmpty && runtime.session != null) {
+        final localSettings = runtime.session!.settings;
+        if (localSettings['biometric_config'] is Map) {
+          cfg = Map<String, dynamic>.from(localSettings['biometric_config'] as Map);
+        }
+      }
 
       final relayMode = cfg['relay_mode'] as String? ?? 'usb_serial_relay';
       final port = cfg['relay_port'] as String? ?? 'COM3';
@@ -230,8 +348,22 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       final gymId = runtime.session?.gymId;
       if (gymId == null) return;
       final client = Supabase.instance.client;
-      final gym = await client.from('gyms').select('biometric_config').eq('id', gymId).maybeSingle();
-      final cfg = Map<String, dynamic>.from(gym?['biometric_config'] as Map? ?? {});
+      Map<String, dynamic> cfg = {};
+      try {
+        final gym = await client.from('gyms').select('settings').eq('id', gymId).maybeSingle();
+        if (gym != null && gym['settings'] is Map) {
+          final settings = Map<String, dynamic>.from(gym['settings'] as Map);
+          if (settings['biometric_config'] is Map) {
+            cfg = Map<String, dynamic>.from(settings['biometric_config'] as Map);
+          }
+        }
+      } catch (_) {}
+      if (cfg.isEmpty && runtime.session != null) {
+        final localSettings = runtime.session!.settings;
+        if (localSettings['biometric_config'] is Map) {
+          cfg = Map<String, dynamic>.from(localSettings['biometric_config'] as Map);
+        }
+      }
       final terminalIp = cfg['terminal_ip'] as String? ?? '192.168.1.41';
       final ok = await AccessAgentClient().releaseTerminalDoor(terminalIp: terminalIp);
       if (mounted) {
@@ -275,8 +407,11 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   @override
   void dispose() {
     _biometricSub?.cancel();
+    _terminalSub?.cancel();
+    _realtimeSub?.unsubscribe();
     _dismissTimer?.cancel();
     _biometricService.dispose();
+    _agent.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -314,19 +449,95 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // Bandeau d'état du lecteur
+            // Bandeau d'état dynamique : Tèminal Pòt + Lektè USB
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               color: const Color(0xFF1E293B),
               child: Row(
                 children: [
-                  const Icon(LucideIcons.fingerprint, color: Color(0xFF10B981), size: 24),
-                  const SizedBox(width: 12),
-                  Text(
-                    '${s.text('fingerprint_reader')} : ${s.text('reader_ready')} (Suprema BioMini)',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+                  Icon(
+                    _terminalOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
+                    color: _terminalOnline ? const Color(0xFF10B981) : Colors.amber,
+                    size: 20,
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _terminalOnline
+                          ? (isFr
+                              ? 'Terminal de porte (${_cfg.terminalIp}) : Connecté & Prêt'
+                              : 'Tèminal Pòt (${_cfg.terminalIp}) : Konekte & Pare')
+                          : (isFr
+                              ? 'Terminal de porte (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Non connecté (vérifiez le réseau)'
+                              : 'Tèminal Pòt (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Pa konekte (verifye rezo a)'),
+                      style: TextStyle(
+                        color: _terminalOnline ? Colors.white70 : Colors.amber.shade200,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  ValueListenableBuilder<BiometricSensorState>(
+                    valueListenable: _biometricService.state,
+                    builder: (context, sensorState, _) {
+                      final usbReady = sensorState == BiometricSensorState.ready;
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: usbReady ? const Color(0xFF10B981).withAlpha(40) : Colors.white.withAlpha(20),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: usbReady ? const Color(0xFF10B981) : Colors.white24,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              LucideIcons.usb,
+                              size: 13,
+                              color: usbReady ? const Color(0xFF34D399) : Colors.white38,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              usbReady
+                                  ? (isFr ? 'USB : Prêt' : 'USB : Pare')
+                                  : (isFr ? 'USB : Débranché' : 'USB : Deploge'),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: usbReady ? const Color(0xFF34D399) : Colors.white38,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    tooltip: isFr ? 'Tester la connexion' : 'Teste koneksyon an',
+                    icon: const Icon(LucideIcons.refreshCw, size: 16, color: Colors.white70),
+                    onPressed: () async {
+                      final termOk = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
+                      await _biometricService.checkSensorConnection();
+                      if (mounted) setState(() => _terminalOnline = termOk);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            duration: const Duration(seconds: 2),
+                            content: Text(
+                              termOk
+                                  ? (isFr ? 'Terminal connecté avec succès' : 'Tèminal konekte avèk siksè')
+                                  : (isFr ? 'Échec de connexion au terminal (${_cfg.terminalIp})' : 'Tèminal la pa reponn nan ${_cfg.terminalIp}'),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
                   TextButton.icon(
                     onPressed: () => context.push('/settings/biometrics'),
                     icon: const Icon(LucideIcons.settings, size: 16, color: Colors.white70),
@@ -350,8 +561,35 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                             onTap: _processing
                                 ? null
                                 : () async {
-                                    final sample = await _biometricService.captureFingerprintSample();
-                                    await _onFingerprintReceived(sample);
+                                    if (_biometricService.readerAvailable) {
+                                      try {
+                                        final sample = await _biometricService.captureFingerprintSample();
+                                        await _onFingerprintReceived(sample);
+                                      } catch (e) {
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text(e.toString()),
+                                              backgroundColor: Colors.red.shade700,
+                                            ),
+                                          );
+                                        }
+                                      }
+                                    } else {
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            duration: const Duration(seconds: 3),
+                                            content: Text(
+                                              isFr
+                                                  ? 'Posez directement votre doigt sur le terminal de porte (${_cfg.terminalIp})'
+                                                  : 'Mete dwèt ou dirèkteman sou tèminal pòt la (${_cfg.terminalIp})',
+                                            ),
+                                            backgroundColor: const Color(0xFF0F766E),
+                                          ),
+                                        );
+                                      }
+                                    }
                                   },
                             child: Container(
                               width: 170,
@@ -377,16 +615,26 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                           ),
                           const SizedBox(height: 28),
                           Text(
-                            s.text('place_finger_prompt'),
+                            isFr
+                                ? 'Posez votre doigt sur le terminal de porte'
+                                : 'Poze dwèt ou sou tèminal pòt la',
                             textAlign: TextAlign.center,
                             style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            isFr
-                                ? 'Détection automatique Suprema BioMini active'
-                                : 'Deteksyon otomatik Suprema BioMini aktif',
-                            style: const TextStyle(color: Colors.white54, fontSize: 14),
+                            _terminalOnline
+                                ? (isFr
+                                    ? 'Terminal ${_cfg.terminalIp} actif · Détection automatique'
+                                    : 'Tèminal ${_cfg.terminalIp} aktif · Deteksyon otomatik')
+                                : (isFr
+                                    ? 'Terminal non connecté · Vérifiez l’IP dans les paramètres'
+                                    : 'Tèminal pa konekte · Verifye adrès IP a nan Paramèt'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _terminalOnline ? const Color(0xFF2DD4BF) : Colors.amber.shade200,
+                              fontSize: 14,
+                            ),
                           ),
                         ] else ...[
                           _buildAccessResultCard(s, isFr, isEn),

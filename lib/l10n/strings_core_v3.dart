@@ -172,5 +172,13 @@ const stringsCoreV3 = <String, List<String>>{
   'cta_button_text': ['RETOUNEN NAN SAL LA KOUNYE A', 'REPRENDRE L’ENTRAÎNEMENT MAINTENANT', 'RESUME TRAINING NOW'],
   'sending_to_members': ['Ap voye imèl bay manm yo...', 'Envoi des emails aux membres...', 'Sending emails to members...'],
   'sent_count_summary': ['imèl voye avèk siksè sou', 'emails envoyés avec succès sur', 'emails sent successfully out of'],
+  'start_date_exact': ['Dat Egzak Kòmansman', 'Date de Début Exacte', 'Exact Start Date'],
+  'start_date_hint': [
+    'Chwazi jou manm nan ap kòmanse antrene a (jodi a oswa yon dat pi devan).',
+    'Sélectionnez le jour où le membre débutera (aujourd’hui ou date future).',
+    'Select the day the member will start (today or a future date).',
+  ],
+  'change_date': ['Chanje Dat', 'Changer la date', 'Change Date'],
+  'subscription_period': ['Peryòd Abònman', 'Période d’Abonnement', 'Membership Period'],
 };
 

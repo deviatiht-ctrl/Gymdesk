@@ -17,6 +17,9 @@ void main() {
       expect(basic.price, 950.0);
       expect(basic.isOneTime, isTrue);
       expect(basic.billingPeriod, 'one_time');
+      expect(basic.badgeQuota, 0);
+      expect(basic.includesTablet, isFalse);
+      expect(basic.installationIncluded, isFalse);
       expect(basic.biometricSupported, isTrue);
       expect(basic.includesDoorAccess, isTrue);
       expect(basic.installmentsAllowed, isTrue);
@@ -28,6 +31,10 @@ void main() {
       // 2. Medium Plan
       expect(medium.maxMembers, 500);
       expect(medium.price, 1450.0);
+      expect(medium.isOneTime, isTrue);
+      expect(medium.badgeQuota, 0);
+      expect(medium.includesTablet, isFalse);
+      expect(medium.installationIncluded, isFalse);
       expect(medium.biometricSupported, isTrue);
       expect(medium.includesDoorAccess, isTrue);
       expect(medium.installmentsAllowed, isTrue);
@@ -39,8 +46,11 @@ void main() {
       // 3. Pro Plan
       expect(pro.maxMembers, 1000);
       expect(pro.price, 2200.0);
+      expect(pro.isOneTime, isTrue);
+      expect(pro.badgeQuota, 0);
+      expect(pro.includesTablet, isFalse);
+      expect(pro.installationIncluded, isFalse);
       expect(pro.biometricSupported, isTrue);
-      expect(pro.includesTablet, isTrue);
       expect(pro.installmentsAllowed, isTrue);
       expect(pro.installment1, 1300.0);
       expect(pro.installment2, 450.0);
@@ -50,6 +60,10 @@ void main() {
       // 4. Enterprise Plan
       expect(enterprise.maxMembers, 0); // Unlimited
       expect(enterprise.price, 3200.0);
+      expect(enterprise.isOneTime, isTrue);
+      expect(enterprise.badgeQuota, 0);
+      expect(enterprise.includesTablet, isFalse);
+      expect(enterprise.installationIncluded, isFalse);
       expect(enterprise.biometricSupported, isTrue);
       expect(enterprise.installmentsAllowed, isTrue);
       expect(enterprise.installment1, 1800.0);
@@ -58,10 +72,13 @@ void main() {
       expect(enterprise.installment1 + enterprise.installment2 + enterprise.installment3, enterprise.price);
     });
 
-    test('First installment covers equipment and technical installation', () {
+    test('All plans are one-time purchase with no badges and paid hardware/installation', () {
       for (final plan in PlatformOffer.defaultAnnualPlans) {
+        expect(plan.isOneTime, isTrue);
+        expect(plan.badgeQuota, 0);
+        expect(plan.includesTablet, isFalse);
+        expect(plan.installationIncluded, isFalse);
         expect(plan.installment1, greaterThan(plan.price * 0.50));
-        expect(plan.installationIncluded, isTrue);
         expect(plan.doorHardwareKit, contains('FSTW F30'));
       }
     });

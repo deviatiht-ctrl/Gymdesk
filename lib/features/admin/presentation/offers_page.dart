@@ -565,9 +565,11 @@ class _OfferCard extends StatelessWidget {
                       ),
                     ),
                     Chip(
-                      label: Text(s.text(offer.isAnnual ? 'annual' : 'monthly')),
+                      label: Text(offer.isOneTime
+                          ? 'Peman Inik (A vi)'
+                          : s.text(offer.isAnnual ? 'annual' : 'monthly')),
                       visualDensity: VisualDensity.compact,
-                      backgroundColor: offer.isAnnual
+                      backgroundColor: offer.isOneTime || offer.isAnnual
                           ? colors.primaryContainer.withAlpha(150)
                           : colors.surfaceContainerHighest,
                     ),
@@ -593,17 +595,30 @@ class _OfferCard extends StatelessWidget {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '/${s.text(offer.isAnnual ? 'per_year' : 'per_month')}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colors.outline,
-                          fontWeight: FontWeight.w600,
+                    if (offer.isOneTime)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4, left: 6),
+                        child: Text(
+                          '(Achte plas nèt)',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colors.outline,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    else ...[
+                      const SizedBox(width: 6),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '/${s.text(offer.isAnnual ? 'per_year' : 'per_month')}',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: colors.outline,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -626,39 +641,27 @@ class _OfferCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                 ],
-                _FeatureRow(
-                  icon: LucideIcons.idCard,
-                  text: offer.badgeQuota > 0
-                      ? '${offer.badgeQuota} Badj QR GRATIS enkli 🪪'
-                      : 'Badj QR fizik sou kòmand (frais impression)',
-                  highlight: offer.badgeQuota > 0,
+                const _FeatureRow(
+                  icon: LucideIcons.shieldCheck,
+                  text: 'Aksè 100% Byometrik & PIN (San badj fizik)',
+                  highlight: true,
                 ),
                 const SizedBox(height: 8),
-                if (offer.tabletCount > 0) ...[
-                  _FeatureRow(
-                    icon: LucideIcons.tablet,
-                    text: '${offer.tabletCount} Tablèt Android GRATIS enkli 📱',
-                    highlight: true,
-                  ),
-                  const SizedBox(height: 8),
-                ] else if (offer.tabletOptionalPrice > 0) ...[
-                  _FeatureRow(
-                    icon: LucideIcons.tablet,
-                    text: 'Opsyon Tablèt Android : +${offer.tabletOptionalPrice.toStringAsFixed(0)} USD',
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                const _FeatureRow(
+                  icon: LucideIcons.tablet,
+                  text: 'Tablèt Android : sou kòmand (se kliyan ki peye l)',
+                ),
+                const SizedBox(height: 8),
                 if (offer.biometricSupported || offer.includesDoorAccess) ...[
                   const _FeatureRow(
                     icon: LucideIcons.fingerprint,
-                    text: 'Sistèm Pòt Byometrik FSTW F30 Enkli ✅ (USB + TCP/IP)',
+                    text: 'Sistèm Kontwòl Aksè & Lektè anprent USB Enkli ✅',
                     highlight: true,
                   ),
                   const SizedBox(height: 8),
                   const _FeatureRow(
                     icon: LucideIcons.wrench,
-                    text: 'Enstalasyon Konplè sou plas pa yon Ekip Teknik Enkli 🛠️',
-                    highlight: true,
+                    text: 'Enstalasyon pòt pa ekip teknik : sou kòmand (se kliyan ki peye l)',
                   ),
                   const SizedBox(height: 8),
                 ],

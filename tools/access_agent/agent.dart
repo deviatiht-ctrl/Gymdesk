@@ -592,6 +592,12 @@ Future<void> _handleRequest(HttpRequest request) async {
         final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
         if (ip != null && ip.isNotEmpty && (ip != cfg['ip'] || port != cfg['port'])) {
           _terminalConfig = {'ip': ip, 'port': port};
+          try {
+            final exeDir = File(Platform.resolvedExecutable).parent.path;
+            File('$exeDir${Platform.pathSeparator}terminal.json').writeAsStringSync(
+              jsonEncode({'ip': ip, 'port': port}),
+            );
+          } catch (_) {}
           await _pauseWatch();
           _resumeWatch();
         }

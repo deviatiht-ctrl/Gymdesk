@@ -1,4 +1,4 @@
--- ============================================================================
+                                                                                                                                                                                                                                        -- ============================================================================
 -- 22 — Email delivery fix (idempotent). Apply after 21_messaging.sql.
 --  * email_outbox accepts every kind produced by 21 (reminders, campaigns, receipts)
 --  * payloads carry logo_path (what the worker signs) and reply_to (gym email)

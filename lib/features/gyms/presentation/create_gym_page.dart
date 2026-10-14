@@ -271,7 +271,9 @@ class _CreateGymPageState extends ConsumerState<CreateGymPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${offer.price % 1 == 0 ? offer.price.toStringAsFixed(0) : offer.price.toStringAsFixed(2)} ${offer.currency} ${s.text(offer.isAnnual ? 'per_year' : 'per_month')}',
+                  offer.isOneTime
+                      ? '${offer.price % 1 == 0 ? offer.price.toStringAsFixed(0) : offer.price.toStringAsFixed(2)} ${offer.currency} (Peman Inik / A vi)'
+                      : '${offer.price % 1 == 0 ? offer.price.toStringAsFixed(0) : offer.price.toStringAsFixed(2)} ${offer.currency} ${s.text(offer.isAnnual ? 'per_year' : 'per_month')}',
                   style: theme.textTheme.titleLarge?.copyWith(
                     color: theme.colorScheme.primary,
                     fontWeight: FontWeight.w800,
@@ -288,13 +290,22 @@ class _CreateGymPageState extends ConsumerState<CreateGymPage> {
                 ],
                 const SizedBox(height: 8),
                 Text(
-                  '${s.text('badge_quota')} : ${offer.badgeQuota} (Opsyonèl)',
-                  style: theme.textTheme.bodySmall,
+                  'Aksè 100% Byometrik & PIN (San badj fizik)',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '📱 Tablèt & 🛠️ Enstalasyon pòt : sou kòmand (se kliyan ki peye l)',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
                 ),
                 if (offer.includesDoorAccess || offer.biometricSupported) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
-                    '✅ Sistèm Pòt Byometrik FSTW F30 Enkli',
+                    '✅ Lektè anprent dijital USB Enkli',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.primary,
                       fontWeight: FontWeight.bold,
@@ -634,7 +645,7 @@ class _CreateGymPageState extends ConsumerState<CreateGymPage> {
                                             : key == 'code'
                                             ? 4
                                             : key == 'phone'
-                                            ? 32
+                                            ? 64
                                             : key == 'timezone'
                                             ? 80
                                             : key == 'accent_color'
@@ -660,15 +671,38 @@ class _CreateGymPageState extends ConsumerState<CreateGymPage> {
                                   MessagePanel(message: s.text(_error!)),
                                 if (_busy) const LoadingPanel(rows: 1),
                                 const SizedBox(height: 24),
-                                FilledButton(
-                                  onPressed: _busy ? null : _submit,
-                                  child: Text(
-                                    s.text(
-                                      _draft == null
-                                          ? 'create_gym'
-                                          : 'resume_creation',
+                                Wrap(
+                                  spacing: 12,
+                                  runSpacing: 12,
+                                  children: [
+                                    FilledButton(
+                                      onPressed: _busy ? null : _submit,
+                                      child: Text(
+                                        s.text(
+                                          _draft == null
+                                              ? 'create_gym'
+                                              : 'resume_creation',
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    if (_draft != null)
+                                      OutlinedButton.icon(
+                                        icon: const Icon(LucideIcons.trash2, size: 16),
+                                        label: const Text('Annuler cette demande'),
+                                        onPressed: _busy
+                                            ? null
+                                            : () async {
+                                                await _store.clear();
+                                                if (mounted) {
+                                                  setState(() {
+                                                    _draft = null;
+                                                    _error = null;
+                                                    _fields['owner_password']!.clear();
+                                                  });
+                                                }
+                                              },
+                                      ),
+                                  ],
                                 ),
                               ],
                             );

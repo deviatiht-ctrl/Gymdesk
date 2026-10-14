@@ -122,14 +122,34 @@ class TerminalAccessService {
       try {
         final gym = await client
             .from('gyms')
+            .select('settings')
+            .eq('id', gymId)
+            .maybeSingle()
+            .timeout(const Duration(seconds: 4));
+        if (gym != null && gym['settings'] is Map) {
+          final settings = Map<String, dynamic>.from(gym['settings'] as Map);
+          if (settings['biometric_config'] is Map) {
+            return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(settings['biometric_config'] as Map));
+          }
+        }
+      } catch (_) {}
+
+      try {
+        final gym = await client
+            .from('gyms')
             .select('biometric_config')
             .eq('id', gymId)
             .maybeSingle()
-            .timeout(const Duration(seconds: 6));
-        if (gym != null) {
-          return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(gym['biometric_config'] as Map? ?? {}));
+            .timeout(const Duration(seconds: 4));
+        if (gym != null && gym['biometric_config'] is Map) {
+          return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(gym['biometric_config'] as Map));
         }
       } catch (_) {}
+    }
+
+    final localSettings = session.settings;
+    if (localSettings['biometric_config'] is Map) {
+      return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(localSettings['biometric_config'] as Map));
     }
     return TerminalAccessConfig.fromJson(
       Map<String, dynamic>.from(session.gym?['biometric_config'] as Map? ?? {}),

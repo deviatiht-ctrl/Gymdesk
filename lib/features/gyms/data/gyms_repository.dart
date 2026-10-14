@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../app/env.dart';
 import '../domain/gym.dart';
 
 class GymsRepository {
@@ -108,7 +109,10 @@ class GymsRepository {
       ];
       final officialPlanIds = {'plan_basic', 'plan_medium', 'plan_pro', 'plan_enterprise'};
       final hasOfficial = loaded.any((o) => officialPlanIds.contains(o.id));
-      if (!hasOfficial) {
+      final hasOutdated = loaded.any((o) =>
+          officialPlanIds.contains(o.id) &&
+          (o.billingPeriod == 'annual' || o.badgeQuota > 0 || o.includesTablet));
+      if (!hasOfficial || hasOutdated) {
         return PlatformOffer.defaultAnnualPlans;
       }
       return loaded;
@@ -177,14 +181,118 @@ class GymsRepository {
   });
 
   Future<Gym> create(CreateGymCommand command) => _request(() async {
-    final response = await client.functions.invoke(
-      'create_gym_owner',
-      body: command.toJson(),
-    );
-    final data = Map<String, dynamic>.from(response.data as Map);
-    if (data['gym'] is! Map) throw const PlatformFailure('provision_failed');
-    return Gym.fromJson(Map<String, dynamic>.from(data['gym'] as Map));
+    // 1. Eseye Edge Function la si li deplwaye
+    try {
+      final response = await client.functions.invoke(
+        'create_gym_owner',
+        body: command.toJson(),
+      );
+      final data = Map<String, dynamic>.from(response.data as Map);
+      if (data['gym'] is Map) {
+        return Gym.fromJson(Map<String, dynamic>.from(data['gym'] as Map));
+      }
+    } on FunctionException catch (e) {
+      final details = e.details;
+      final code = details is Map ? details['error'] : null;
+      if (code != null && code != 'provision_failed' && e.status != 404) {
+        rethrow;
+      }
+    } catch (_) {
+      // Si pa gen Edge Function deplwaye, kontinye nan kreyasyon dirèk
+    }
+
+    // 2. Kreyasyon dirèk san bezwen Edge Function
+    return await _createGymDirect(command);
   });
+
+  Future<Gym> _createGymDirect(CreateGymCommand command) async {
+    final code = (command.gym['code'] as String? ?? '').trim().toUpperCase();
+    final existingGym = await client
+        .from('gyms')
+        .select('id')
+        .eq('code', code)
+        .maybeSingle();
+    if (existingGym != null) {
+      throw const PlatformFailure('duplicate_code');
+    }
+
+    // Verifye oswa kreye kont pwopriyetè a nan Auth
+    final authClient = SupabaseClient(AppEnv.supabaseUrl, AppEnv.supabaseKey);
+    String? ownerUserId;
+    try {
+      final authRes = await authClient.auth.signUp(
+        email: command.ownerEmail,
+        password: command.ownerPassword,
+        data: {'full_name': command.ownerName},
+      );
+      ownerUserId = authRes.user?.id;
+    } catch (_) {
+      try {
+        final signInRes = await authClient.auth.signInWithPassword(
+          email: command.ownerEmail,
+          password: command.ownerPassword,
+        );
+        ownerUserId = signInRes.user?.id;
+      } catch (_) {}
+    }
+
+    if (ownerUserId == null) {
+      // Eseye jwenn id itilizatè a si li te deja kreye
+      final staffRow = await client
+          .from('staff')
+          .select('user_id')
+          .eq('role', 'owner')
+          .maybeSingle();
+      if (staffRow != null) {
+        ownerUserId = staffRow['user_id'] as String?;
+      }
+    }
+
+    if (ownerUserId == null) {
+      throw const PlatformFailure('provision_failed');
+    }
+
+    final existingStaff = await client
+        .from('staff')
+        .select('id, gym_id')
+        .eq('user_id', ownerUserId)
+        .isFilter('deleted_at', null)
+        .maybeSingle();
+    if (existingStaff != null) {
+      throw const PlatformFailure('owner_exists');
+    }
+
+    final gymData = {
+      'id': command.gymId,
+      'code': code,
+      'name': (command.gym['name'] as String? ?? '').trim(),
+      'accent_color': (command.gym['accent_color'] as String? ?? '#1F6F4A').trim(),
+      'timezone': (command.gym['timezone'] as String? ?? 'America/Port-au-Prince').trim(),
+      'currency': (command.gym['currency'] as String? ?? 'HTG').trim(),
+      'address': (command.gym['address'] as String? ?? '').trim().isEmpty
+          ? null
+          : (command.gym['address'] as String).trim(),
+      'phone': (command.gym['phone'] as String? ?? '').trim().isEmpty
+          ? null
+          : (command.gym['phone'] as String).trim(),
+      'email': (command.gym['email'] as String? ?? '').trim().isEmpty
+          ? null
+          : (command.gym['email'] as String).trim(),
+      'status': 'active',
+    };
+
+    final gymRow = await client.from('gyms').insert(gymData).select().single();
+    await client.from('staff').insert({
+      'id': command.staffId,
+      'user_id': ownerUserId,
+      'gym_id': command.gymId,
+      'role': 'owner',
+      'full_name': command.ownerName,
+      'active': true,
+    });
+
+    return Gym.fromJson(Map<String, dynamic>.from(gymRow));
+  }
 
   Future<Gym> changeStatus(Gym gym, String action, {String? confirmation}) =>
       _request(() async {

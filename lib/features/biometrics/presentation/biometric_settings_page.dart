@@ -43,7 +43,8 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
   }
 
   Future<void> _loadGymBiometricConfig() async {
-    final gymId = ref.read(appRuntimeProvider).session?.gymId;
+    final runtime = ref.read(appRuntimeProvider);
+    final gymId = runtime.session?.gymId;
     if (gymId == null) {
       setState(() => _loading = false);
       return;
@@ -51,29 +52,68 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
 
     try {
       final client = Supabase.instance.client;
-      final gym = await client
-          .from('gyms')
-          .select('biometric_enabled, biometric_config')
-          .eq('id', gymId)
-          .maybeSingle();
+      Map<String, dynamic> cfg = {};
+      bool? bioEnabled;
 
-      if (gym != null && mounted) {
-        final cfg = Map<String, dynamic>.from(gym['biometric_config'] as Map? ?? {});
+      // 1. Lire d'abord les settings généraux de la salle (qui existent à 100%)
+      try {
+        final gym = await client
+            .from('gyms')
+            .select('settings')
+            .eq('id', gymId)
+            .maybeSingle();
+
+        if (gym != null && gym['settings'] is Map) {
+          final gymSettings = Map<String, dynamic>.from(gym['settings'] as Map);
+          if (gymSettings['biometric_config'] is Map) {
+            cfg = Map<String, dynamic>.from(gymSettings['biometric_config'] as Map);
+          }
+          bioEnabled = gymSettings['biometric_enabled'] as bool?;
+        }
+      } catch (_) {}
+
+      // 2. Si non trouvé dans settings, tenter la colonne dédiée (si elle existe)
+      if (cfg.isEmpty) {
+        try {
+          final gymBio = await client
+              .from('gyms')
+              .select('biometric_enabled, biometric_config')
+              .eq('id', gymId)
+              .maybeSingle();
+          if (gymBio != null && gymBio['biometric_config'] is Map) {
+            cfg = Map<String, dynamic>.from(gymBio['biometric_config'] as Map);
+            bioEnabled = gymBio['biometric_enabled'] as bool? ?? bioEnabled;
+          }
+        } catch (_) {}
+      }
+
+      // 3. Fallback sur session locale si vide
+      if (cfg.isEmpty && runtime.session != null) {
+        final localSettings = runtime.session!.settings;
+        if (localSettings['biometric_config'] is Map) {
+          cfg = Map<String, dynamic>.from(localSettings['biometric_config'] as Map);
+        }
+      }
+
+      if (mounted) {
+        final savedIp = (cfg['terminal_ip'] as String?)?.trim();
+        final defaultIp = (runtime.session?.settings['door_terminal_ip'] as String?)?.trim();
+
         setState(() {
-          _accessMode = cfg['access_mode'] as String? ?? 'finger_only';
+          _accessMode = cfg['access_mode'] as String? ?? (bioEnabled == false ? 'off' : 'finger_only');
           _preferredVendor = cfg['vendor'] as String? ?? 'suprema';
           _relayMode = cfg['relay_mode'] as String? ?? 'terminal_bew2';
           _relayPortController.text = cfg['relay_port'] as String? ?? 'COM3';
           _relayUrlController.text = cfg['relay_url'] as String? ?? 'http://192.168.1.50/relay/0?turn=on';
-          _terminalIpController.text = cfg['terminal_ip'] as String? ?? '192.168.1.41';
+          _terminalIpController.text = (savedIp != null && savedIp.isNotEmpty)
+              ? savedIp
+              : ((defaultIp != null && defaultIp.isNotEmpty) ? defaultIp : '192.168.1.200');
           _pulseDurationSeconds = (cfg['pulse_duration_seconds'] as num?)?.toDouble() ?? 3.0;
           final modes = TerminalAccessConfig.fromJson(cfg);
           _terminalEnforces = modes.terminalEnforces;
           _appControls = modes.appControls;
           _loading = false;
         });
-      } else {
-        if (mounted) setState(() => _loading = false);
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -81,7 +121,8 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
   }
 
   Future<void> _saveConfig() async {
-    final gymId = ref.read(appRuntimeProvider).session?.gymId;
+    final runtime = ref.read(appRuntimeProvider);
+    final gymId = runtime.session?.gymId;
     if (gymId == null) return;
 
     setState(() => _saving = true);
@@ -101,17 +142,44 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
         'app_controls_door': _appControls,
       };
 
+      // 1. Lire les settings actuels pour merger
+      Map<String, dynamic> currentSettings = Map<String, dynamic>.from(runtime.session?.settings ?? {});
+      try {
+        final gym = await client.from('gyms').select('settings').eq('id', gymId).maybeSingle();
+        if (gym != null && gym['settings'] is Map) {
+          currentSettings = Map<String, dynamic>.from(gym['settings'] as Map);
+        }
+      } catch (_) {}
+
+      currentSettings['biometric_config'] = config;
+      currentSettings['biometric_enabled'] = _accessMode != 'off';
+      currentSettings['door_terminal_ip'] = _terminalIpController.text.trim();
+
+      // 2. Mettre à jour dans la colonne 'settings' (qui existe à coup sûr dans le schéma)
       await client.from('gyms').update({
-        'biometric_enabled': _accessMode != 'off',
-        'biometric_config': config,
+        'settings': currentSettings,
       }).eq('id', gymId);
+
+      // 3. Essayer aussi les colonnes dédiées si elles existent sans bloquer en cas d'absence
+      try {
+        await client.from('gyms').update({
+          'biometric_enabled': _accessMode != 'off',
+          'biometric_config': config,
+        }).eq('id', gymId);
+      } catch (_) {}
+
+      // 4. Notifier l'agent local pour qu'il cible immédiatement la nouvelle IP
+      try {
+        final agent = AccessAgentClient();
+        await agent.watchTerminal(terminalIp: _terminalIpController.text.trim());
+      } catch (_) {}
 
       if (mounted) {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(s.locale.languageCode == 'fr'
-                ? 'Configuration biométrique et porte enregistrée !'
+                ? 'Configuration biométrique et porte enregistrée avec succès !'
                 : 'Konfigirasyon anrejistre avèk siksè !'),
             backgroundColor: const Color(0xFF059669),
           ),

@@ -37,20 +37,22 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
       ['Statut', p.status === 'trial' ? 'Période d’essai (7 jours)' : 'Compte actif'],
     ];
   } else if (job.kind === 'member_welcome') {
+    const startStr = date(p.start_date);
+    const endStr = date(p.end_date);
     title = 'Votre inscription est confirmée';
-    subject = `Confirmation de votre inscription`;
+    subject = `Confirmation de votre inscription - ${brand}`;
     intro = p.imported
       ? 'Merci de faire partie de notre salle. Votre dossier et votre période déjà réglée ont été repris, sans nouveaux frais d’inscription.'
       : `Bienvenue chez ${brand} ! Votre inscription a bien été enregistrée. Voici le récapitulatif de votre abonnement.`;
     rows = [
       ['Numéro de membre', p.member_number],
       ['Formule', p.plan_name],
-      ['Début', date(p.start_date)],
-      ['Fin', date(p.end_date)],
+      ['Début', startStr],
+      ['Fin', endStr],
       ['Montant réglé', p.imported ? 'Période déjà réglée' : money(p.price, p.currency)],
       ['Statut', p.status === 'pending' ? 'En attente de validation' : 'Actif'],
     ];
-    note = 'Pour entrer, posez simplement votre doigt sur le lecteur à l’entrée. Vous recevrez un rappel par email avant la fin de votre abonnement.';
+    note = `⚠️ Rappel important : Votre abonnement débutera officiellement le ${startStr}. Veuillez impérativement vous présenter à la salle à cette date exacte, car c'est à ce moment précis que votre période d'accès commencera à être décomptée. Pour entrer, posez simplement votre doigt sur le lecteur à l’entrée.`;
   } else if (job.kind === 'member_renewal') {
     title = 'Votre renouvellement est confirmé';
     subject = 'Renouvellement de votre abonnement';
