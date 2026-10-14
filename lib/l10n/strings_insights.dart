@@ -20,6 +20,66 @@ const stringsInsights = <String, List<String>>{
     'Renouveler Maintenant',
     'Renew Now',
   ],
+  'dash_hint_active_members': [
+    'Klike pou wè tout manm aktif',
+    'Cliquez pour voir tous les membres actifs',
+    'Click to see all active members',
+  ],
+  'dash_hint_suspended': [
+    'Klike pou wè manm sispann',
+    'Cliquez pour voir les membres suspendus',
+    'Click to see suspended members',
+  ],
+  'dash_hint_expiring': [
+    'Klike pou wè abònman k ap fini',
+    'Cliquez pour voir les abonnements qui expirent',
+    'Click to see expiring subscriptions',
+  ],
+  'dash_hint_entries': [
+    'Antre jodi a pa anprent',
+    'Entrées du jour par empreinte',
+    'Today’s entries by fingerprint',
+  ],
+  'dash_hint_denied': [
+    'Aksè refize jodi a',
+    'Accès refusés aujourd’hui',
+    'Access denied today',
+  ],
+  'dash_hint_payments': [
+    'Klike pou wè lis peman jodi a',
+    'Cliquez pour voir les paiements du jour',
+    'Click to see today’s payments',
+  ],
+  'dash_hint_revenue': [
+    'Klike pou wè detay (Seans, Mensuel...)',
+    'Cliquez pour le détail (Séance, Mensuel…)',
+    'Click for details (Session, Monthly…)',
+  ],
+  'dash_hint_pending': [
+    'Renouvèlman an atann apwobasyon',
+    'Renouvellements en attente d’approbation',
+    'Renewals awaiting approval',
+  ],
+  'dash_subtitle': [
+    'Tablo Bò & Jesyon Finansyè an Tan Reyèl',
+    'Tableau de Bord & Gestion Financière en Temps Réel',
+    'Dashboard & Real-Time Financial Management',
+  ],
+  'door_fingerprint_activity': [
+    'Aktivite Pòt & Anprent',
+    'Activité Porte & Empreinte',
+    'Door & Fingerprint Activity',
+  ],
+  'email_and_campaigns': [
+    'Email & Kanpay',
+    'Email & Campagnes',
+    'Email & Campaigns',
+  ],
+  'close_cashier': [
+    'Klòti Kès Kesyè',
+    'Clôturer la Caisse',
+    'Close Cash Register',
+  ],
   'revenue_today_breakdown': [
     'Detay Resèt Jodia',
     'Détail Recettes du Jour',

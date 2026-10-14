@@ -102,6 +102,19 @@ begin
   exception when invalid_parameter_value then
     if sqlerrm <> 'invalid_record' then raise; end if; end;
 
+  -- Cash register: open + close must not trip the audit whitelist.
+  execute 'reset role';
+  perform set_config('request.jwt.claim.sub', owner_user::text, true);
+  execute 'set local role authenticated';
+  v_payload := public.open_cash_session(5000);
+  v_payload := public.close_cash_session((v_payload->>'id')::uuid, 5000, 'test close');
+  if v_payload->>'status' <> 'closed' then raise exception 'FAIL cash close %', v_payload; end if;
+  execute 'reset role';
+  if not exists(select 1 from public.audit_log where action = 'cash_session_closed') then
+    raise exception 'FAIL cash_session_closed audit';
+  end if;
+  execute 'set local role authenticated';
+
   -- Reception can enqueue, but an unknown role cannot.
   perform set_config('request.jwt.claim.sub', recep_user::text, true);
   v_result := public.enqueue_payment_receipt(pay, v_path);

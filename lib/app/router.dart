@@ -34,6 +34,7 @@ import '../features/onboarding/presentation/splash_page.dart';
 import '../features/payments/presentation/payments_page.dart';
 import '../features/plans/presentation/plans_page.dart';
 import '../features/reports/presentation/reports_page.dart';
+import '../features/settings/data/settings_repository.dart';
 import '../features/settings/presentation/branding_page.dart';
 import '../features/settings/presentation/pin_page.dart';
 import '../features/settings/presentation/settings_page.dart';
@@ -562,18 +563,10 @@ class _AppShell extends StatelessWidget {
                       minExtendedWidth: 220,
                       leading: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: isExtended
-                            ? Image.asset(
-                                'assets/brand/logo_horizontal.png',
-                                width: 150,
-                                fit: BoxFit.contain,
-                              )
-                            : Image.asset(
-                                'assets/brand/icon_securgym.png',
-                                width: 34,
-                                height: 34,
-                                fit: BoxFit.contain,
-                              ),
+                        child: _GymLogo(
+                          runtime: runtime,
+                          extended: isExtended,
+                        ),
                       ),
                       trailing: Expanded(
                         child: Align(
@@ -658,4 +651,77 @@ class _AppShell extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Logo gym nan nan ba navigasyon an — telechaje URL siyen a yon fwa.
+/// Tounen sou logo SecurGYM si gym nan pa gen logo.
+class _GymLogo extends StatefulWidget {
+  const _GymLogo({required this.runtime, required this.extended});
+  final AppRuntime runtime;
+  final bool extended;
+
+  @override
+  State<_GymLogo> createState() => _GymLogoState();
+}
+
+class _GymLogoState extends State<_GymLogo> {
+  String? _url;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final runtime = widget.runtime;
+      final db = runtime.database;
+      final session = runtime.session;
+      if (db == null || session == null) return;
+      final url = await GymSettingsRepository(
+        runtime.client,
+        db,
+        session,
+      ).signedLogoUrl(session.gym?['logo_url'] as String?);
+      if (mounted) {
+        setState(() {
+          _url = url;
+          _loaded = true;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loaded = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = _url;
+    if (_loaded && url != null) {
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: widget.extended ? 180 : 56,
+          maxHeight: widget.extended ? 64 : 56,
+        ),
+        child: Image.network(url, fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => _fallback()),
+      );
+    }
+    return _fallback();
+  }
+
+  Widget _fallback() => widget.extended
+      ? Image.asset(
+          'assets/brand/logo_horizontal.png',
+          width: 150,
+          fit: BoxFit.contain,
+        )
+      : Image.asset(
+          'assets/brand/icon_securgym.png',
+          width: 34,
+          height: 34,
+          fit: BoxFit.contain,
+        );
 }

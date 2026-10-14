@@ -125,4 +125,44 @@ end $$;
 revoke all on function public.enqueue_payment_receipt(uuid, text) from public, anon;
 grant execute on function public.enqueue_payment_receipt(uuid, text) to authenticated;
 
+-- ----------------------------------------------------------------------------
+-- audit() : la whitelist de 23 avait oublié les évènements de 20 (caisse,
+-- porte, campagnes…) — close_cash_session levait invalid_audit_event.
+-- ----------------------------------------------------------------------------
+create or replace function public.audit(p_action text, p_entity text, p_entity_id uuid, p_details jsonb default '{}'::jsonb, p_gym uuid default null)
+returns uuid language plpgsql security definer set search_path = '' as $$
+declare v_id uuid := gen_random_uuid(); v_gym uuid := public.current_gym_id();
+begin
+    if v_gym is null or public.current_staff_id() is null or (p_gym is not null and p_gym <> v_gym) then
+        raise exception 'access_denied' using errcode = '42501';
+    end if;
+    if jsonb_typeof(coalesce(p_details, '{}'::jsonb)) is distinct from 'object' or char_length(p_details::text) > 4096 then
+        raise exception 'invalid_audit_event' using errcode = '22023';
+    end if;
+    if p_entity not in ('members','plans','subscriptions','payments','attendance','badge_templates','gyms','staff',
+                        'badges','member_pins','payment_declarations','employees',
+                        'cash_sessions','access_events','campaigns')
+       or p_action not in (
+         'create','update','delete','sync_conflict',
+         'member_create','member_update','member_archive','qr_regenerate',
+         'plan_save','plan_archive',
+         'subscription_create','subscription_update','subscription_renew','subscription_cancel','subscription_archive',
+         'payment_create','payment_update','payment_archive','payment_voided',
+         'attendance_scan','badge_template_save','badge_template_archive','export',
+         'badge_bind','badge_update','pin_set','pin_update','pin_reset','payment_declaration',
+         'employee_create','employee_update','employee_archive','branding_updated',
+         'cash_session_opened','cash_session_closed','manual_door_open',
+         'fingerprint_registered','fingerprint_removed','extra_badges_request',
+         'payment_declaration_review','campaign_sent'
+       ) then
+        raise exception 'invalid_audit_event' using errcode = '22023';
+    end if;
+    insert into public.audit_log(id, gym_id, actor_id, action, entity, entity_id, details)
+    values(v_id, v_gym, public.current_staff_id(), p_action, p_entity, p_entity_id, coalesce(p_details, '{}'::jsonb));
+    return v_id;
+end $$;
+
+revoke execute on function public.audit(text,text,uuid,jsonb,uuid) from public, anon;
+grant execute on function public.audit(text,text,uuid,jsonb,uuid) to authenticated;
+
 commit;
