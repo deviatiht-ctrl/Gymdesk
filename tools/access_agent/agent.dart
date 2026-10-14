@@ -35,12 +35,16 @@ Map<String, dynamic> terminalConfig() {
   var port = 51211;
   try {
     final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final f = File('$exeDir${Platform.pathSeparator}terminal.json');
-    if (f.existsSync()) {
-      final j = jsonDecode(f.readAsStringSync());
-      if (j is Map) {
-        ip = j['ip']?.toString() ?? ip;
-        port = (j['port'] as num?)?.toInt() ?? port;
+    final parentDir = Directory(exeDir).parent.path;
+    for (final d in [exeDir, parentDir, Directory.current.path]) {
+      final f = File('$d${Platform.pathSeparator}terminal.json');
+      if (f.existsSync()) {
+        final j = jsonDecode(f.readAsStringSync());
+        if (j is Map) {
+          ip = j['ip']?.toString() ?? ip;
+          port = (j['port'] as num?)?.toInt() ?? port;
+          break;
+        }
       }
     }
   } catch (_) {}
@@ -51,13 +55,17 @@ Map<String, dynamic> terminalConfig() {
 Map<String, String>? _biostarTool() {
   final sep = Platform.pathSeparator;
   final exeDir = File(Platform.resolvedExecutable).parent.path;
+  final parentDir = Directory(exeDir).parent.path;
   final cwd = Directory.current.path;
-  final exeDirs = [exeDir, cwd, '$cwd${sep}GymDesk_USB'];
+  final exeDirs = [exeDir, parentDir, cwd, '$cwd${sep}GymDesk_USB'];
   final dllDirs = [
     '$exeDir${sep}Lib${sep}Window${sep}lib${sep}x64',
+    '$parentDir${sep}Lib${sep}Window${sep}lib${sep}x64',
     '$exeDir${sep}biostar',
+    '$parentDir${sep}biostar',
     '$cwd${sep}GymDesk_USB${sep}Lib${sep}Window${sep}lib${sep}x64',
     exeDir,
+    parentDir,
   ];
   String? tool;
   for (final d in exeDirs) {
@@ -266,11 +274,14 @@ void broadcastEvent(Map<String, dynamic> data) {
 
 List<String> _sdkCandidateDirs() {
   final exeDir = File(Platform.resolvedExecutable).parent.path;
+  final parentDir = Directory(exeDir).parent.path;
   final cwd = Directory.current.path;
   final sep = Platform.pathSeparator;
   return [
     exeDir,
+    parentDir,
     '$exeDir${sep}sdk',
+    '$parentDir${sep}sdk',
     cwd,
     '$cwd${sep}sdk',
     '$cwd${sep}tools${sep}access_agent${sep}sdk',
