@@ -14,7 +14,7 @@ import 'suprema_ffi.dart';
 ///   signale honnêtement (`reader_connected: false`) : aucune capture simulée.
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
-const String agentVersion = '3.3.0';
+const String agentVersion = '3.4.0';
 bool _doorConnected = true;
 
 ReaderBackend? _sdk;
@@ -74,8 +74,151 @@ Map<String, String>? _biostarTool() {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Siveyan tèminal la (biostar_tool watch): yon sèl koneksyon pèmanan ki
+// voye chak evènman W2 a (idantifikasyon, refi, pòt) bay app la via /events,
+// epi ki egzekite kòmand pòt yo (pulse/release/lock) sou menm koneksyon an.
+// ---------------------------------------------------------------------------
+Process? _watchProc;
+bool _watchReady = false;
+bool _watchPaused = false;
+bool _watchLoopStarted = false;
+DateTime? _watchLastEvent;
+String? _watchError;
+Future<void> _biostarQueue = Future.value();
+
+Directory get _watchCmdDir => Directory('${Directory.systemTemp.path}${Platform.pathSeparator}gymdesk_watch_cmd');
+
+void _ensureWatchLoop() {
+  if (_watchLoopStarted) return;
+  _watchLoopStarted = true;
+  unawaited(_watchLoop());
+}
+
+Future<void> _watchLoop() async {
+  var backoff = 3;
+  while (true) {
+    if (_watchPaused || _biostarTool() == null) {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      continue;
+    }
+    final cfg = _biostarTool()!;
+    final term = terminalConfig();
+    try {
+      if (!_watchCmdDir.existsSync()) _watchCmdDir.createSync(recursive: true);
+      for (final f in _watchCmdDir.listSync()) {
+        try { f.deleteSync(); } catch (_) {}
+      }
+      final proc = await Process.start(
+        cfg['tool']!,
+        [cfg['dllDir']!, 'watch', '${term['ip']}', '${term['port']}', '0', _watchCmdDir.path],
+        workingDirectory: cfg['dllDir'],
+      );
+      _watchProc = proc;
+      unawaited(proc.stderr.drain<void>());
+      final lines = proc.stdout.transform(utf8.decoder).transform(const LineSplitter());
+      final sub = lines.listen((line) {
+        final f = line.trim().split('\t');
+        if (f.first == 'watching') {
+          _watchReady = true;
+          _watchError = null;
+          backoff = 3;
+          print('[W2] Siveyan aktif sou ${term['ip']} (${f.length > 1 ? f[1] : '?'})');
+          broadcastEvent({'type': 'terminal_watch', 'online': true, 'ip': term['ip']});
+        } else if (f.first == 'evt' && f.length >= 7) {
+          _watchLastEvent = DateTime.now();
+          String field(String prefix) {
+            final v = f.firstWhere((x) => x.startsWith(prefix), orElse: () => '');
+            return v.isEmpty ? '' : v.substring(prefix.length);
+          }
+          final uid = field('uid=');
+          final code = int.tryParse(field('code=0x'), radix: 16) ?? 0;
+          broadcastEvent({
+            'type': 'terminal_event',
+            'event_id': f[1],
+            'at': f[2],
+            'uid': (uid.isEmpty || uid == '-') ? null : uid,
+            'code': code,
+            'main': code & 0xFF00,
+            'sub': code & 0xFF,
+            'event': f[6],
+            'timestamp': DateTime.now().toIso8601String(),
+          });
+        } else if (f.first == 'err') {
+          _watchError = f.skip(1).join(': ');
+        }
+      });
+      await proc.exitCode;
+      await sub.cancel();
+    } catch (e) {
+      _watchError = '$e';
+    }
+    final wasReady = _watchReady;
+    _watchProc = null;
+    _watchReady = false;
+    if (wasReady) broadcastEvent({'type': 'terminal_watch', 'online': false});
+    if (!_watchPaused) {
+      await Future<void>.delayed(Duration(seconds: backoff));
+      backoff = (backoff * 2).clamp(3, 30);
+    }
+  }
+}
+
+Future<void> _pauseWatch() async {
+  _watchPaused = true;
+  final p = _watchProc;
+  if (p != null) {
+    p.kill();
+    try {
+      await p.exitCode.timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+}
+
+void _resumeWatch() => _watchPaused = false;
+
+/// Kòmand pòt via siveyan an (pa gen 2yèm koneksyon). Retounen null si
+/// siveyan an pa disponib — moun ki rele a fè yon apèl biostar_tool nòmal.
+Future<List<String>?> _watchDoorCommand(String cmd) async {
+  if (!_watchReady || _watchProc == null) return null;
+  final name = 'c${DateTime.now().microsecondsSinceEpoch}';
+  final sep = Platform.pathSeparator;
+  final res = File('${_watchCmdDir.path}$sep$name.res');
+  try {
+    await File('${_watchCmdDir.path}$sep$name.tmp').writeAsString(cmd, flush: true);
+    await File('${_watchCmdDir.path}$sep$name.tmp').rename('${_watchCmdDir.path}$sep$name.cmd');
+    for (var i = 0; i < 40; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      if (res.existsSync()) {
+        final out = (await res.readAsString()).trim().split('\t');
+        try { await res.delete(); } catch (_) {}
+        return out;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 /// Lanse biostar_tool.exe yon fwa; retounen lis liy repons yo.
-Future<List<List<String>>> _biostarCall(List<String> args, {Duration timeout = const Duration(seconds: 20)}) async {
+/// Siveyan an mete an pòz pandan apèl la pou pa gen 2 koneksyon SDK
+/// an menm tan sou tèminal la; apèl yo fèt youn apre lòt.
+Future<List<List<String>>> _biostarCall(List<String> args, {Duration timeout = const Duration(seconds: 20)}) {
+  final needsDevice = args.isNotEmpty && args.first != 'search';
+  final completer = Completer<List<List<String>>>();
+  _biostarQueue = _biostarQueue.then((_) async {
+    try {
+      if (needsDevice) await _pauseWatch();
+      completer.complete(await _biostarRun(args, timeout: timeout));
+    } catch (e, st) {
+      completer.completeError(e, st);
+    } finally {
+      if (needsDevice) _resumeWatch();
+    }
+  });
+  return completer.future;
+}
+
+Future<List<List<String>>> _biostarRun(List<String> args, {required Duration timeout}) async {
   final cfg = _biostarTool();
   if (cfg == null) throw SupremaException('sdk_missing', 'biostar_tool.exe oswa BS_SDK_V2.dll (x64) manke.');
   final process = await Process.start(cfg['tool']!, [cfg['dllDir']!, ...args], workingDirectory: cfg['dllDir']);
@@ -94,8 +237,20 @@ Future<List<List<String>>> _biostarCall(List<String> args, {Duration timeout = c
 
 final List<HttpResponse> _eventSubscribers = [];
 
+// Jounal evènman pou long-polling (/api/events/poll): navigatè yo pa ka
+// li yon flux SSE atravè package:http sou web, kidonk app la poll isit la.
+final List<Map<String, dynamic>> _eventLog = [];
+int _eventSeq = 0;
+Completer<void> _eventSignal = Completer<void>();
+
 void broadcastEvent(Map<String, dynamic> data) {
-  final payload = 'data: ${jsonEncode(data)}\n\n';
+  final entry = {...data, 'seq': ++_eventSeq};
+  _eventLog.add(entry);
+  if (_eventLog.length > 200) _eventLog.removeAt(0);
+  final signal = _eventSignal;
+  _eventSignal = Completer<void>();
+  signal.complete();
+  final payload = 'data: ${jsonEncode(entry)}\n\n';
   final dead = <HttpResponse>[];
   for (final res in _eventSubscribers) {
     try {
@@ -171,6 +326,7 @@ Future<void> main(List<String> args) async {
     print(' Lektè Suprema konekte (${_sdk!.mode}): ${_sdk!.scannerId}');
   }
   print('========================================================');
+  _ensureWatchLoop();
 
   await for (final request in server) {
     _handleRequest(request);
@@ -280,6 +436,7 @@ Future<void> _handleRequest(HttpRequest request) async {
         'reader_name': (sdk?.readerConnected ?? false) ? 'Suprema BioMini' : null,
         'reader_serial': sdk?.scannerId,
         'door_connected': _doorConnected,
+        'terminal_watch': _watchReady,
       });
       return;
     }
@@ -291,6 +448,24 @@ Future<void> _handleRequest(HttpRequest request) async {
       res.headers.set('Connection', 'keep-alive');
       _eventSubscribers.add(res);
       res.write('data: ${jsonEncode({'type': 'connected', 'timestamp': DateTime.now().toIso8601String()})}\n\n');
+      return;
+    }
+
+    // 2bis. Long-polling: ?since=<seq> (-1 = pozisyon aktyèl san rejwe ansyen yo)
+    if (path == '/api/events/poll') {
+      _ensureWatchLoop();
+      final since = int.tryParse(request.uri.queryParameters['since'] ?? '') ?? -1;
+      final waitSeconds = (int.tryParse(request.uri.queryParameters['wait'] ?? '') ?? 20).clamp(0, 25);
+      if (since >= 0 && !_eventLog.any((e) => (e['seq'] as int) > since) && waitSeconds > 0) {
+        try {
+          await _eventSignal.future.timeout(Duration(seconds: waitSeconds));
+        } catch (_) {}
+      }
+      await _json(res, {
+        'seq': _eventSeq,
+        'terminal_watch': _watchReady,
+        'events': since < 0 ? const [] : [for (final e in _eventLog) if ((e['seq'] as int) > since) e],
+      });
       return;
     }
 
@@ -366,8 +541,10 @@ Future<void> _handleRequest(HttpRequest request) async {
       final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
       final seconds = ((body['seconds'] as num?)?.toInt() ?? 3).clamp(1, 30);
       try {
-        final lines = await _biostarCall(['pulse', ip, '$port', '$seconds'],
-            timeout: const Duration(seconds: 25));
+        final viaWatch = ip == terminalConfig()['ip'] ? await _watchDoorCommand('pulse $seconds') : null;
+        final lines = viaWatch != null
+            ? [viaWatch]
+            : await _biostarCall(['pulse', ip, '$port', '$seconds'], timeout: const Duration(seconds: 25));
         if (lines.any((l) => l.first == 'ok')) {
           broadcastEvent({
             'type': 'door_opened',
@@ -394,7 +571,10 @@ Future<void> _handleRequest(HttpRequest request) async {
       final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
       final verb = path.endsWith('/lock') ? 'lock' : 'release';
       try {
-        final lines = await _biostarCall([verb, ip, '$port'], timeout: const Duration(seconds: 20));
+        final viaWatch = ip == terminalConfig()['ip'] ? await _watchDoorCommand(verb) : null;
+        final lines = viaWatch != null
+            ? [viaWatch]
+            : await _biostarCall([verb, ip, '$port'], timeout: const Duration(seconds: 20));
         final ok = lines.any((l) => l.first == 'ok');
         await _json(res, {'success': ok, 'online': ok, 'ip': ip, 'command': verb});
       } on SupremaException catch (e) {
@@ -403,8 +583,34 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
+    // Siveyan tèminal la: eta + chanje tèminal ki siveye a.
+    if (path == '/api/terminals/watch') {
+      if (request.method == 'POST') {
+        final body = await _readJson(request);
+        final cfg = terminalConfig();
+        final ip = body['ip']?.toString().trim();
+        final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
+        if (ip != null && ip.isNotEmpty && (ip != cfg['ip'] || port != cfg['port'])) {
+          _terminalConfig = {'ip': ip, 'port': port};
+          await _pauseWatch();
+          _resumeWatch();
+        }
+      }
+      _ensureWatchLoop();
+      await _json(res, {
+        'success': true,
+        'online': _watchReady,
+        'terminal': terminalConfig(),
+        'last_event': _watchLastEvent?.toIso8601String(),
+        'error': _watchReady ? null : _watchError,
+      });
+      return;
+    }
+
     // Pouse anprent manm GymDesk yo sou tèminal W2 a (BS2_EnrollUser).
-    // Body: {members:[{id, name, fingers:[[b64 t1, b64 t2?], ...]}], ip?}
+    // Body: {members:[{id, name, start?, end?, fingers:[[b64 t1, b64 t2?], ...]}],
+    //        remove?:[id], ip?}. start/end = epoch UTC (segonn): apre `end`,
+    // W2 a refize moun nan li menm (menm si laptop la etenn).
     // Template yo dwe fòma natif Suprema (384B) — capture ak tpl:'suprema'.
     if (path == '/api/terminals/sync' && request.method == 'POST') {
       final body = await _readJson(request);
@@ -412,17 +618,38 @@ Future<void> _handleRequest(HttpRequest request) async {
       final ip = body['ip']?.toString() ?? cfg['ip'] as String;
       final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
       final members = (body['members'] as List?) ?? const [];
-      if (members.isEmpty) {
+      final remove = [
+        for (final r in (body['remove'] as List?) ?? const [])
+          if (r.toString().replaceAll('-', '').isNotEmpty) r.toString().replaceAll('-', '')
+      ];
+      if (members.isEmpty && remove.isEmpty) {
         await _json(res, {'success': false, 'error': 'empty', 'message': 'Okenn manm yo voye.'});
         return;
       }
       try {
+        var removed = 0;
+        final removeErrors = <String>[];
+        for (final uid in remove) {
+          final out = await _biostarCall(['rmuser', ip, uid, '$port'], timeout: const Duration(seconds: 20));
+          if (out.any((l) => l.first == 'ok')) {
+            removed++;
+          } else {
+            removeErrors.add('$uid: ${out.isEmpty ? 'unknown' : out.first.skip(1).join(' ')}');
+          }
+        }
+        if (members.isEmpty) {
+          await _json(res, {'success': true, 'enrolled': 0, 'removed': removed, 'errors': removeErrors});
+          return;
+        }
         final lines = <String>[];
         for (final m in members) {
           final mm = Map<String, dynamic>.from(m as Map);
           final uid = (mm['id']?.toString() ?? '').replaceAll('-', '');
           if (uid.isEmpty) continue;
-          lines.add('user\t$uid\t${(mm['name']?.toString() ?? '').replaceAll('\t', ' ')}');
+          final start = (mm['start'] as num?)?.toInt();
+          final end = (mm['end'] as num?)?.toInt();
+          final dates = start != null && end != null && end > start ? '\t$start\t$end' : '';
+          lines.add('user\t$uid\t${(mm['name']?.toString() ?? '').replaceAll('\t', ' ')}$dates');
           var idx = 0;
           for (final f in (mm['fingers'] as List? ?? const [])) {
             final tpls = (f as List).map((t) => t.toString()).toList();
@@ -438,7 +665,12 @@ Future<void> _handleRequest(HttpRequest request) async {
           await _json(res, {
             'success': ok,
             'enrolled': ok ? int.tryParse(out.firstWhere((l) => l.first == 'ok')[1]) ?? 0 : 0,
-            'errors': [for (final l in out) if (l.first == 'err') l.skip(1).join(': ')],
+            'removed': removed,
+            'skipped': [for (final l in out) if (l.first == 'skip' && l.length > 1) l[1]],
+            'errors': [
+              ...removeErrors,
+              for (final l in out) if (l.first == 'err') l.skip(1).join(': '),
+            ],
           });
         } finally {
           try { await tmp.delete(); } catch (_) {}

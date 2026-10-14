@@ -50,6 +50,22 @@ FONCTIONNALITÉS INTÉGRÉES & MATÉRIEL SUPPORTÉ :
     (ex. 192.168.1.x) ou branchés via le même routeur/switch.
   * Test : ouvrez http://127.0.0.1:47811/api/terminals (recherche)
     et POST /api/terminals/ping pour vérifier la connexion.
+  * Qui contrôle la porte (Paramètres → Biométrie) :
+    - "Le terminal vérifie la date" : la date de fin d'abonnement est
+      envoyée au W2 ; il refuse les impayés lui-même, même PC éteint.
+    - "L'application ouvre la porte" : le W2 identifie, l'application
+      vérifie le paiement puis ouvre. Application fermée = personne n'entre.
+    - Les deux peuvent être actifs en même temps.
+  * Écran d'accès (2e écran devant la porte) : Paramètres → "Ouvrir
+    l'écran d'accès", glissez la fenêtre sur l'autre écran, puis F11.
+    Il affiche le nom, les jours restants, un message d'encouragement et
+    synchronise le terminal automatiquement toutes les 10 minutes.
+  * Employés (coachs, ménage, sécurité...) : Paramètres → Employés.
+  * Diagnostic terminal (dans ce dossier, invite de commandes) :
+      biostar_tool.exe Lib\Window\lib\x64 watch 192.168.1.41 51211 60
+    affiche en direct IDENTIFY_SUCCESS / IDENTIFY_FAIL / ACCESS_DENIED.
+      biostar_tool.exe Lib\Window\lib\x64 enrollscan 192.168.1.41 <ID> "Nom" 51211
+    enregistre une empreinte directement sur le W2 (2 poses du doigt).
 
 - MESSAGERIE :
   * Email de bienvenue immédiat dès l'inscription d'un membre,

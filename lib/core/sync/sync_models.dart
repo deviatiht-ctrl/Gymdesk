@@ -16,6 +16,7 @@ enum SyncEntity {
   paymentDeclarations('payment_declarations'),
   gymContracts('gym_contracts', writable: false),
   platformInvoices('platform_invoices', writable: false),
+  employees('employees'),
   auditLog('audit_log', writable: false);
 
   const SyncEntity(this.table, {this.writable = true});

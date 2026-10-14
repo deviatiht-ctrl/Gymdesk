@@ -1,3 +1,4 @@
+import 'strings_access_v4.dart';
 import 'strings_core_v3.dart';
 import 'strings_insights.dart';
 
@@ -5,4 +6,5 @@ import 'strings_insights.dart';
 const extraStrings = <String, List<String>>{
   ...stringsCoreV3,
   ...stringsInsights,
+  ...stringsAccessV4,
 };

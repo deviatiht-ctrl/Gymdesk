@@ -12,11 +12,26 @@ import '../domain/member.dart';
 class FingerprintEnrollmentDialog extends ConsumerStatefulWidget {
   const FingerprintEnrollmentDialog({
     super.key,
-    required this.member,
+    required Member this.member,
     required this.onSaved,
-  });
+  })  : displayName = null,
+        subtitle = null,
+        onCaptured = null;
 
-  final Member member;
+  /// Menm popup 3 kapti a, pou lòt moun pase manm (ex. anplwaye yo):
+  /// [onCaptured] resevwa 3 kapti yo (menm dwèt, verifye) epi anrejistre yo.
+  const FingerprintEnrollmentDialog.generic({
+    super.key,
+    required String this.displayName,
+    this.subtitle,
+    required Future<void> Function(List<String> captures) this.onCaptured,
+    required this.onSaved,
+  }) : member = null;
+
+  final Member? member;
+  final String? displayName;
+  final String? subtitle;
+  final Future<void> Function(List<String> captures)? onCaptured;
   final VoidCallback onSaved;
 
   static Future<void> show(
@@ -29,6 +44,25 @@ class FingerprintEnrollmentDialog extends ConsumerStatefulWidget {
       barrierDismissible: false,
       builder: (context) => FingerprintEnrollmentDialog(
         member: member,
+        onSaved: onSaved,
+      ),
+    );
+  }
+
+  static Future<void> showGeneric(
+    BuildContext context, {
+    required String displayName,
+    String? subtitle,
+    required Future<void> Function(List<String> captures) onCaptured,
+    required VoidCallback onSaved,
+  }) {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => FingerprintEnrollmentDialog.generic(
+        displayName: displayName,
+        subtitle: subtitle,
+        onCaptured: onCaptured,
         onSaved: onSaved,
       ),
     );
@@ -122,37 +156,43 @@ class _FingerprintEnrollmentDialogState
     final runtime = ref.read(appRuntimeProvider);
 
     try {
-      // 1. Ekri dirèkteman sou Supabase si gen rezo
-      try {
-        await runtime.client.rpc('register_member_fingerprint', params: {
-          'p_member': widget.member.id,
-          'p_template': template,
-        });
-      } catch (e) {
-        debugPrint('Supabase direct biometric registration error: $e');
+      final generic = widget.onCaptured;
+      if (generic != null) {
+        await generic(List.unmodifiable(_captures));
+      } else {
+        final member = widget.member!;
+        // 1. Ekri dirèkteman sou Supabase si gen rezo
         try {
-          await runtime.client.from('members').update({
-            'fingerprint_template': template,
-            'fingerprint_registered': true,
-            'updated_at': DateTime.now().toUtc().toIso8601String(),
-          }).eq('id', widget.member.id);
-        } catch (_) {}
+          await runtime.client.rpc('register_member_fingerprint', params: {
+            'p_member': member.id,
+            'p_template': template,
+          });
+        } catch (e) {
+          debugPrint('Supabase direct biometric registration error: $e');
+          try {
+            await runtime.client.from('members').update({
+              'fingerprint_template': template,
+              'fingerprint_registered': true,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            }).eq('id', member.id);
+          } catch (_) {}
+        }
+
+        // 2. Mete ajou baz done Drift lokal la
+        final now = runtime.sync?.clock.correctedNow ?? DateTime.now().toUtc();
+        final updatedRow = {
+          ...member.row,
+          'fingerprint_template': template,
+          'fingerprint_registered': true,
+          'updated_at': now.toIso8601String(),
+        };
+
+        await runtime.database?.save(
+          SyncEntity.members,
+          updatedRow,
+          changedAt: now,
+        );
       }
-
-      // 2. Mete ajou baz done Drift lokal la
-      final now = runtime.sync?.clock.correctedNow ?? DateTime.now().toUtc();
-      final updatedRow = {
-        ...widget.member.row,
-        'fingerprint_template': template,
-        'fingerprint_registered': true,
-        'updated_at': now.toIso8601String(),
-      };
-
-      await runtime.database?.save(
-        SyncEntity.members,
-        updatedRow,
-        changedAt: now,
-      );
 
       // 3. Senkronize imedyatman
       unawaited(runtime.sync?.synchronize());
@@ -160,12 +200,13 @@ class _FingerprintEnrollmentDialogState
       widget.onSaved();
 
       if (mounted) {
+        final name = widget.member?.fullName ?? widget.displayName ?? '';
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xff1f6f4a),
             content: Text(
-              'Anprent anrejistre avèk siksè pou ${widget.member.fullName}!',
+              'Anprent anrejistre avèk siksè pou $name!',
             ),
           ),
         );
@@ -208,11 +249,11 @@ class _FingerprintEnrollmentDialogState
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Text(
-              widget.member.fullName,
+              widget.member?.fullName ?? widget.displayName ?? '',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
             Text(
-              widget.member.memberNumber,
+              widget.member?.memberNumber ?? widget.subtitle ?? '',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 24),

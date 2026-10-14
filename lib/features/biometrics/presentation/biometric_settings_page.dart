@@ -5,12 +5,11 @@ import 'package:gymdesk_biometrics/gymdesk_biometrics.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'dart:convert';
-
 import '../../../app/providers.dart';
+import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
-import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
+import 'access_display_page.dart';
 
 class BiometricSettingsPage extends ConsumerStatefulWidget {
   const BiometricSettingsPage({super.key});
@@ -27,6 +26,8 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
   final _relayUrlController = TextEditingController(text: 'http://192.168.1.50/relay/0?turn=on');
   final _terminalIpController = TextEditingController(text: '192.168.1.41');
   double _pulseDurationSeconds = 3.0;
+  bool _terminalEnforces = true;
+  bool _appControls = false;
 
   bool _loading = true;
   bool _saving = false;
@@ -66,6 +67,9 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
           _relayUrlController.text = cfg['relay_url'] as String? ?? 'http://192.168.1.50/relay/0?turn=on';
           _terminalIpController.text = cfg['terminal_ip'] as String? ?? '192.168.1.41';
           _pulseDurationSeconds = (cfg['pulse_duration_seconds'] as num?)?.toDouble() ?? 3.0;
+          final modes = TerminalAccessConfig.fromJson(cfg);
+          _terminalEnforces = modes.terminalEnforces;
+          _appControls = modes.appControls;
           _loading = false;
         });
       } else {
@@ -93,6 +97,8 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
         'relay_url': _relayUrlController.text.trim(),
         'terminal_ip': _terminalIpController.text.trim(),
         'pulse_duration_seconds': _pulseDurationSeconds,
+        'terminal_enforces_expiry': _terminalEnforces,
+        'app_controls_door': _appControls,
       };
 
       await client.from('gyms').update({
@@ -183,66 +189,53 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     }
   }
 
-  /// Pouse tout anprent manm yo sou tèminal BioEntry W2 a (BS2_EnrollUser).
-  /// Apre sa, tèminal la rekonèt manm GymDesk yo menm lè PC la fèmen.
-  /// Atansyon: W2 a atann fòma natif Suprema — si template ISO yo pa matche,
-  /// re-anrejistre dwèt yo apre kaptire an fòma "suprema".
+  void _setModes({bool? terminal, bool? app}) {
+    final nextTerminal = terminal ?? _terminalEnforces;
+    final nextApp = app ?? _appControls;
+    if (!nextTerminal && !nextApp) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(AppStrings.of(context).text('mode_need_one')),
+        backgroundColor: Colors.orange.shade800,
+      ));
+      return;
+    }
+    setState(() {
+      _terminalEnforces = nextTerminal;
+      _appControls = nextApp;
+    });
+  }
+
+  /// Pouse manm + anplwaye ki gen anprent sou W2 a (BS2_EnrollUser), ak dat
+  /// aksè selon mòd la (tèminal: dat fen abònman an; app: W2 a idantifye
+  /// sèlman epi app la deside). Retire moun ki pa la ankò sou tèminal la.
   Future<void> _syncFingerprintsToTerminal() async {
     setState(() {
       _testingTerminal = true;
       _terminalStatusText = null;
     });
-    final isFr = AppStrings.of(context).locale.languageCode == 'fr';
+    final s = AppStrings.of(context);
     try {
-      final db = ref.read(appRuntimeProvider).database;
-      if (db == null) return;
-      final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
-      final members = <Map<String, dynamic>>[];
-      for (final r in rows) {
-        try {
-          final row = Map<String, dynamic>.from(jsonDecode(r.payload) as Map);
-          final id = row['id'] as String?;
-          if (id == null) continue;
-          final fingers = <List<String>>[
-            if ((row['fingerprint_template'] as String?)?.isNotEmpty == true)
-              [row['fingerprint_template'] as String],
-            if ((row['fingerprint_backup_template'] as String?)?.isNotEmpty == true)
-              [row['fingerprint_backup_template'] as String],
-          ];
-          if (fingers.isEmpty) continue;
-          final name = '${row['first_name'] ?? ''} ${row['last_name'] ?? ''}'.trim();
-          members.add({'id': id, 'name': name, 'fingers': fingers});
-        } catch (_) {}
-      }
-      if (members.isEmpty) {
-        if (mounted) {
-          setState(() => _testingTerminal = false);
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(isFr
-                ? 'Aucun membre avec empreinte enregistrée.'
-                : 'Okenn manm pa gen anprent anrejistre.'),
-            backgroundColor: Colors.orange,
-          ));
-        }
-        return;
-      }
-      final result = await AccessAgentClient()
-          .syncTerminalMembers(members, terminalIp: _terminalIpController.text.trim());
-      final ok = result?['success'] == true;
-      final enrolled = result?['enrolled'] ?? 0;
-      if (mounted) {
-        setState(() => _testingTerminal = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ok
-              ? (isFr
-                  ? '$enrolled utilisateur(s) synchronisés sur le terminal !'
-                  : '$enrolled manm senkronize sou tèminal la !')
-              : (isFr
-                  ? 'Échec de la synchronisation vers le terminal.'
-                  : 'Senkronizasyon an echwe.')),
-          backgroundColor: ok ? const Color(0xFF059669) : Colors.red,
-        ));
-      }
+      final runtime = ref.read(appRuntimeProvider);
+      final service = TerminalAccessService(runtime.client, runtime.database!, runtime.session!);
+      final result = await service.syncToTerminal(TerminalAccessConfig(
+        terminalEnforces: _terminalEnforces,
+        appControls: _appControls,
+        terminalIp: _terminalIpController.text.trim().isEmpty ? '192.168.1.41' : _terminalIpController.text.trim(),
+        pulseSeconds: _pulseDurationSeconds.round(),
+      ));
+      if (!mounted) return;
+      setState(() => _testingTerminal = false);
+      final nothing = result.ok && result.enrolled == 0 && result.removed == 0 && result.errors.isEmpty;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(nothing
+            ? s.text('terminal_sync_nothing')
+            : result.ok
+                ? s.text('terminal_sync_done')
+                    .replaceAll('{n}', '${result.enrolled}')
+                    .replaceAll('{r}', '${result.removed}')
+                : '${s.text('terminal_sync_failed')}${result.errors.isEmpty ? '' : '\n${result.errors.first}'}'),
+        backgroundColor: nothing ? Colors.orange : result.ok ? const Color(0xFF059669) : Colors.red,
+      ));
     } catch (_) {
       if (mounted) setState(() => _testingTerminal = false);
     }
@@ -339,6 +332,81 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                           value: 'off',
                           groupValue: _accessMode,
                           onChanged: (val) => setState(() => _accessMode = val!),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Section 1bis : Kiyès ki kontwole pòt la (tèminal / app / tou de)
+                Card(
+                  elevation: 1.5,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.keyRound, color: Color(0xFF0F766E), size: 26),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                s.text('access_modes_title'),
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(LucideIcons.router),
+                          title: Text(s.text('mode_terminal_title')),
+                          subtitle: Text(s.text('mode_terminal_desc')),
+                          value: _terminalEnforces,
+                          onChanged: (v) => _setModes(terminal: v),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(LucideIcons.monitorSmartphone),
+                          title: Text(s.text('mode_app_title')),
+                          subtitle: Text(s.text('mode_app_desc')),
+                          value: _appControls,
+                          onChanged: (v) => _setModes(app: v),
+                        ),
+                        if (_terminalEnforces && _appControls)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, bottom: 8),
+                            child: Text(
+                              s.text('mode_both_hint'),
+                              style: TextStyle(color: Colors.teal.shade800, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 10,
+                          children: [
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                              onPressed: () => openAccessDisplayWindow(context),
+                              icon: const Icon(LucideIcons.monitor, size: 18),
+                              label: Text(s.text('open_access_display')),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () => context.push('/settings/employees'),
+                              icon: const Icon(LucideIcons.idCard, size: 18),
+                              label: Text(s.text('employees')),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          s.text('access_display_hint'),
+                          style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
                         ),
                       ],
                     ),

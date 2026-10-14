@@ -13,12 +13,14 @@ import '../features/auth/presentation/password_reset_page.dart';
 import '../features/auth/presentation/signup_page.dart';
 import '../features/auth/presentation/unlock_page.dart';
 import '../features/attendance/presentation/kiosk_page.dart';
+import '../features/biometrics/presentation/access_display_page.dart';
 import '../features/biometrics/presentation/biometric_settings_page.dart';
 import '../features/biometrics/presentation/door_access_page.dart';
 import '../features/biometrics/presentation/identify_reader_page.dart';
 import '../features/biometrics/presentation/reader_diagnostic_page.dart';
 import '../features/cash/presentation/cash_session_page.dart';
 import '../features/dashboard/presentation/local_overview_page.dart';
+import '../features/employees/presentation/employees_page.dart';
 import '../features/enrollment/presentation/enrollment_wizard_page.dart';
 import '../features/gyms/presentation/gyms_page.dart';
 import '../features/gyms/presentation/create_gym_page.dart';
@@ -43,6 +45,8 @@ import '../features/billing/presentation/paywall_page.dart';
 import '../l10n/app_strings.dart';
 import 'runtime.dart';
 
+String? _deferredLocation;
+
 GoRouter createRouter(AppRuntime runtime) => GoRouter(
   initialLocation: '/startup',
   refreshListenable: runtime,
@@ -59,6 +63,20 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         runtime.errorCode == 'gym_suspended' ? '/paywall' : '/access',
       SessionPhase.ready => null,
     };
+    // Fenèt ekran aksè a ouvri dirèkteman sou /access-display: kenbe destinasyon
+    // an pandan demaraj la (/startup) pou retounen sou li lè sesyon an pare.
+    if (path == '/access-display' && gate != null) _deferredLocation = path;
+    if (gate == null && _deferredLocation != null && path != _deferredLocation) {
+      final target = _deferredLocation;
+      _deferredLocation = null;
+      if (runtime.session?.isPlatformAdmin != true) return target;
+    }
+    if (gate == null && path == _deferredLocation) _deferredLocation = null;
+    if (path == '/access-display' &&
+        gate == null &&
+        !{'owner', 'supervisor', 'reception'}.contains(runtime.session?.role)) {
+      return '/';
+    }
     if (gate != null) {
       if (runtime.phase == SessionPhase.signedOut &&
           {'/language', '/onboarding', '/signup', '/login'}.contains(path)) {
@@ -109,6 +127,10 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
     }
     if (path.startsWith('/settings/staff') &&
         (platform || runtime.session?.role != 'owner')) {
+      return '/settings';
+    }
+    if (path.startsWith('/settings/employees') &&
+        (platform || runtime.session?.canManageGym != true)) {
       return '/settings';
     }
     if (path.startsWith('/badges') ||
@@ -171,6 +193,11 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
     GoRoute(
       path: '/kiosk',
       builder: (context, state) => const KioskPage(),
+    ),
+    // Ekran aksè pou 2yèm ekran devan pòt la (fenèt apa, plen ekran).
+    GoRoute(
+      path: '/access-display',
+      builder: (context, state) => const AccessDisplayPage(),
     ),
     GoRoute(
       path: '/reset-password',
@@ -285,6 +312,10 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         GoRoute(
           path: '/settings/staff/new',
           builder: (context, state) => const CreateStaffPage(),
+        ),
+        GoRoute(
+          path: '/settings/employees',
+          builder: (context, state) => const EmployeesPage(),
         ),
         GoRoute(path: '/gyms', builder: (context, state) => const GymsPage()),
         GoRoute(

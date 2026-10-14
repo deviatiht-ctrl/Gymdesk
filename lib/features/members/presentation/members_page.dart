@@ -9,6 +9,7 @@ import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
 import '../data/members_repository.dart';
+import 'members_stats_panel.dart';
 
 class MembersPage extends ConsumerStatefulWidget {
   const MembersPage({super.key});
@@ -18,8 +19,10 @@ class MembersPage extends ConsumerStatefulWidget {
 
 class _MembersPageState extends ConsumerState<MembersPage> {
   late final MembersRepository _repository;
+  late final Stream<List<MemberListEntry>> _all;
   final _search = TextEditingController();
   String _filter = 'all';
+  bool _showStats = true;
 
   @override
   void initState() {
@@ -30,6 +33,20 @@ class _MembersPageState extends ConsumerState<MembersPage> {
       runtime.database!,
       runtime.session!,
     );
+    _all = _repository.watch().asBroadcastStream();
+  }
+
+  Map<String, int> _counts(List<MemberListEntry> all) {
+    final st = MembersStats.from(all, DateTime.now());
+    return {
+      'all': st.total,
+      'valid': st.active,
+      'expiring': st.expiring,
+      'expired': st.expired,
+      'pending': st.pending,
+      'pending_fingerprint': st.noFingerprint,
+      'suspended': all.where((e) => e.member.status == 'suspended').length,
+    };
   }
 
   @override
@@ -63,6 +80,11 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                 s.text('members'),
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
+              OutlinedButton.icon(
+                onPressed: () => setState(() => _showStats = !_showStats),
+                icon: Icon(_showStats ? LucideIcons.chevronUp : LucideIcons.chartColumn, size: 18),
+                label: Text(s.text(_showStats ? 'hide_stats' : 'show_stats')),
+              ),
               FilledButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF0F766E),
@@ -73,6 +95,18 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                 label: const Text('Enskri Nouvo Manm (Anprent)'),
               ),
             ],
+          ),
+        ),
+        StreamBuilder<List<MemberListEntry>>(
+          stream: _all,
+          builder: (context, snapshot) => AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            child: _showStats && snapshot.hasData && MediaQuery.sizeOf(context).height >= 700
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                    child: MembersStatsPanel(entries: snapshot.data!),
+                  )
+                : const SizedBox(width: double.infinity),
           ),
         ),
         Padding(
@@ -99,29 +133,34 @@ class _MembersPageState extends ConsumerState<MembersPage> {
           padding: const EdgeInsets.all(24),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final filter in [
-                  'all',
-                  'valid',
-                  'expiring',
-                  'expired',
-                  'pending',
-                  'pending_fingerprint',
-                  'suspended',
-                ])
-                  ChoiceChip(
-                    label: Text(
-                      filter == 'pending_fingerprint'
-                          ? 'An atann anprent (Pou rele)'
-                          : s.text('member_filter_$filter'),
-                    ),
-                    selected: _filter == filter,
-                    onSelected: (_) => setState(() => _filter = filter),
-                  ),
-              ],
+            child: StreamBuilder<List<MemberListEntry>>(
+              stream: _all,
+              builder: (context, snapshot) {
+                final counts = snapshot.hasData ? _counts(snapshot.data!) : const <String, int>{};
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final filter in [
+                      'all',
+                      'valid',
+                      'expiring',
+                      'expired',
+                      'pending',
+                      'pending_fingerprint',
+                      'suspended',
+                    ])
+                      ChoiceChip(
+                        label: Text(
+                          '${filter == 'pending_fingerprint' ? 'An atann anprent (Pou rele)' : s.text('member_filter_$filter')}'
+                          '${counts[filter] == null ? '' : ' · ${counts[filter]}'}',
+                        ),
+                        selected: _filter == filter,
+                        onSelected: (_) => setState(() => _filter = filter),
+                      ),
+                  ],
+                );
+              },
             ),
           ),
         ),

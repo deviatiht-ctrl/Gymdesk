@@ -81,3 +81,17 @@ Deno.test('templates escape content and reject unsafe logo URLs and colors', () 
   const welcome = renderEmail({ ...job, kind: 'gym_welcome', payload: { ...job.payload, status: 'trial', badge_quota: 100 } }, null);
   assert(welcome.text.includes('100') && welcome.text.includes('essai') && welcome.subject.includes('GymDesk'));
 });
+Deno.test('renewal reminders follow the gym member language; other emails stay French', () => {
+  const reminder = (language: string, days: number) => renderEmail({
+    ...job, kind: 'renewal_reminder',
+    payload: { ...job.payload, language, days_left: days, renewal_price: 1500, end_date: '2026-10-31' },
+  }, null);
+  const ht = reminder('ht', 2);
+  assert(ht.subject.includes('2 jou') && ht.html.includes('lang="ht"') && ht.text.startsWith('Bonjou') && ht.text.includes('Pa bliye peye'));
+  const en = reminder('en', 0);
+  assert(en.subject.includes('ends today') && en.text.includes('Best regards'));
+  const fr = reminder('xx', 7);
+  assert(fr.subject.includes('7 jours') && fr.html.includes('lang="fr"'));
+  const welcome = renderEmail({ ...job, payload: { ...job.payload, language: 'ht' } }, null);
+  assert(welcome.html.includes('lang="fr"') && welcome.text.includes('Cordialement'));
+});

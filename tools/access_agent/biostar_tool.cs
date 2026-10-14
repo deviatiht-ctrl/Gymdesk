@@ -183,6 +183,8 @@ public struct BS2UserBlob
 static class Program
 {
     static IntPtr ctx = IntPtr.Zero;
+    const uint DefaultStart = 978307200;   // 2001-01-01 00:00:00
+    const uint DefaultEnd = 1924991999;    // 2030-12-31 23:59:59
 
     static int Init(string dllDir)
     {
@@ -439,6 +441,14 @@ static class Program
                 if (!users.ContainsKey(uid))
                 {
                     var blob = NewBlob(uid, f[2]);
+                    // Opsyonèl: dat kòmansman/fen (epoch UTC) — W2 a refize
+                    // itilizatè a li menm apre dat fen an (ACCESS_DENIED_EXPIRED).
+                    uint start, end;
+                    if (f.Length >= 5 && uint.TryParse(f[3], out start) && uint.TryParse(f[4], out end) && end > start)
+                    {
+                        blob.setting.startTime = start;
+                        blob.setting.endTime = end;
+                    }
                     users[uid] = blob;
                     fingers[uid] = new List<BS2Fingerprint>();
                     order.Add(uid);
@@ -529,8 +539,11 @@ static class Program
             },
             setting = new BS2UserSetting
             {
-                startTime = 0,
-                endTime = 0xFFFFFFFF,   // pa janm ekspire
+                // Valè default BioStar 2 (2001-01-01 → 2030-12-31 23:59:59).
+                // ATANSYON: endTime=0xFFFFFFFF/startTime=0 = W2 a trete l kòm
+                // ekspire (ACCESS_DENIED_EXPIRED 0x1903, verifye sou W2 a).
+                startTime = DefaultStart,
+                endTime = DefaultEnd,
                 fingerAuthMode = 255,   // NONE → itilize mòd default tèminal la
                 cardAuthMode = 255,     // (menm jan ak itilizatè BioStar yo)
                 idAuthMode = 255,
@@ -594,6 +607,7 @@ static class Program
             var name = System.Text.Encoding.UTF8.GetString(blobs[0].name).TrimEnd('\0').Trim();
             var groups = string.Join(",", blobs[0].accessGroupId.Where(g => g != 0));
             Console.WriteLine("user\t" + uid + "\t" + name + "\tnumFingers=" + blobs[0].user.numFingers
+                + "\tstart=" + blobs[0].setting.startTime + "\tend=" + blobs[0].setting.endTime
                 + "\tfingerAuth=" + blobs[0].setting.fingerAuthMode
                 + "\tcardAuth=" + blobs[0].setting.cardAuthMode
                 + "\tidAuth=" + blobs[0].setting.idAuthMode
@@ -700,9 +714,12 @@ static class Program
         catch { }
     }
 
-    // Siveye evènman W2 yo pandan <seconds> segonn — mete dwèt sou
-    // tèminal la pandan sa a pou wè si l rekonèt ou oswa l refize.
-    static int Watch(string ip, ushort port, int seconds)
+    // Siveye evènman W2 yo pandan <seconds> segonn (0 = san fen) — mete
+    // dwèt sou tèminal la pou wè si l rekonèt ou oswa l refize.
+    // [cmdDir]: ajan an depoze fichye *.cmd ("pulse 3" | "release" | "lock")
+    // pou pòt la egzekite sou MENM koneksyon an (pa gen 2yèm koneksyon,
+    // pa gen evènman ki pèdi). Rezilta a ekri nan <non>.res.
+    static int Watch(string ip, ushort port, int seconds, string cmdDir)
     {
         uint id;
         var rc = Connect(ip, port, out id);
@@ -710,11 +727,89 @@ static class Program
         var cbPtr = Marshal.GetFunctionPointerForDelegate(logCb);
         rc = Native.BS2_StartMonitoringLog(ctx, id, cbPtr);
         if (rc <= 0) { Console.WriteLine("err\twatch\tStartMonitoringLog: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
-        Console.Error.WriteLine("[watch] Siveyan aktive pandan " + seconds + "s — eskane dwèt la sou W2 a kounye a...");
-        System.Threading.Thread.Sleep(seconds * 1000);
+        int doorId = 0;
+        IntPtr doorObj; uint numDoor;
+        if (Native.BS2_GetAllDoor(ctx, id, out doorObj, out numDoor) >= 0 && numDoor > 0)
+        {
+            doorId = Marshal.ReadInt32(doorObj, 0);
+            Native.BS2_ReleaseObject(doorObj);
+        }
+        Console.WriteLine("watching\t" + id + "\tdoor=" + doorId);
+        Console.Out.Flush();
+        Console.Error.WriteLine("[watch] Siveyan aktive" + (seconds > 0 ? " pandan " + seconds + "s" : "") + " — eskane dwèt la sou W2 a kounye a...");
+        var started = DateTime.UtcNow;
+        var lastBeat = DateTime.UtcNow;
+        var exitCode = 0;
+        while (seconds <= 0 || (DateTime.UtcNow - started).TotalSeconds < seconds)
+        {
+            System.Threading.Thread.Sleep(150);
+            if (cmdDir != null && System.IO.Directory.Exists(cmdDir))
+            {
+                foreach (var file in System.IO.Directory.GetFiles(cmdDir, "*.cmd"))
+                {
+                    string cmd;
+                    try { cmd = System.IO.File.ReadAllText(file).Trim(); System.IO.File.Delete(file); }
+                    catch { continue; }
+                    var resFile = System.IO.Path.ChangeExtension(file, ".res");
+                    var capturedDoor = doorId;
+                    var deviceId = id;
+                    new System.Threading.Thread(() => RunDoorCommand(deviceId, capturedDoor, cmd, resFile)) { IsBackground = true }.Start();
+                }
+            }
+            if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 20)
+            {
+                lastBeat = DateTime.UtcNow;
+                BS2SimpleDeviceInfo info;
+                if (Native.BS2_GetDeviceInfo(ctx, id, out info) <= 0)
+                {
+                    // Tèminal la dekonekte: kite ajan an relanse siveyan an.
+                    Console.WriteLine("err\tdisconnected\tTèminal la pa reponn ankò");
+                    Console.Out.Flush();
+                    exitCode = 2;
+                    break;
+                }
+            }
+        }
         Native.BS2_StopMonitoringLog(ctx, id);
         Native.BS2_DisconnectDevice(ctx, id);
-        return 0;
+        return exitCode;
+    }
+
+    static void RunDoorCommand(uint id, int doorId, string cmd, string resFile)
+    {
+        string result;
+        if (doorId == 0) result = "err\tno_door\tOkenn pòt pa konfigire sou tèminal la";
+        else
+        {
+            var parts = cmd.Split(' ');
+            var doorIds = Marshal.AllocHGlobal(4);
+            try
+            {
+                Marshal.WriteInt32(doorIds, 0, doorId);
+                int rc;
+                if (parts[0] == "pulse")
+                {
+                    uint seconds = 3;
+                    if (parts.Length > 1) uint.TryParse(parts[1], out seconds);
+                    seconds = Math.Max(1u, Math.Min(seconds, 20u));
+                    rc = Native.BS2_TimedUnlockDoor(ctx, id, 0x04, doorIds, 1, seconds);
+                    if (rc >= 0)
+                    {
+                        // Menm koreksyon ak Pulse(): san kapteur pòt, timed unlock
+                        // la pa ekspire — nou retire flag operatè a apre dire a.
+                        System.IO.File.WriteAllText(resFile, "ok\t1");
+                        System.Threading.Thread.Sleep((int)seconds * 1000);
+                        Native.BS2_ReleaseDoor(ctx, id, 0x04, doorIds, 1);
+                        return;
+                    }
+                }
+                else if (parts[0] == "lock") rc = Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1);
+                else rc = Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+                result = rc >= 0 ? "ok\t1" : "err\tdoor\t" + parts[0] + ": " + rc;
+            }
+            finally { Marshal.FreeHGlobal(doorIds); }
+        }
+        try { System.IO.File.WriteAllText(resFile, result); } catch { }
     }
 
     // Eskane yon dwèt sou W2 a (fòma natif SUPREMA) epi afiche template yo
@@ -1042,9 +1137,9 @@ static class Program
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tsscan <ip> [port]"); return 1; }
                     return SScan(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
                 case "watch":
-                    if (args.Length < 3) { Console.WriteLine("err\tusage\twatch <ip> [port] [seconds]"); return 1; }
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\twatch <ip> [port] [seconds] [cmdDir]"); return 1; }
                     return Watch(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,
-                        args.Length > 4 ? int.Parse(args[4]) : 30);
+                        args.Length > 4 ? int.Parse(args[4]) : 30, args.Length > 5 ? args[5] : null);
                 case "enrollscan":
                     if (args.Length < 4) { Console.WriteLine("err\tusage\tenrollscan <ip> <uid> [name] [port]"); return 1; }
                     return EnrollScan(args[2], args[3], args.Length > 4 ? args[4] : "",

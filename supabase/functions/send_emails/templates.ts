@@ -14,6 +14,10 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
     return m ? `${m[3]}/${m[2]}/${m[1]}` : value;
   };
   const money = (amount: unknown, currency: unknown) => `${amount ?? 0} ${currency ?? 'HTG'}`;
+  // Lang manm yo (gyms.settings.member_language). Sèlman rapèl yo tradui pou
+  // kounye a; lòt imèl yo rete an fransè pou pa melanje lang nan yon mesaj.
+  const lang = job.kind === 'renewal_reminder' && (p.language === 'ht' || p.language === 'en') ? p.language : 'fr';
+  const t = (fr: string, ht: string, en: string) => lang === 'ht' ? ht : lang === 'en' ? en : fr;
 
   let title = 'Bienvenue dans votre salle';
   let subject = '';
@@ -59,17 +63,34 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
     note = 'Votre accès par empreinte reste actif sans interruption.';
   } else if (job.kind === 'renewal_reminder') {
     const daysLeft = Number(p.days_left ?? 0);
-    const days = `${daysLeft} jour${daysLeft > 1 ? 's' : ''}`;
-    title = daysLeft === 0 ? 'Votre abonnement se termine aujourd’hui' : `Votre abonnement se termine dans ${days}`;
-    intro = daysLeft === 0
-      ? `Votre abonnement chez ${brand} se termine aujourd’hui. Pour garder votre accès, pensez à le renouveler à la réception.`
-      : `Petit rappel : votre abonnement chez ${brand} se termine le ${date(p.end_date)}. Pensez à le renouveler pour garder votre accès sans interruption.`;
-    rows = [
-      ['Formule actuelle', p.plan_name],
-      ['Date de fin', date(p.end_date)],
-      ['Tarif de renouvellement', money(p.renewal_price, p.currency)],
-    ];
-    note = 'Paiement à la réception : espèces, MonCash, NatCash, virement ou carte.';
+    const end = date(p.end_date);
+    if (lang === 'ht') {
+      title = daysLeft === 0 ? 'Abònman w fini jodi a' : `Abònman w ap fini nan ${daysLeft} jou`;
+      intro = daysLeft === 0
+        ? `Abònman w lan nan ${brand} fini jodi a. Pou w kontinye antre, pase nan resepsyon an pou w renouvle l.`
+        : `Ti rapèl : abònman w lan nan ${brand} ap fini ${end}. Pa bliye peye pou aksè w pa koupe.`;
+      rows = [['Fòmil aktyèl', p.plan_name], ['Dat li fini', end], ['Pri renouvèlman', money(p.renewal_price, p.currency)]];
+      note = 'Peman nan resepsyon an : kach, MonCash, NatCash, virman oswa kat.';
+    } else if (lang === 'en') {
+      title = daysLeft === 0 ? 'Your membership ends today' : `Your membership ends in ${daysLeft} day${daysLeft > 1 ? 's' : ''}`;
+      intro = daysLeft === 0
+        ? `Your membership at ${brand} ends today. To keep your access, please renew it at the front desk.`
+        : `Friendly reminder: your membership at ${brand} ends on ${end}. Don’t forget to renew so your access isn’t interrupted.`;
+      rows = [['Current plan', p.plan_name], ['End date', end], ['Renewal price', money(p.renewal_price, p.currency)]];
+      note = 'Pay at the front desk: cash, MonCash, NatCash, bank transfer or card.';
+    } else {
+      const days = `${daysLeft} jour${daysLeft > 1 ? 's' : ''}`;
+      title = daysLeft === 0 ? 'Votre abonnement se termine aujourd’hui' : `Votre abonnement se termine dans ${days}`;
+      intro = daysLeft === 0
+        ? `Votre abonnement chez ${brand} se termine aujourd’hui. Pour garder votre accès, pensez à le renouveler à la réception.`
+        : `Petit rappel : votre abonnement chez ${brand} se termine le ${end}. Pensez à le renouveler pour garder votre accès sans interruption.`;
+      rows = [
+        ['Formule actuelle', p.plan_name],
+        ['Date de fin', end],
+        ['Tarif de renouvellement', money(p.renewal_price, p.currency)],
+      ];
+      note = 'Paiement à la réception : espèces, MonCash, NatCash, virement ou carte.';
+    }
   } else if (job.kind === 'campaign') {
     title = String(p.campaign_title || p.subject || 'Information de votre salle');
     subject = String(p.subject || title);
@@ -105,13 +126,15 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
     : [p.gym_phone, p.gym_address].filter(Boolean).join(' · ');
   const reply = platform
     ? 'Une question ? Répondez simplement à cet email, notre équipe vous répondra.'
-    : `Une question ? Répondez simplement à cet email : votre message arrivera directement à ${brand}.`;
+    : t(`Une question ? Répondez simplement à cet email : votre message arrivera directement à ${brand}.`,
+        `Ou gen yon kesyon ? Reponn imèl sa a dirèkteman : mesaj ou ap rive kay ${brand}.`,
+        `Any question? Just reply to this email: your message goes straight to ${brand}.`);
   const footer = job.kind === 'campaign'
     ? `Vous recevez ce message en tant que membre de ${brand}. Pour ne plus recevoir ses annonces, répondez « STOP ».`
     : '';
 
   const html = `<!doctype html>
-<html lang="fr">
+<html lang="${lang}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -133,7 +156,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
           <tr>
             <td style="padding:12px 28px 8px;font-size:15px;line-height:1.6;color:#374151">
               <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#111827">${escape(title)}</h1>
-              ${greet ? `<p style="margin:0 0 12px">Bonjour ${escape(p.name)},</p>` : ''}
+              ${greet ? `<p style="margin:0 0 12px">${t('Bonjour', 'Bonjou', 'Hello')} ${escape(p.name)},</p>` : ''}
               <p style="margin:0 0 16px;white-space:pre-line">${escape(intro)}</p>
               ${details.length > 0 ? `
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:8px 0 16px;border:1px solid #e5e7eb;border-radius:8px">
@@ -145,7 +168,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
               </table>` : ''}
               ${note ? `<p style="margin:0 0 16px;font-size:14px;color:#4b5563">${escape(note)}</p>` : ''}
               <p style="margin:0 0 16px;font-size:14px;color:#4b5563">${escape(reply)}</p>
-              <p style="margin:0 0 20px">Cordialement,<br>${escape(brand)}</p>
+              <p style="margin:0 0 20px">${t('Cordialement', 'Mèsi', 'Best regards')},<br>${escape(brand)}</p>
             </td>
           </tr>
           <tr>
@@ -164,12 +187,12 @@ export function renderEmail(job: EmailJob, logoUrl: string | null) {
     subject: job.kind === 'campaign' ? line(subject) : `${line(subject || title)} – ${line(brand)}`,
     html,
     text: [
-      greet ? `Bonjour ${p.name},` : '',
+      greet ? `${t('Bonjour', 'Bonjou', 'Hello')} ${p.name},` : '',
       intro,
       details.map(([label, value]) => `${label} : ${value}`).join('\n'),
       note,
       reply,
-      `Cordialement,\n${brand}`,
+      `${t('Cordialement', 'Mèsi', 'Best regards')},\n${brand}`,
       contact,
       footer,
     ].filter(Boolean).join('\n\n'),

@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../app/providers.dart';
 import '../../../l10n/app_strings.dart';
 import '../../auth/presentation/login_page.dart';
+import '../../biometrics/presentation/access_display_page.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -41,6 +42,24 @@ class SettingsPage extends ConsumerWidget {
             subtitle: Text(s.text('biometrics_settings_hint')),
             trailing: const Icon(LucideIcons.chevronRight),
             onTap: () => context.push('/settings/biometrics'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(LucideIcons.idCard),
+            title: Text(s.text('employees')),
+            subtitle: Text(s.text('employees_hint')),
+            trailing: const Icon(LucideIcons.chevronRight),
+            onTap: () => context.push('/settings/employees'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(LucideIcons.monitor),
+            title: Text(s.text('open_access_display')),
+            subtitle: Text(s.text('access_display_hint')),
+            trailing: const Icon(LucideIcons.externalLink),
+            onTap: () => openAccessDisplayWindow(context),
           ),
           const Divider(height: 1),
           ListTile(

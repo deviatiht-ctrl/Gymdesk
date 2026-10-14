@@ -227,14 +227,16 @@ class AccessAgentClient {
     return false;
   }
 
-  Future<bool> pulseTerminalRelay({String? terminalIp}) async {
+  Future<bool> pulseTerminalRelay({String? terminalIp, int seconds = 3}) async {
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/api/terminals/pulse'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'terminal': 'BioEntry W2', 'ip': terminalIp ?? '192.168.1.41'}),
-      ).timeout(const Duration(seconds: 4));
-      return res.statusCode == 200;
+        body: jsonEncode({'terminal': 'BioEntry W2', 'ip': terminalIp ?? '192.168.1.41', 'seconds': seconds}),
+      ).timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) return false;
+      final data = jsonDecode(res.body);
+      return data is! Map || data['success'] != false;
     } catch (_) {
       return false;
     }
@@ -246,16 +248,73 @@ class AccessAgentClient {
   Future<Map<String, dynamic>?> syncTerminalMembers(
     List<Map<String, dynamic>> members, {
     String? terminalIp,
+    List<String> remove = const [],
   }) async {
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/api/terminals/sync'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'members': members, 'ip': terminalIp ?? '192.168.1.41'}),
-      ).timeout(const Duration(seconds: 45));
+        body: jsonEncode({
+          'members': members,
+          'remove': remove,
+          'ip': terminalIp ?? '192.168.1.41',
+        }),
+      ).timeout(const Duration(seconds: 90));
       if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (_) {}
     return null;
+  }
+
+  /// Chwazi tèminal agent la siveye (evènman an tan reyèl) epi retounen eta l.
+  Future<bool> watchTerminal({String? terminalIp}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/terminals/watch'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'ip': ?terminalIp}),
+      ).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        return (jsonDecode(res.body) as Map<String, dynamic>)['online'] == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /// Flux evènman agent la (tèminal W2: idantifikasyon, refi, pòt) via
+  /// long-polling — mache sou web kote package:http pa ka li SSE.
+  Stream<Map<String, dynamic>> terminalEvents() {
+    late final StreamController<Map<String, dynamic>> controller;
+    var running = true;
+    Future<void> loop() async {
+      var since = -1;
+      while (running) {
+        try {
+          final res = await http
+              .get(Uri.parse('$baseUrl/api/events/poll?since=$since&wait=20'))
+              .timeout(const Duration(seconds: 30));
+          if (res.statusCode != 200) throw const FormatException();
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          final seq = (data['seq'] as num?)?.toInt() ?? 0;
+          for (final e in (data['events'] as List? ?? const [])) {
+            if (running) controller.add(Map<String, dynamic>.from(e as Map));
+          }
+          if (running) {
+            controller.add({'type': 'agent_status', 'online': true, 'terminal_watch': data['terminal_watch'] == true});
+          }
+          since = seq;
+        } catch (_) {
+          if (running) controller.add({'type': 'agent_status', 'online': false, 'terminal_watch': false});
+          await Future<void>.delayed(const Duration(seconds: 3));
+          since = -1;
+        }
+      }
+    }
+
+    controller = StreamController<Map<String, dynamic>>(
+      onListen: () => unawaited(loop()),
+      onCancel: () => running = false,
+    );
+    return controller.stream;
   }
 
   Future<bool> releaseTerminalDoor({String? terminalIp}) async {

@@ -195,7 +195,12 @@ class SyncEngine {
         final paymentSnapshot =
             entity == SyncEntity.payments && fresh.role == 'reception';
         if (paymentSnapshot) await db.purgeSyncedPayments();
-        await _pull(entity, serverTime, full: reconcile || paymentSnapshot);
+        try {
+          await _pull(entity, serverTime, full: reconcile || paymentSnapshot);
+        } on SyncRejected catch (e) {
+          // Sèvè ki poko gen migrasyon 23 (anplwaye): pa bloke rès senkronizasyon an.
+          if (entity != SyncEntity.employees || e.code != 'invalid_record') rethrow;
+        }
         _progress = (i + 1) / entities.length;
         _emit(SyncPhase.running);
       }

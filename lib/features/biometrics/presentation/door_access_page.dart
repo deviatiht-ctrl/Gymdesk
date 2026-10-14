@@ -17,6 +17,7 @@ import '../../attendance/data/attendance_repository.dart';
 import '../../members/data/members_repository.dart';
 import '../../members/domain/member.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
+import 'access_display_page.dart';
 
 enum AccessStatus { none, granted, deniedExpired, deniedNoSubscription, deniedUnrecognized }
 
@@ -293,6 +294,11 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         foregroundColor: Colors.white,
         title: Text(s.text('door_access_kiosk')),
         actions: [
+          IconButton(
+            tooltip: s.text('open_access_display'),
+            icon: const Icon(LucideIcons.monitor),
+            onPressed: () => openAccessDisplayWindow(context),
+          ),
           IconButton(
             tooltip: s.text('open_door_manual'),
             icon: const Icon(LucideIcons.doorOpen),

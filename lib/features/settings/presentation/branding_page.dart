@@ -52,6 +52,7 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
   final _doorPortController = TextEditingController(text: '5005');
   final _tempPinHoursController = TextEditingController(text: '24');
   bool _testingDoor = false;
+  String _memberLanguage = 'fr';
   final _booleans = {
     'allow_access_pending': false,
     'reception_see_all_payments': false,
@@ -84,6 +85,8 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
         _logoPath = gym.logoUrl;
         _logoPreview = null;
         _biometricEnabled = gym.settings['biometric_enabled'] == true;
+        final lang = gym.settings['member_language'];
+        _memberLanguage = lang is String && {'ht', 'fr', 'en'}.contains(lang) ? lang : 'fr';
         _biometricMode = gym.settings['biometric_mode'] as String? ?? 'badge_pin';
         _doorEnabled = gym.settings['door_terminal_enabled'] != false;
         _doorIpController.text = gym.settings['door_terminal_ip'] as String? ?? '192.168.1.200';
@@ -229,6 +232,7 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
         'door_terminal_ip': _doorIpController.text.trim(),
         'door_terminal_port': int.tryParse(_doorPortController.text) ?? 5005,
         'temporary_pin_duration_hours': int.tryParse(_tempPinHoursController.text) ?? 24,
+        'member_language': _memberLanguage,
         ..._booleans,
       };
       final changedAt =
@@ -353,6 +357,23 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
                                     ? null
                                     : (value) =>
                                           _fields['currency']!.text = value!,
+                              ),
+                            ),
+                            SizedBox(
+                              width: width,
+                              child: DropdownButtonFormField<String>(
+                                initialValue: _memberLanguage,
+                                decoration: InputDecoration(
+                                  labelText: s.text('member_language'),
+                                ),
+                                items: const [
+                                  DropdownMenuItem(value: 'ht', child: Text('Kreyòl ayisyen')),
+                                  DropdownMenuItem(value: 'fr', child: Text('Français')),
+                                  DropdownMenuItem(value: 'en', child: Text('English')),
+                                ],
+                                onChanged: _busy
+                                    ? null
+                                    : (value) => _memberLanguage = value ?? 'fr',
                               ),
                             ),
                           ],
