@@ -65,6 +65,16 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetLog(IntPtr context, uint deviceId, uint eventId, uint amount, out IntPtr logsObj, out uint numLog);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetAuthConfig(IntPtr context, uint deviceId, IntPtr config);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_VerifyFingerprint(IntPtr context, uint deviceId, IntPtr finger);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_ScanFingerprintEx(IntPtr context, uint deviceId, IntPtr finger, uint templateIndex, uint quality, byte templateFormat, out uint outQuality, IntPtr cbReadyToScan);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_StartMonitoringLog(IntPtr context, uint deviceId, IntPtr cbLogReceived);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_StopMonitoringLog(IntPtr context, uint deviceId);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseObject(IntPtr obj);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseContext(IntPtr context);
@@ -457,6 +467,14 @@ static class Program
                     }
                     Array.Copy(tpl, 0, fp.data, t * 384, tpl.Length);
                 }
+                // W2 a bezwen 2 template pa dwèt pou identify mache —
+                // si gen 1 sèl, kopye l nan dezyèm plas la.
+                if (!skip)
+                {
+                    var empty = true;
+                    for (var b = 384; b < 768; b++) if (fp.data[b] != 0) { empty = false; break; }
+                    if (empty) Array.Copy(fp.data, 0, fp.data, 384, 384);
+                }
                 if (skip) skipped.Add(f[1]); else fingers[f[1]].Add(fp);
             }
         }
@@ -513,9 +531,9 @@ static class Program
             {
                 startTime = 0,
                 endTime = 0xFFFFFFFF,   // pa janm ekspire
-                fingerAuthMode = 0,     // BIOMETRIC_ONLY
-                cardAuthMode = 254,     // PROHIBITED
-                idAuthMode = 254,       // PROHIBITED
+                fingerAuthMode = 255,   // NONE → itilize mòd default tèminal la
+                cardAuthMode = 255,     // (menm jan ak itilizatè BioStar yo)
+                idAuthMode = 255,
                 securityLevel = 0,
             },
             name = new byte[48 * 4],
@@ -574,7 +592,12 @@ static class Program
             rc = Native.BS2_GetUserDatas(ctx, id, uids, 1, blobs, 0xFFFF); // ALL mask
             if (rc < 0) { Console.WriteLine("err\tget_user\t" + uid + ": " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
             var name = System.Text.Encoding.UTF8.GetString(blobs[0].name).TrimEnd('\0').Trim();
-            Console.WriteLine("user\t" + uid + "\t" + name + "\tnumFingers=" + blobs[0].user.numFingers);
+            var groups = string.Join(",", blobs[0].accessGroupId.Where(g => g != 0));
+            Console.WriteLine("user\t" + uid + "\t" + name + "\tnumFingers=" + blobs[0].user.numFingers
+                + "\tfingerAuth=" + blobs[0].setting.fingerAuthMode
+                + "\tcardAuth=" + blobs[0].setting.cardAuthMode
+                + "\tidAuth=" + blobs[0].setting.idAuthMode
+                + "\taccessGroups=[" + groups + "]");
             if (blobs[0].fingerObjs != IntPtr.Zero && blobs[0].user.numFingers > 0)
             {
                 var n = blobs[0].user.numFingers;
@@ -598,6 +621,213 @@ static class Program
             if (blobs[0].faceObjs != IntPtr.Zero) Native.BS2_ReleaseObject(blobs[0].faceObjs);
         }
         finally { Marshal.FreeHGlobal(uids); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
+    // Eskane yon dwèt sou W2 a epi verifye l kont template itilizatè <uid>
+    // ki deja sou tèminal la. Sa di nou si matchè tèminal la ka li template
+    // nou pouse yo (tès konpatiblite fòma), san wèl pòt la.
+    static int VScan(string ip, string uid, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var uids = Marshal.AllocHGlobal(32);
+        var fp = Marshal.AllocHGlobal(772);
+        var blobs = new BS2UserBlob[] { NewBlob("", "") };
+        try
+        {
+            var ub = System.Text.Encoding.ASCII.GetBytes(uid);
+            for (var i = 0; i < 32; i++) Marshal.WriteByte(uids, i, i < ub.Length ? ub[i] : (byte)0);
+            rc = Native.BS2_GetUserDatas(ctx, id, uids, 1, blobs, 0xFFFF); // ALL mask
+            if (rc < 0) { Console.WriteLine("err\tget_user\t" + uid + ": " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+            if (blobs[0].fingerObjs == IntPtr.Zero || blobs[0].user.numFingers == 0)
+            {
+                Console.WriteLine("err\tno_finger\t" + uid + " pa gen anprent sou tèminal la");
+                Native.BS2_DisconnectDevice(ctx, id);
+                return -1;
+            }
+            // Kopye premye BS2Fingerprint (772 bytes) nan buffer nou an.
+            for (var i = 0; i < 772; i++) Marshal.WriteByte(fp, i, Marshal.ReadByte(blobs[0].fingerObjs, i));
+            Native.BS2_ReleaseObject(blobs[0].fingerObjs);
+            if (blobs[0].cardObjs != IntPtr.Zero) Native.BS2_ReleaseObject(blobs[0].cardObjs);
+            if (blobs[0].faceObjs != IntPtr.Zero) Native.BS2_ReleaseObject(blobs[0].faceObjs);
+
+            Console.Error.WriteLine("[vscan] Mete dwèt la sou Capteur W2 a kounye a...");
+            rc = Native.BS2_VerifyFingerprint(ctx, id, fp);
+            if (rc > 0) Console.WriteLine("ok\tmatch\tDWÈT LA MATCHE — matchè W2 a ka li template sa a.");
+            else if (rc == -307) Console.WriteLine("err\tno_match\tNOT_SAME_FINGERPRINT (-307): dwèt la pa matche template sa a.");
+            else Console.WriteLine("err\tverify\tBS2_VerifyFingerprint: " + rc);
+        }
+        finally { Marshal.FreeHGlobal(fp); Marshal.FreeHGlobal(uids); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return rc;
+    }
+
+    // Callback: W2 a rele sa lè li pare pou yon eskan — se SINYAL reyèl
+    // "mete dwèt la" la. Kenbe referans lan vivan pandan eskan an (GC).
+    static OnReadyToScanDelegate readyCb = new OnReadyToScanDelegate(OnReadyToScan);
+    delegate void OnReadyToScanDelegate(uint deviceId, uint sequence);
+    static void OnReadyToScan(uint deviceId, uint sequence)
+    {
+        Console.Error.WriteLine("[scan] >>> W2 PARE — METE DWÈT LA SOU KAPTEUR LA KOUNYE A <<<");
+        Console.Error.Flush();
+    }
+
+    // Callback monitoring: chak evènman W2 a (auth, pòt, itilizatè) parèt
+    // la an tan reyèl — meyè fason pou wè sa tèminal la fè ak yon eskan.
+    static OnLogReceivedDelegate logCb = new OnLogReceivedDelegate(OnLogReceived);
+    delegate void OnLogReceivedDelegate(uint deviceId, IntPtr eventPtr);
+    static void OnLogReceived(uint deviceId, IntPtr p)
+    {
+        try
+        {
+            var evId = (uint)Marshal.ReadInt32(p, 0);
+            var ts = (uint)Marshal.ReadInt32(p, 4);
+            var dev = (uint)Marshal.ReadInt32(p, 8);
+            var uidBytes = new byte[32];
+            Marshal.Copy(new IntPtr(p.ToInt64() + 12), uidBytes, 0, 32);
+            var uid = System.Text.Encoding.ASCII.GetString(uidBytes).TrimEnd('\0').Trim();
+            var code = (ushort)Marshal.ReadInt16(p, 44);
+            var param = Marshal.ReadByte(p, 46);
+            var dt = ts == 0 ? "-" : new DateTime(1970, 1, 1).AddSeconds(ts).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            Console.WriteLine("evt\t" + evId + "\t" + dt + "\tdev=" + dev
+                + "\tuid=" + (uid.Length > 0 ? uid : "-")
+                + "\tcode=0x" + code.ToString("X4") + "\t" + EvName(code) + "\tparam=" + param);
+            Console.Out.Flush();
+        }
+        catch { }
+    }
+
+    // Siveye evènman W2 yo pandan <seconds> segonn — mete dwèt sou
+    // tèminal la pandan sa a pou wè si l rekonèt ou oswa l refize.
+    static int Watch(string ip, ushort port, int seconds)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var cbPtr = Marshal.GetFunctionPointerForDelegate(logCb);
+        rc = Native.BS2_StartMonitoringLog(ctx, id, cbPtr);
+        if (rc <= 0) { Console.WriteLine("err\twatch\tStartMonitoringLog: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+        Console.Error.WriteLine("[watch] Siveyan aktive pandan " + seconds + "s — eskane dwèt la sou W2 a kounye a...");
+        System.Threading.Thread.Sleep(seconds * 1000);
+        Native.BS2_StopMonitoringLog(ctx, id);
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
+    // Eskane yon dwèt sou W2 a (fòma natif SUPREMA) epi afiche template yo
+    // an base64 — pou pwodwi template ki soti dirèkteman sou tèminal la.
+    static int SScan(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var fp = Marshal.AllocHGlobal(772);
+        var cbPtr = Marshal.GetFunctionPointerForDelegate(readyCb);
+        try
+        {
+            for (var i = 0; i < 772; i++) Marshal.WriteByte(fp, i, 0);
+            for (uint t = 0; t < 2; t++)
+            {
+                var ok = false;
+                for (var attempt = 1; attempt <= 3 && !ok; attempt++)
+                {
+                    uint q;
+                    Console.Error.WriteLine("[sscan] Template " + (t + 1) + "/2, tantativ " + attempt + " — tann sinyal W2 a...");
+                    rc = Native.BS2_ScanFingerprintEx(ctx, id, fp, t, 40, 0, out q, cbPtr);
+                    if (rc > 0)
+                    {
+                        Console.Error.WriteLine("[sscan] t" + t + " ok quality=" + q);
+                        var tpl = new byte[384];
+                        Marshal.Copy(new IntPtr(fp.ToInt64() + 4 + t * 384), tpl, 0, 384);
+                        Console.WriteLine("fp\t" + Convert.ToBase64String(tpl));
+                        Console.Out.Flush();
+                        ok = true;
+                    }
+                    else if (rc == -305)
+                    {
+                        Console.Error.WriteLine("[sscan] timeout — pa gen dwèt. Rekòmanse...");
+                    }
+                    else if (rc == -308 || rc == -309)
+                    {
+                        Console.Error.WriteLine("[sscan] kalite twò ba — peze dwèt la byen plat, rekòmanse...");
+                    }
+                    else
+                    {
+                        Console.WriteLine("err\tscan\tBS2_ScanFingerprintEx t" + t + ": " + rc);
+                        Native.BS2_DisconnectDevice(ctx, id);
+                        return rc;
+                    }
+                }
+                if (!ok)
+                {
+                    Console.WriteLine("err\tscan\tTemplate " + (t + 1) + " echwe apre 3 tantativ");
+                    Native.BS2_DisconnectDevice(ctx, id);
+                    return -1;
+                }
+            }
+        }
+        finally { Marshal.FreeHGlobal(fp); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
+    // Enroll yon itilizatè antye pa eskane dwèt la sou W2 a: eskane 2
+    // template yo sou tèminal la menm epi anrejistre l dirèkteman.
+    // Template la garanti konpatib — se W2 a ki pwodwi l.
+    static int EnrollScan(string ip, string uid, string name, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var fp = Marshal.AllocHGlobal(772);
+        var cbPtr = Marshal.GetFunctionPointerForDelegate(readyCb);
+        try
+        {
+            for (var i = 0; i < 772; i++) Marshal.WriteByte(fp, i, 0);
+            for (uint t = 0; t < 2; t++)
+            {
+                var ok = false;
+                for (var attempt = 1; attempt <= 3 && !ok; attempt++)
+                {
+                    uint q;
+                    Console.Error.WriteLine("[enrollscan] Template " + (t + 1) + "/2, tantativ " + attempt + " — tann sinyal W2 a...");
+                    rc = Native.BS2_ScanFingerprintEx(ctx, id, fp, t, 40, 0, out q, cbPtr);
+                    if (rc > 0) { Console.Error.WriteLine("[enrollscan] t" + t + " ok quality=" + q); ok = true; }
+                    else if (rc == -305) Console.Error.WriteLine("[enrollscan] timeout — pa gen dwèt. Rekòmanse...");
+                    else if (rc == -308 || rc == -309) Console.Error.WriteLine("[enrollscan] kalite twò ba — peze dwèt la byen plat...");
+                    else
+                    {
+                        Console.WriteLine("err\tscan\tBS2_ScanFingerprintEx t" + t + ": " + rc);
+                        Native.BS2_DisconnectDevice(ctx, id);
+                        return rc;
+                    }
+                }
+                if (!ok)
+                {
+                    Console.WriteLine("err\tscan\tTemplate " + (t + 1) + " echwe apre 3 tantativ");
+                    Native.BS2_DisconnectDevice(ctx, id);
+                    return -1;
+                }
+            }
+
+            var blob = NewBlob(uid, name);
+            blob.user.numFingers = 1;
+            var fptr = Marshal.AllocHGlobal(772);
+            try
+            {
+                for (var i = 0; i < 772; i++) Marshal.WriteByte(fptr, i, Marshal.ReadByte(fp, i));
+                blob.fingerObjs = fptr;
+                var blobs = new BS2UserBlob[] { blob };
+                rc = Native.BS2_EnrollUser(ctx, id, blobs, 1, 1);
+            }
+            finally { Marshal.FreeHGlobal(fptr); }
+            if (rc < 0) { Console.WriteLine("err\tenroll\tBS2_EnrollUser: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+            Console.WriteLine("ok\tenrolled\t" + uid);
+        }
+        finally { Marshal.FreeHGlobal(fp); }
         Native.BS2_DisconnectDevice(ctx, id);
         return 0;
     }
@@ -696,6 +926,42 @@ static class Program
         return 0;
     }
 
+    // Li BS2AuthConfig tèminal la (~444 bytes, pack=1):
+    //   authSchedule[11] u32 @0 | useGlobalAPB @44 | globalAPBFailAction @45
+    //   useGroupMatching @46 | reserved @47 | reserved2[28] @48 | usePrivateAuth @76
+    //   faceDetectionLevel @77 | useServerMatching @78 | useFullAccess @79
+    //   matchTimeout @80 | authTimeout @81 | numOperators @82
+    // Si useServerMatching=1, tèminal lan pa verifye lokalman — li voye
+    // anprent la sou yon sèvè BioStar (si sèvè a pa la, auth pa janm mache).
+    static int AuthCfg(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var buf = Marshal.AllocHGlobal(512);
+        try
+        {
+            for (var i = 0; i < 512; i++) Marshal.WriteByte(buf, i, 0);
+            rc = Native.BS2_GetAuthConfig(ctx, id, buf);
+            if (rc < 0) { Console.WriteLine("err\tauthcfg\tGetAuthConfig: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+            var sched = new List<string>();
+            for (var m = 0; m < 11; m++)
+            {
+                var s = (uint)Marshal.ReadInt32(buf, m * 4);
+                if (s != 0) sched.Add("mode" + m + "=" + s);
+            }
+            Console.WriteLine("authcfg\tserverMatching=" + Marshal.ReadByte(buf, 78)
+                + "\tfullAccess=" + Marshal.ReadByte(buf, 79)
+                + "\tgroupMatching=" + Marshal.ReadByte(buf, 46)
+                + "\tprivateAuth=" + Marshal.ReadByte(buf, 76)
+                + "\tauthTimeout=" + Marshal.ReadByte(buf, 81)
+                + "\tschedules=[" + string.Join(" ", sched) + "]");
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return 0;
+    }
+
     static int RmUser(string ip, string uid, ushort port)
     {
         uint id;
@@ -766,6 +1032,23 @@ static class Program
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tlogs <ip> [port] [count]"); return 1; }
                     return Logs(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,
                         args.Length > 4 ? uint.Parse(args[4]) : 30);
+                case "authcfg":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tauthcfg <ip> [port]"); return 1; }
+                    return AuthCfg(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "vscan":
+                    if (args.Length < 4) { Console.WriteLine("err\tusage\tvscan <ip> <uid> [port]"); return 1; }
+                    return VScan(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);
+                case "sscan":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tsscan <ip> [port]"); return 1; }
+                    return SScan(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "watch":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\twatch <ip> [port] [seconds]"); return 1; }
+                    return Watch(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,
+                        args.Length > 4 ? int.Parse(args[4]) : 30);
+                case "enrollscan":
+                    if (args.Length < 4) { Console.WriteLine("err\tusage\tenrollscan <ip> <uid> [name] [port]"); return 1; }
+                    return EnrollScan(args[2], args[3], args.Length > 4 ? args[4] : "",
+                        args.Length > 5 ? ushort.Parse(args[5]) : (ushort)51211);
                 default:
                     Console.WriteLine("err\tunknown_command\t" + args[1]);
                     return 1;
