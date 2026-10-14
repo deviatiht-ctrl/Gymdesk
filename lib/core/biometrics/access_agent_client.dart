@@ -104,7 +104,7 @@ class AccessAgentClient {
             body: jsonEncode({
               'timeout_ms': timeout.inMilliseconds,
               'min_quality': minQuality,
-              if (tpl != null) 'tpl': tpl,
+              'tpl': ?tpl,
             }),
           )
           .timeout(timeout + const Duration(seconds: 5));

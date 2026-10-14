@@ -63,6 +63,8 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetFilteredLog(IntPtr context, uint deviceId, IntPtr uid, ushort eventCode, uint start, uint end, byte tnaKey, out IntPtr logsObj, out uint numLog);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetLog(IntPtr context, uint deviceId, uint eventId, uint amount, out IntPtr logsObj, out uint numLog);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseObject(IntPtr obj);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern void BS2_ReleaseContext(IntPtr context);
@@ -650,30 +652,46 @@ static class Program
         uint id;
         var rc = Connect(ip, port, out id);
         if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
-        var uidPtr = Marshal.StringToHGlobalAnsi(""); // vid = tout itilizatè
-        IntPtr logsObj; uint numLog;
-        try { rc = Native.BS2_GetFilteredLog(ctx, id, uidPtr, 0, 0, 0, 0, out logsObj, out numLog); }
-        finally { Marshal.FreeHGlobal(uidPtr); }
-        if (rc < 0) { Console.WriteLine("err\tlogs\tGetFilteredLog: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
-        var n = Math.Min(numLog, amount);
-        // GetFilteredLog retounen nan lòd ansyen → resan; nou pran N dènye yo.
-        var startIdx = numLog > n ? numLog - n : 0u;
-        for (var i = startIdx; i < numLog; i++)
+        // BS2_GetLog mache pa paj soti nan yon eventId. Nou ekri chak liy
+        // touswit (flush) pou rezilta a siviv si pwosesis la kraze pita.
+        const uint pageSize = 1024;
+        uint lastId = 0;
+        uint total = 0;
+        for (var pages = 0; pages < 300; pages++)
         {
-            var p = new IntPtr(logsObj.ToInt64() + i * 48);
-            var evId = Marshal.ReadInt32(p, 0);
-            var ts = (uint)Marshal.ReadInt32(p, 4);
-            var dev = (uint)Marshal.ReadInt32(p, 8);
-            var uidBytes = new byte[32];
-            Marshal.Copy(new IntPtr(p.ToInt64() + 12), uidBytes, 0, 32);
-            var uid = System.Text.Encoding.ASCII.GetString(uidBytes).TrimEnd('\0').Trim();
-            var code = (ushort)Marshal.ReadInt16(p, 44);
-            var param = Marshal.ReadByte(p, 46);
-            var dt = ts == 0 ? "-" : new DateTime(1970, 1, 1).AddSeconds(ts).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-            Console.WriteLine("log\t" + evId + "\t" + dt + "\tdev=" + dev + "\tuid=" + (uid.Length > 0 ? uid : "-")
-                + "\tcode=0x" + code.ToString("X4") + "\t" + EvName(code) + "\tparam=" + param);
+            IntPtr logsObj; uint numLog;
+            rc = Native.BS2_GetLog(ctx, id, lastId, pageSize, out logsObj, out numLog);
+            if (rc < 0) { Console.WriteLine("err\tlogs\tGetLog: " + rc); Console.Out.Flush(); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+            if (numLog == 0 || logsObj == IntPtr.Zero) { if (logsObj != IntPtr.Zero) Native.BS2_ReleaseObject(logsObj); break; }
+            if (pages == 0)
+            {
+                var raw = new byte[256];
+                Marshal.Copy(logsObj, raw, 0, 256);
+                Console.Error.WriteLine("[logs] numLog=" + numLog + " raw0-255=" + BitConverter.ToString(raw));
+            }
+            for (uint i = 0; i < numLog; i++)
+            {
+                var p = new IntPtr(logsObj.ToInt64() + i * 48);
+                var evId = (uint)Marshal.ReadInt32(p, 0);
+                var ts = (uint)Marshal.ReadInt32(p, 4);
+                var dev = (uint)Marshal.ReadInt32(p, 8);
+                var uidBytes = new byte[32];
+                Marshal.Copy(new IntPtr(p.ToInt64() + 12), uidBytes, 0, 32);
+                var uid = System.Text.Encoding.ASCII.GetString(uidBytes).TrimEnd('\0').Trim();
+                var code = (ushort)Marshal.ReadInt16(p, 44);
+                var param = Marshal.ReadByte(p, 46);
+                var dt = ts == 0 ? "-" : new DateTime(1970, 1, 1).AddSeconds(ts).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+                Console.WriteLine("log\t" + evId + "\t" + dt + "\tdev=" + dev
+                    + "\tuid=" + (uid.Length > 0 ? uid : "-")
+                    + "\tcode=0x" + code.ToString("X4") + "\t" + EvName(code) + "\tparam=" + param);
+                lastId = evId; total++;
+            }
+            Native.BS2_ReleaseObject(logsObj);
+            Console.Out.Flush();
+            if (numLog < pageSize) break;
         }
-        if (logsObj != IntPtr.Zero) Native.BS2_ReleaseObject(logsObj);
+        Console.WriteLine("total\t" + total);
+        Console.Out.Flush();
         Native.BS2_DisconnectDevice(ctx, id);
         return 0;
     }
