@@ -221,6 +221,51 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     }
   }
 
+  Future<void> _autoDiscoverTerminal() async {
+    setState(() {
+      _testingTerminal = true;
+      _terminalStatusText = 'Rechèch tèminal sou rezo a ap fèt...';
+    });
+    final isFr = AppStrings.of(context).locale.languageCode == 'fr';
+    final client = AccessAgentClient();
+    final devices = await client.searchTerminals();
+    if (!mounted) return;
+    setState(() => _testingTerminal = false);
+    if (devices.isNotEmpty) {
+      final ip = devices.first['ip']?.toString();
+      if (ip != null && ip.isNotEmpty) {
+        setState(() {
+          _terminalIpController.text = ip;
+          _terminalStatusText = isFr
+              ? 'Terminal détecté : $ip'
+              : 'Tèminal detekte sou rezo a : $ip';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isFr
+                ? 'Terminal Suprema BioEntry W2 trouvé : $ip !'
+                : 'Tèminal Suprema BioEntry W2 jwenn : $ip !'),
+            backgroundColor: const Color(0xFF059669),
+          ),
+        );
+        return;
+      }
+    }
+    setState(() {
+      _terminalStatusText = isFr
+          ? 'Aucun terminal détecté automatiquement.'
+          : 'Okenn tèminal pa jwenn otomatikman sou rezo a.';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isFr
+            ? 'Aucun terminal trouvé automatiquement. Vérifiez le câble réseau ou saisissez l\'IP manuellement.'
+            : 'Okenn tèminal pa jwenn otomatikman. Verifye kab rezo a oswa tape IP a alamen.'),
+        backgroundColor: Colors.orange.shade800,
+      ),
+    );
+  }
+
   Future<void> _testTerminalDoorPulse() async {
     setState(() => _testingTerminal = true);
     final isFr = AppStrings.of(context).locale.languageCode == 'fr';
@@ -586,15 +631,30 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                           style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
                         ),
                         const SizedBox(height: 16),
-                        TextField(
-                          controller: _terminalIpController,
-                          decoration: InputDecoration(
-                            labelText: isFr ? 'Adresse IP du Terminal BioEntry W2' : 'Adrès IP Tèminal la',
-                            hintText: '192.168.1.41',
-                            prefixIcon: const Icon(LucideIcons.network),
-                            suffixText: 'Port: 51211',
-                            border: const OutlineInputBorder(),
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _terminalIpController,
+                                decoration: InputDecoration(
+                                  labelText: isFr ? 'Adresse IP du Terminal BioEntry W2' : 'Adrès IP Tèminal la',
+                                  hintText: '192.168.1.41',
+                                  prefixIcon: const Icon(LucideIcons.network),
+                                  suffixText: 'Port: 51211',
+                                  border: const OutlineInputBorder(),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                              ),
+                              onPressed: _testingTerminal ? null : _autoDiscoverTerminal,
+                              icon: const Icon(LucideIcons.scanLine, size: 18),
+                              label: Text(isFr ? 'Détecter IP' : 'Chèche IP'),
+                            ),
+                          ],
                         ),
                         if (_terminalStatusText != null) ...[
                           const SizedBox(height: 10),

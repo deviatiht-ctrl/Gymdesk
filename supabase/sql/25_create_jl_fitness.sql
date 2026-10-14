@@ -6,7 +6,9 @@
 -- Telefòn : +509 48170828 / 37774354 / 41433933
 -- Adrès : Delmas 75, Frangneauville 15, #27
 -- Koulè : #FFA726 (Jaune Abricot / Ambre)
+-- Deviz : USD ($ Dollars)
 -- Plan Platfòm : PLAN 3 : PRO (1 000 manm, anprent dijital & pòt byometrik enkli)
+-- Plan Kliyan : Séance $10 USD | Mensuel $40 USD
 -- ==============================================================================
 
 do $$
@@ -33,7 +35,7 @@ begin
     where id = v_owner_id;
 
     -- --------------------------------------------------------------------------
-    -- 2. Kreye oswa Mete Ajou Sal la nan public.gyms
+    -- 2. Kreye oswa Mete Ajou Sal la nan public.gyms (Deviz: USD)
     -- --------------------------------------------------------------------------
     select id into v_gym_id
     from public.gyms
@@ -63,7 +65,7 @@ begin
             '+509 48170828 / 37774354 / 41433933',
             'jeanlesly1990@gmail.com',
             'America/Port-au-Prince',
-            'HTG',
+            'USD',
             'active',
             jsonb_build_object(
                 'biometric_enabled', true,
@@ -90,7 +92,7 @@ begin
             phone = '+509 48170828 / 37774354 / 41433933',
             email = 'jeanlesly1990@gmail.com',
             timezone = 'America/Port-au-Prince',
-            currency = 'HTG',
+            currency = 'USD',
             status = 'active',
             deleted_at = null,
             settings = jsonb_build_object(
@@ -213,7 +215,7 @@ begin
     );
 
     -- --------------------------------------------------------------------------
-    -- 7. Kreye Plan Abònman Estanda pou Kliyan Sal la (Pa mete okenn manm)
+    -- 7. Kreye Plan Abònman Estanda (Sèlman Séance $10 USD & Mois $40 USD)
     -- --------------------------------------------------------------------------
     delete from public.plans where gym_id = v_gym_id;
 
@@ -228,10 +230,8 @@ begin
         sort_order,
         description
     ) values
-        (gen_random_uuid(), v_gym_id, 'Pas 1 Jou (Séance)', 1, 500, 'HTG', true, 1, 'Aksè pou yon jounen konplè'),
-        (gen_random_uuid(), v_gym_id, 'Abònman 1 Mwa', 30, 2500, 'HTG', true, 2, 'Aksè san limit pou 30 jou avèk anprent dijital'),
-        (gen_random_uuid(), v_gym_id, 'Abònman 3 Mwa', 90, 6500, 'HTG', true, 3, 'Aksè san limit pou 90 jou'),
-        (gen_random_uuid(), v_gym_id, 'Abònman 1 Ane', 365, 24000, 'HTG', true, 4, 'Aksè VIP pou 1 ane konplè');
+        (gen_random_uuid(), v_gym_id, 'Séance (1 Jou)', 1, 10.00, 'USD', true, 1, 'Aksè pou yon jounen konplè ($10 USD)'),
+        (gen_random_uuid(), v_gym_id, 'Abònman 1 Mwa', 30, 40.00, 'USD', true, 2, 'Aksè san limit pou 30 jou avèk anprent dijital ($40 USD)');
 
     raise notice '=======================================================';
     raise notice 'FELISITASYON! Sal JL FITNESS monte avèk siksè nan sistèm nan:';
@@ -239,6 +239,8 @@ begin
     raise notice 'Kòd: JLF';
     raise notice 'Pwopriyetè: JEAN LESLY (ID: %)', v_owner_id;
     raise notice 'Imèl: jeanlesly1990@gmail.com';
-    raise notice 'Plan: 1 000 Manm Byometrik & Pòt (A vi)';
+    raise notice 'Deviz: USD ($)';
+    raise notice 'Plan Kliyan: Séance $10 USD | Mwa $40 USD';
+    raise notice 'Plan Platfòm: 1 000 Manm Byometrik & Pòt (A vi)';
     raise notice '=======================================================';
 end $$;

@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/access_control/terminal_access_service.dart';
+import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/sync/sync_models.dart';
 import '../data/members_repository.dart';
 import '../domain/member.dart';
@@ -115,6 +116,33 @@ class _FingerprintTransferDialogState extends ConsumerState<FingerprintTransferD
         });
       }
     }
+  }
+
+  Future<void> _autoDiscoverTerminal() async {
+    setState(() => _isSyncingTerminal = true);
+    final client = AccessAgentClient();
+    final devices = await client.searchTerminals();
+    if (!mounted) return;
+    setState(() => _isSyncingTerminal = false);
+    if (devices.isNotEmpty) {
+      final ip = devices.first['ip']?.toString();
+      if (ip != null && ip.isNotEmpty) {
+        setState(() => _terminalIpCtrl.text = ip);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Tèminal BioEntry W2 jwenn sou adrès IP: $ip !'),
+            backgroundColor: const Color(0xFF059669),
+          ),
+        );
+        return;
+      }
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Okenn tèminal pa jwenn otomatikman sou rezo a.'),
+        backgroundColor: Colors.orange,
+      ),
+    );
   }
 
   Future<void> _importLegacyFingerprints() async {
@@ -411,6 +439,17 @@ class _FingerprintTransferDialogState extends ConsumerState<FingerprintTransferD
                     border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
                   ),
                 ),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF2DD4BF),
+                  side: const BorderSide(color: Color(0xFF14B8A6)),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+                ),
+                onPressed: _isSyncingTerminal ? null : _autoDiscoverTerminal,
+                icon: const Icon(LucideIcons.scanLine, size: 18),
+                label: const Text('Chèche IP'),
               ),
             ],
           ),

@@ -242,6 +242,23 @@ class AccessAgentClient {
     }
   }
 
+  /// Chèche tèminal Suprema sou rezo lokal la (via BioStar Device SDK)
+  Future<List<Map<String, dynamic>>> searchTerminals() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$baseUrl/api/terminals'),
+      ).timeout(const Duration(seconds: 25));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return [
+          for (final d in (data['devices'] as List? ?? const []))
+            Map<String, dynamic>.from(d as Map),
+        ];
+      }
+    } catch (_) {}
+    return const [];
+  }
+
   /// Pouse anprent manm yo sou tèminal BioEntry W2 a (BS2_EnrollUser).
   /// [members]: [{id, name, fingers: [[b64 t1, b64 t2?], ...]}]
   /// Template yo dwe fòma natif Suprema (384B) — capture ak tpl:'suprema'.
