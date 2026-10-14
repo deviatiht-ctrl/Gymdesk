@@ -17,6 +17,7 @@ import '../../members/data/member_photo_codec.dart';
 import '../../members/data/members_repository.dart';
 import '../../members/domain/member.dart';
 import '../../payments/data/receipt_pdf.dart';
+import '../../payments/data/receipt_service.dart';
 import '../../payments/domain/payment.dart';
 import '../../payments/presentation/receipt_sheet.dart';
 import '../../plans/data/plans_repository.dart';
@@ -360,6 +361,18 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
 
       final email = draft.email.trim();
 
+      // Resi peman an voye OTOMATIK pa email (silansye si offline).
+      final gym = runtime.session?.gym ?? const <String, dynamic>{};
+      final gymId = runtime.session?.gymId;
+      if (gymId != null && _lastPaymentId.isNotEmpty) {
+        unawaited(
+          ReceiptService(runtime.client, gymId).autoEnqueue(
+            _receiptData(fullName, plan.name, endDate, gym),
+            gym['logo_url'] as String?,
+          ),
+        );
+      }
+
       if (mounted) {
         _showSuccessDialog(s, result.memberId, fullName, plan.name, endDate, email);
       }
@@ -386,7 +399,16 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     await showReceiptSheet(
       context,
       ref,
-      ReceiptData(
+      _receiptData(fullName, planName, endDate, gym),
+    );
+  }
+
+  ReceiptData _receiptData(
+    String fullName,
+    String planName,
+    DateTime endDate,
+    Map<String, dynamic> gym,
+  ) => ReceiptData(
         paymentId: _lastPaymentId,
         memberName: fullName,
         memberNumber: _lastMemberNumber,
@@ -410,9 +432,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         gymPhone: gym['phone'] as String?,
         gymEmail: gym['email'] as String?,
         reference: _referenceController.text.trim(),
-      ),
-    );
-  }
+      );
 
   void _showSuccessDialog(AppStrings s, String memberId, String fullName, String planName, DateTime endDate, String email) {
     final gymName = ref.read(appRuntimeProvider).session?.name ?? 'GymDesk';

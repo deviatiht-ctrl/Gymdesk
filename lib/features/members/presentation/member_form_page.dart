@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +13,7 @@ import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../payments/data/receipt_pdf.dart';
+import '../../payments/data/receipt_service.dart';
 import '../../payments/domain/payment.dart';
 import '../../payments/presentation/receipt_sheet.dart';
 import '../../plans/data/plans_repository.dart';
@@ -324,35 +327,39 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
       await HapticFeedback.lightImpact();
       if (mounted && payment != null && subscription != null) {
         final gym = runtime.session?.gym ?? const <String, dynamic>{};
-        await showReceiptSheet(
-          context,
-          ref,
-          ReceiptData(
-            paymentId: payment.id!,
-            memberName:
-                '${draft.firstName.trim()} ${draft.lastName.trim()}'.trim(),
-            memberNumber: result.memberNumber,
-            planName: _plan?.name ?? s.text('plan'),
-            amount: payment.amount,
-            currency: payment.currency,
-            method: payment.method,
-            paidAt: changedAt,
-            gymName: gym['name'] as String? ?? 'GymDesk',
-            accentColor: gym['accent_color'] as String? ?? '#0F766E',
-            periodStart: subscription.startDate,
-            periodEnd: subscription.endDate,
-            receivedAmount: payment.effectiveReceived,
-            creditAdded: payment.creditAdded,
-            creditBalance: payment.creditAdded,
-            memberEmail: draft.email,
-            memberPhone: draft.whatsapp.isNotEmpty
-                ? draft.whatsapp
-                : draft.phone,
-            gymAddress: gym['address'] as String?,
-            gymPhone: gym['phone'] as String?,
-            gymEmail: gym['email'] as String?,
-          ),
+        final data = ReceiptData(
+          paymentId: payment.id!,
+          memberName:
+              '${draft.firstName.trim()} ${draft.lastName.trim()}'.trim(),
+          memberNumber: result.memberNumber,
+          planName: _plan?.name ?? s.text('plan'),
+          amount: payment.amount,
+          currency: payment.currency,
+          method: payment.method,
+          paidAt: changedAt,
+          gymName: gym['name'] as String? ?? 'GymDesk',
+          accentColor: gym['accent_color'] as String? ?? '#0F766E',
+          periodStart: subscription.startDate,
+          periodEnd: subscription.endDate,
+          receivedAmount: payment.effectiveReceived,
+          creditAdded: payment.creditAdded,
+          creditBalance: payment.creditAdded,
+          memberEmail: draft.email,
+          memberPhone: draft.whatsapp.isNotEmpty
+              ? draft.whatsapp
+              : draft.phone,
+          gymAddress: gym['address'] as String?,
+          gymPhone: gym['phone'] as String?,
+          gymEmail: gym['email'] as String?,
         );
+        final gymId = runtime.session?.gymId;
+        if (gymId != null) {
+          unawaited(
+            ReceiptService(runtime.client, gymId)
+                .autoEnqueue(data, gym['logo_url'] as String?),
+          );
+        }
+        await showReceiptSheet(context, ref, data);
       }
       if (mounted) context.go('/members/${result.memberId}');
     } on MemberFailure catch (e) {

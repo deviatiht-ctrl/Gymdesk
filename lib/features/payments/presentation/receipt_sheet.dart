@@ -82,6 +82,12 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
       _labels,
     );
     if (mounted) setState(() => _pdf = pdf);
+    // Resi a voye OTOMATIK pa email lè manm nan gen yon adrès —
+    // pa bezwen klike anyen. RPC la idempotent: pa gen doublon.
+    final email = widget.data.memberEmail ?? '';
+    if (email.contains('@') && mounted) {
+      unawaited(_sendEmail());
+    }
   }
 
   Map<String, String> get _labels {

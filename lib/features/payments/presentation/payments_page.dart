@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -19,6 +20,7 @@ import 'package:uuid/uuid.dart';
 
 import '../data/payments_repository.dart';
 import '../data/receipt_pdf.dart';
+import '../data/receipt_service.dart';
 import '../domain/payment.dart';
 import 'collect_payment_dialog.dart';
 import 'receipt_sheet.dart';
@@ -169,34 +171,39 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
       if (p.id == subscription.planId) plan = p;
     }
     if (!mounted) return;
-    await showReceiptSheet(
-      context,
-      ref,
-      ReceiptData(
-        paymentId: command.id ?? '',
-        memberName: member.fullName,
-        memberNumber: member.memberNumber,
-        planName: plan?.name ?? s.text('plan'),
-        amount: command.amount,
-        currency: command.currency,
-        method: command.method,
-        paidAt: _now(),
-        gymName: gym['name'] as String? ?? 'GymDesk',
-        accentColor: gym['accent_color'] as String? ?? '#0F766E',
-        periodStart: subscription.startDate,
-        periodEnd: subscription.endDate,
-        receivedAmount: command.effectiveReceived,
-        creditUsed: command.creditUsed,
-        creditAdded: command.creditAdded,
-        creditBalance:
-            member.creditBalance + command.creditAdded - command.creditUsed,
-        memberEmail: member.email,
-        memberPhone: member.whatsapp ?? member.phone,
-        gymAddress: gym['address'] as String?,
-        gymPhone: gym['phone'] as String?,
-        gymEmail: gym['email'] as String?,
-      ),
+    final data = ReceiptData(
+      paymentId: command.id ?? '',
+      memberName: member.fullName,
+      memberNumber: member.memberNumber,
+      planName: plan?.name ?? s.text('plan'),
+      amount: command.amount,
+      currency: command.currency,
+      method: command.method,
+      paidAt: _now(),
+      gymName: gym['name'] as String? ?? 'GymDesk',
+      accentColor: gym['accent_color'] as String? ?? '#0F766E',
+      periodStart: subscription.startDate,
+      periodEnd: subscription.endDate,
+      receivedAmount: command.effectiveReceived,
+      creditUsed: command.creditUsed,
+      creditAdded: command.creditAdded,
+      creditBalance:
+          member.creditBalance + command.creditAdded - command.creditUsed,
+      memberEmail: member.email,
+      memberPhone: member.whatsapp ?? member.phone,
+      gymAddress: gym['address'] as String?,
+      gymPhone: gym['phone'] as String?,
+      gymEmail: gym['email'] as String?,
     );
+    // Voye resi a otomatik pa email (silansye si offline / san email).
+    final gymId = runtime.session?.gymId;
+    if (gymId != null) {
+      unawaited(
+        ReceiptService(runtime.client, gymId)
+            .autoEnqueue(data, gym['logo_url'] as String?),
+      );
+    }
+    await showReceiptSheet(context, ref, data);
   }
 
   @override
