@@ -218,7 +218,7 @@ class AccessAgentClient {
         Uri.parse('$baseUrl/api/terminals/ping'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'ip': terminalIp ?? '192.168.1.41'}),
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         return data['online'] == true;
