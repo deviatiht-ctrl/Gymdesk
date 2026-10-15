@@ -1090,6 +1090,99 @@ static class Program
         return 0;
     }
 
+    static int DumpAll(string ip, string outFile, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+
+        uint nu, nc, nf, nfa;
+        rc = Native.BS2_GetUserDatabaseInfo(ctx, id, out nu, out nc, out nf, out nfa, IntPtr.Zero);
+        if (rc < 0) { Console.WriteLine("err\tdb_info\tGetUserDatabaseInfo: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+        Console.WriteLine("db\tusers=" + nu + "\tcards=" + nc + "\tfingers=" + nf);
+
+        IntPtr uidsObj; uint numUid;
+        rc = Native.BS2_GetUserList(ctx, id, out uidsObj, out numUid, IntPtr.Zero);
+        if (rc < 0 || uidsObj == IntPtr.Zero || numUid == 0)
+        {
+            Console.WriteLine("ok\tempty\tOkenn itilizatè pa genyen sou tèminal la.");
+            Native.BS2_DisconnectDevice(ctx, id);
+            return 0;
+        }
+
+        var lines = new List<string>();
+        var jsonItems = new List<string>();
+        var uids = Marshal.AllocHGlobal(32);
+        var blobs = new BS2UserBlob[] { NewBlob("", "") };
+
+        try
+        {
+            for (uint i = 0; i < numUid; i++)
+            {
+                var p = new IntPtr(uidsObj.ToInt64() + i * 32);
+                for (var b = 0; b < 32; b++) Marshal.WriteByte(uids, b, Marshal.ReadByte(p, b));
+
+                rc = Native.BS2_GetUserDatas(ctx, id, uids, 1, blobs, 0xFFFF);
+                if (rc < 0) continue;
+
+                var uid = System.Text.Encoding.ASCII.GetString(blobs[0].user.userID).TrimEnd('\0').Trim();
+                var name = System.Text.Encoding.UTF8.GetString(blobs[0].name).TrimEnd('\0').Trim();
+                var startSec = blobs[0].setting.startTime;
+                var endSec = blobs[0].setting.endTime;
+
+                DateTime? startDt = null;
+                DateTime? endDt = null;
+                try { if (startSec > 0 && startSec < 0x7FFFFFFF) startDt = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(startSec); } catch { }
+                try { if (endSec > 0 && endSec < 0x7FFFFFFF) endDt = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(endSec); } catch { }
+
+                var startDateStr = startDt.HasValue ? startDt.Value.ToString("yyyy-MM-dd") : "";
+                var endDateStr = endDt.HasValue ? endDt.Value.ToString("yyyy-MM-dd") : "";
+
+                string fpB64 = "";
+                if (blobs[0].fingerObjs != IntPtr.Zero && blobs[0].user.numFingers > 0)
+                {
+                    var fp = blobs[0].fingerObjs;
+                    var data = new byte[384];
+                    Marshal.Copy(new IntPtr(fp.ToInt64() + 4), data, 0, 384);
+                    if (data.Any(x => x != 0)) fpB64 = Convert.ToBase64String(data);
+                    Native.BS2_ReleaseObject(blobs[0].fingerObjs);
+                }
+                if (blobs[0].cardObjs != IntPtr.Zero) Native.BS2_ReleaseObject(blobs[0].cardObjs);
+                if (blobs[0].faceObjs != IntPtr.Zero) Native.BS2_ReleaseObject(blobs[0].faceObjs);
+
+                if (!string.IsNullOrEmpty(fpB64))
+                {
+                    lines.Add("finger\t" + uid + "\t0\t" + fpB64 + "\t" + name);
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        lines.Add(name + "\t" + fpB64);
+                    }
+                }
+
+                jsonItems.Add("  {\"uid\":\"" + uid + "\",\"name\":\"" + name.Replace("\"", "\\\"") 
+                    + "\",\"start_date\":\"" + startDateStr + "\",\"end_date\":\"" + endDateStr + "\",\"fingerprint\":\"" + fpB64 + "\"}");
+
+                Console.WriteLine("user\t" + uid + "\t" + name + "\tend=" + endDateStr + "\tfinger=" + (!string.IsNullOrEmpty(fpB64) ? "WI" : "NON"));
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(uids);
+            if (uidsObj != IntPtr.Zero) Native.BS2_ReleaseObject(uidsObj);
+        }
+
+        Native.BS2_DisconnectDevice(ctx, id);
+
+        var txtFile = string.IsNullOrEmpty(outFile) ? "anprent_bw2_export.txt" : outFile;
+        var jsonFile = System.IO.Path.ChangeExtension(txtFile, ".json");
+
+        System.IO.File.WriteAllLines(txtFile, lines);
+        System.IO.File.WriteAllText(jsonFile, "[\n" + string.Join(",\n", jsonItems) + "\n]\n");
+
+        Console.WriteLine("ok\texported\t" + lines.Count + " anprent sove nan " + txtFile + " ak " + jsonFile);
+        return 0;
+    }
+
     static int Main(string[] args)
     {
         if (args.Length < 2)
@@ -1141,6 +1234,15 @@ static class Program
                 case "rmall":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tclearusers <ip> [port]"); return 1; }
                     return ClearUsers(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "dump":
+                case "export":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tdump <ip> [outputFile] [port]"); return 1; }
+                    ushort testPort;
+                    var outF = args.Length > 3 && !ushort.TryParse(args[3], out testPort) ? args[3] : "anprent_bw2_export.txt";
+                    ushort pDump = 51211;
+                    if (args.Length > 4 && ushort.TryParse(args[4], out testPort)) pDump = testPort;
+                    else if (args.Length > 3 && ushort.TryParse(args[3], out testPort)) pDump = testPort;
+                    return DumpAll(args[2], outF, pDump);
                 case "logs":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tlogs <ip> [port] [count]"); return 1; }
                     return Logs(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,
