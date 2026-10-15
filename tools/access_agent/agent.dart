@@ -698,6 +698,21 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
+    if (path == '/api/terminals/clear' && request.method == 'POST') {
+      final body = await _readJson(request);
+      final cfg = terminalConfig();
+      final ip = body['ip']?.toString() ?? cfg['ip'] as String;
+      final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
+      try {
+        final lines = await _biostarCall(['clearusers', ip, '$port'], timeout: const Duration(seconds: 30));
+        final ok = lines.any((l) => l.first == 'ok');
+        await _json(res, {'success': ok, 'ip': ip, 'message': ok ? 'Tout anprent efase sou tèminal la.' : 'Echèk efasman.'});
+      } on SupremaException catch (e) {
+        await _json(res, {'success': false, 'error': e.code, 'message': e.message});
+      }
+      return;
+    }
+
     if (path.startsWith('/api/terminals')) {
       await _json(res, {
         'success': false,

@@ -61,6 +61,8 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_RemoveUser(IntPtr context, uint deviceId, IntPtr uids, uint uidCount);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_RemoveAllUser(IntPtr context, uint deviceId);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetFilteredLog(IntPtr context, uint deviceId, IntPtr uid, ushort eventCode, uint start, uint end, byte tnaKey, out IntPtr logsObj, out uint numLog);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetLog(IntPtr context, uint deviceId, uint eventId, uint amount, out IntPtr logsObj, out uint numLog);
@@ -1076,6 +1078,18 @@ static class Program
         return 0;
     }
 
+    static int ClearUsers(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        rc = Native.BS2_RemoveAllUser(ctx, id);
+        Native.BS2_DisconnectDevice(ctx, id);
+        if (rc < 0) { Console.WriteLine("err\tremove_all\tBS2_RemoveAllUser: " + rc); return rc; }
+        Console.WriteLine("ok\tcleared\tTout anprent ak itilizatè sou tèminal la efase nèt.");
+        return 0;
+    }
+
     static int Main(string[] args)
     {
         if (args.Length < 2)
@@ -1123,6 +1137,10 @@ static class Program
                 case "rmuser":
                     if (args.Length < 4) { Console.WriteLine("err\tusage\trmuser <ip> <uid> [port]"); return 1; }
                     return RmUser(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);
+                case "clearusers":
+                case "rmall":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tclearusers <ip> [port]"); return 1; }
+                    return ClearUsers(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
                 case "logs":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tlogs <ip> [port] [count]"); return 1; }
                     return Logs(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,
