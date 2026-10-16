@@ -28,14 +28,26 @@ const displayName = (value: unknown, fallback: string) =>
 export function brevoPayload(job: EmailJob, config: Pick<Config, 'senderEmail' | 'senderName'>, content: ReturnType<typeof renderEmail>) {
   const replyTo = typeof job.payload.reply_to === 'string' && emailPattern.test(job.payload.reply_to) ? job.payload.reply_to : null;
   const name = job.kind === 'gym_welcome' ? config.senderName : displayName(job.payload.gym_name, config.senderName);
-  const headers: Record<string, string> = { 'X-GymDesk-Event': job.id };
-  if (job.kind === 'campaign' && replyTo) headers['List-Unsubscribe'] = `<mailto:${replyTo}?subject=STOP>`;
+  const isMarketing = job.kind === 'campaign';
+  const headers: Record<string, string> = {
+    'X-GymDesk-Event': job.id,
+    'X-Entity-Ref-ID': job.id,
+    'Feedback-ID': `${job.kind}:gymdesk`,
+  };
+  if (isMarketing) {
+    if (replyTo) headers['List-Unsubscribe'] = `<mailto:${replyTo}?subject=STOP>`;
+    headers['Precedence'] = 'bulk';
+  } else {
+    headers['X-Auto-Response-Suppress'] = 'OOF, AutoReply';
+    headers['Auto-Submitted'] = 'auto-generated';
+  }
   return {
     sender: { name, email: config.senderEmail },
     ...(replyTo ? { replyTo: { email: replyTo, name } } : {}),
     to: [{ email: job.recipient, ...(typeof job.payload.name === 'string' ? { name: displayName(job.payload.name, '') } : {}) }],
     subject: content.subject, htmlContent: content.html, textContent: content.text,
-    tags: ['gymdesk', job.kind], headers,
+    tags: isMarketing ? ['gymdesk-marketing', 'campaign'] : ['gymdesk-transactional', job.kind],
+    headers,
   };
 }
 

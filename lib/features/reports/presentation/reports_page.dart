@@ -41,7 +41,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       final bytes = await buildReportPdf(
         snapshot,
         gymName: gym?['name'] as String? ?? 'GymDesk',
-        currency: gym?['currency'] as String? ?? 'HTG',
+        currency: gym?['currency'] as String? ?? 'USD',
         labels: {
           'payments': s.text('payments'),
           'revenue': s.text('revenue'),

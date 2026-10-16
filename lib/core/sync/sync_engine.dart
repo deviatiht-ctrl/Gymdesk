@@ -87,7 +87,7 @@ class SyncEngine {
       _emit(state.value.phase, state.value.errorCode);
     });
     _network = Connectivity().onConnectivityChanged.listen((results) {
-      _connected = !results.contains(ConnectivityResult.none);
+      _connected = results.any((r) => r != ConnectivityResult.none);
       if (_connected) {
         unawaited(synchronize());
       } else {

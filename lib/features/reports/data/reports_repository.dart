@@ -102,8 +102,10 @@ class ReportsRepository {
     );
   }
 
-  bool _outside(DateTime value, DateTime start, DateTime end) =>
-      value.isBefore(start) || value.isAfter(end);
+  bool _outside(DateTime value, DateTime start, DateTime end) {
+    final v = dateOnly(value);
+    return v.isBefore(start) || v.isAfter(end);
+  }
 }
 
 class ReportSnapshot {

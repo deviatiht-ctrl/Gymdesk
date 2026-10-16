@@ -25,9 +25,32 @@ import '../../settings/data/settings_repository.dart';
 /// ki devan pòt la oswa sou yon tablèt Wi-Fi.
 Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = false]) async {
   final target = isTablet ? '/tablet-access' : '/access-display';
+  if (context != null && context.mounted) {
+    final width = MediaQuery.sizeOf(context).width;
+    final isMobileOrTablet = isTablet ||
+        width < 900 ||
+        defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android;
+    if (isMobileOrTablet) {
+      context.push(target);
+      return;
+    }
+  }
   if (kIsWeb) {
-    final uri = Uri.base.replace(fragment: target, query: null);
-    await launchUrl(uri, webOnlyWindowName: isTablet ? 'gymdesk_tablet_access' : 'gymdesk_access_display');
+    try {
+      final uri = Uri.base.replace(fragment: target, query: null);
+      final launched = await launchUrl(
+        uri,
+        webOnlyWindowName: isTablet ? 'gymdesk_tablet_access' : 'gymdesk_access_display',
+      );
+      if (!launched && context != null && context.mounted) {
+        context.push(target);
+      }
+    } catch (_) {
+      if (context != null && context.mounted) {
+        context.push(target);
+      }
+    }
   } else if (context != null && context.mounted) {
     context.push(target);
   }

@@ -309,7 +309,7 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
                                 child: Padding(
                                   padding: const EdgeInsets.all(20),
                                   child: Text(
-                                    '${s.text('payments_total')}: ${total.toStringAsFixed(2)} ${ref.read(appRuntimeProvider).session?.gym?['currency'] as String? ?? 'HTG'}',
+                                    '${s.text('payments_total')}: ${total.toStringAsFixed(2)} ${ref.read(appRuntimeProvider).session?.gym?['currency'] as String? ?? 'USD'}',
                                     style: Theme.of(
                                       context,
                                     ).textTheme.titleLarge,

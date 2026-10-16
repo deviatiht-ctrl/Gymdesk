@@ -31,6 +31,8 @@ class EmployeesRepository {
 
   Future<List<Employee>> all() => watch().first;
 
+  bool get _canManage => session.canManageGym || session.role == 'reception';
+
   /// Kreye oswa modifye yon anplwaye. Retounen id li.
   Future<String> save({
     Employee? existing,
@@ -43,7 +45,7 @@ class EmployeesRepository {
     String notes = '',
     bool active = true,
   }) async {
-    if (!session.canManageGym) throw const EmployeeFailure('access_denied');
+    if (!_canManage) throw const EmployeeFailure('access_denied');
     final first = firstName.trim();
     if (first.isEmpty || first.length > 80 || lastName.trim().length > 80) {
       throw const EmployeeFailure('invalid_record');
@@ -74,7 +76,7 @@ class EmployeesRepository {
   }
 
   Future<void> saveFingerprints(Employee employee, List<String> captures) async {
-    if (!session.canManageGym) throw const EmployeeFailure('access_denied');
+    if (!_canManage) throw const EmployeeFailure('access_denied');
     final templates = captures.where((t) => t.isNotEmpty).toList();
     if (templates.isEmpty) throw const EmployeeFailure('invalid_record');
     // Dènye kapti a (verifye kont premye a) se template prensipal la;
@@ -89,7 +91,7 @@ class EmployeesRepository {
   }
 
   Future<void> clearFingerprints(Employee employee) async {
-    if (!session.canManageGym) throw const EmployeeFailure('access_denied');
+    if (!_canManage) throw const EmployeeFailure('access_denied');
     await _write({
       ...employee.row,
       'fingerprint_template': null,

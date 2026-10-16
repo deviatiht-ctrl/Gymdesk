@@ -13,7 +13,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
     return m ? `${m[3]}/${m[2]}/${m[1]}` : value;
   };
-  const money = (amount: unknown, currency: unknown) => `${amount ?? 0} ${currency ?? 'HTG'}`;
+  const money = (amount: unknown, currency: unknown) => `${amount ?? 0} ${currency ?? 'USD'}`;
   // Lang manm yo (gyms.settings.member_language). Sèlman rapèl yo tradui pou
   // kounye a; lòt imèl yo rete an fransè pou pa melanje lang nan yon mesaj.
   const lang = (job.kind === 'renewal_reminder' || job.kind === 'payment_receipt')

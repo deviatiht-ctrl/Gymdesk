@@ -64,16 +64,21 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         runtime.errorCode == 'gym_suspended' ? '/paywall' : '/access',
       SessionPhase.ready => null,
     };
-    // Fenèt ekran aksè a ouvri dirèkteman sou /access-display: kenbe destinasyon
-    // an pandan demaraj la (/startup) pou retounen sou li lè sesyon an pare.
-    if (path == '/access-display' && gate != null) _deferredLocation = path;
+    // Fenèt ekran aksè a ouvri dirèkteman sou /access-display, /tablet-access oswa /door_access:
+    // kenbe destinasyon an pandan demaraj la (/startup) pou retounen sou li lè sesyon an pare.
+    if ((path == '/access-display' ||
+            path == '/tablet-access' ||
+            path == '/door_access') &&
+        gate != null) {
+      _deferredLocation = path;
+    }
     if (gate == null && _deferredLocation != null && path != _deferredLocation) {
       final target = _deferredLocation;
       _deferredLocation = null;
       if (runtime.session?.isPlatformAdmin != true) return target;
     }
     if (gate == null && path == _deferredLocation) _deferredLocation = null;
-    if (path == '/access-display' &&
+    if ((path == '/access-display' || path == '/tablet-access') &&
         gate == null &&
         !{'owner', 'supervisor', 'reception'}.contains(runtime.session?.role)) {
       return '/';
@@ -131,7 +136,7 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
       return '/settings';
     }
     if (path.startsWith('/settings/employees') &&
-        (platform || runtime.session?.canManageGym != true)) {
+        (platform || runtime.session?.active != true)) {
       return '/settings';
     }
     if (path.startsWith('/badges') ||

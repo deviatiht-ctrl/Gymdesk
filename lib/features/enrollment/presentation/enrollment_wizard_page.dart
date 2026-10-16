@@ -59,6 +59,14 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   List<GymPlan> _plans = [];
   bool _loadingPlans = true;
 
+  String get _currency {
+    final p = _selectedPlan?.currency;
+    if (p != null && p.isNotEmpty) return p;
+    final g = ref.read(appRuntimeProvider).session?.gym?['currency'] as String?;
+    if (g != null && g.isNotEmpty) return g;
+    return 'USD';
+  }
+
   // Step 3: Peman
   String _paymentMethod = 'cash';
   final _paymentAmountController = TextEditingController();
@@ -301,7 +309,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           memberId: '',
           subscriptionId: '',
           amount: amt,
-          currency: 'HTG',
+          currency: plan.currency.isNotEmpty ? plan.currency : _currency,
           method: _paymentMethod,
           reference: _referenceController.text.trim(),
           receivedAmount: received,
@@ -414,7 +422,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         memberNumber: _lastMemberNumber,
         planName: planName,
         amount: _lastAmount,
-        currency: gym['currency'] as String? ?? 'HTG',
+        currency: _currency,
         method: _paymentMethod,
         paidAt: DateTime.now().toUtc(),
         gymName: gym['name'] as String? ?? 'GymDesk',
@@ -908,7 +916,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               title: Text(plan.name, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text('${plan.durationDays} ${s.text('days')}'),
               trailing: Text(
-                '${plan.price.toStringAsFixed(0)} HTG',
+                '${plan.price.toStringAsFixed(0)} ${plan.currency}',
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
               ),
             ),
@@ -931,7 +939,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${s.text('plans')}: ${_selectedPlan?.name ?? ''} (${_selectedPlan?.price.toStringAsFixed(0) ?? '0'} HTG)',
+                  '${s.text('plans')}: ${_selectedPlan?.name ?? ''} (${_selectedPlan?.price.toStringAsFixed(0) ?? '0'} $_currency)',
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
@@ -973,7 +981,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 controller: _paymentAmountController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  labelText: '${s.text('amount_paid')} (HTG) *',
+                  labelText: '${s.text('amount_paid')} ($_currency) *',
                   border: const OutlineInputBorder(),
                 ),
                 onChanged: (_) => setState(() {}),
@@ -985,7 +993,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 controller: _paymentReceivedController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  labelText: '${s.text('amount_received')} (HTG)',
+                  labelText: '${s.text('amount_received')} ($_currency)',
                   border: const OutlineInputBorder(),
                   hintText: _paymentAmountController.text,
                 ),
@@ -1007,7 +1015,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             return CheckboxListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(s.text('keep_change_as_credit')),
-              subtitle: Text('+${rest.toStringAsFixed(2)} HTG'),
+              subtitle: Text('+${rest.toStringAsFixed(2)} $_currency'),
               value: _keepChangeAsCredit,
               onChanged: (v) =>
                   setState(() => _keepChangeAsCredit = v == true),
