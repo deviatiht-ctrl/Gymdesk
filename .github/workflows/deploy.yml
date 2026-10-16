@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-and-deploy:
@@ -12,6 +16,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -25,7 +31,26 @@ jobs:
       - name: Build Web Release
         run: flutter build web --release
 
+      - name: Upload Web Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: build/web
+
+      - name: Update web_deploy directory
+        run: |
+          rm -rf web_deploy/*
+          cp -r build/web/* web_deploy/
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add web_deploy
+          if ! git diff --staged --quiet; then
+            git commit -m "build(web): compile web_deploy from flutter build [skip ci]"
+            git push origin main
+          fi
+
       - name: Deploy to Vercel
+        continue-on-error: true
         uses: amondnet/vercel-action@v25
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
