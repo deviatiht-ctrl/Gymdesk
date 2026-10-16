@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:timezone/timezone.dart' as tz;
 
+import '../../features/attendance/data/attendance_repository.dart';
 import '../../features/employees/data/employees_repository.dart';
 import '../../features/employees/domain/employee.dart';
 import '../../features/members/data/members_repository.dart';
@@ -168,43 +169,40 @@ class TerminalAccessService {
   DateTime? _peopleAt;
 
   static Future<TerminalAccessConfig> loadConfig(SupabaseClient client, StaffSession session) async {
+    // 1. Priyorite konfigirasyon lokal la (enstantane, 0ms, mache 100% offline san bloke)
+    final localSettings = session.settings;
+    if (localSettings['biometric_config'] is Map) {
+      return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(localSettings['biometric_config'] as Map));
+    }
+    if (session.gym?['biometric_config'] is Map) {
+      return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(session.gym!['biometric_config'] as Map));
+    }
+
+    // 2. Si li pa nan sesyon an, chèche nan Supabase ak yon ti timeout rapid (1.5s)
     final gymId = session.gymId;
     if (gymId != null) {
       try {
         final gym = await client
             .from('gyms')
-            .select('settings')
+            .select('settings, biometric_config')
             .eq('id', gymId)
             .maybeSingle()
-            .timeout(const Duration(seconds: 4));
-        if (gym != null && gym['settings'] is Map) {
-          final settings = Map<String, dynamic>.from(gym['settings'] as Map);
-          if (settings['biometric_config'] is Map) {
-            return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(settings['biometric_config'] as Map));
+            .timeout(const Duration(milliseconds: 1500));
+        if (gym != null) {
+          if (gym['settings'] is Map) {
+            final s = Map<String, dynamic>.from(gym['settings'] as Map);
+            if (s['biometric_config'] is Map) {
+              return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(s['biometric_config'] as Map));
+            }
+          }
+          if (gym['biometric_config'] is Map) {
+            return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(gym['biometric_config'] as Map));
           }
         }
       } catch (_) {}
-
-      try {
-        final gym = await client
-            .from('gyms')
-            .select('biometric_config')
-            .eq('id', gymId)
-            .maybeSingle()
-            .timeout(const Duration(seconds: 4));
-        if (gym != null && gym['biometric_config'] is Map) {
-          return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(gym['biometric_config'] as Map));
-        }
-      } catch (_) {}
     }
 
-    final localSettings = session.settings;
-    if (localSettings['biometric_config'] is Map) {
-      return TerminalAccessConfig.fromJson(Map<String, dynamic>.from(localSettings['biometric_config'] as Map));
-    }
-    return TerminalAccessConfig.fromJson(
-      Map<String, dynamic>.from(session.gym?['biometric_config'] as Map? ?? {}),
-    );
+    return const TerminalAccessConfig();
   }
 
   Future<Map<String, AccessPerson>> _loadPeople({bool force = false}) async {
@@ -221,11 +219,41 @@ class TerminalAccessService {
             GymPlan(Map<String, dynamic>.from(jsonDecode(r.payload) as Map)).name,
     };
     final employees = await EmployeesRepository(db, session).all();
-    final people = <String, AccessPerson>{
-      for (final e in entries)
-        terminalUid(e.member.id): AccessPerson.member(e, planName: plans[e.subscription?.planId]),
-      for (final e in employees) terminalUid(e.id): AccessPerson.employee(e),
-    };
+    final people = <String, AccessPerson>{};
+
+    for (final e in entries) {
+      final person = AccessPerson.member(e, planName: plans[e.subscription?.planId]);
+      people[terminalUid(e.member.id)] = person;
+      people[e.member.id] = person;
+      final num = e.member.memberNumber.trim();
+      if (num.isNotEmpty) {
+        people[num] = person;
+        people[num.toLowerCase()] = person;
+        final digits = num.replaceAll(RegExp(r'\D'), '');
+        if (digits.isNotEmpty) {
+          people[digits] = person;
+          final intVal = int.tryParse(digits);
+          if (intVal != null) {
+            people['$intVal'] = person;
+          }
+        }
+      }
+      final phone = e.member.phone?.replaceAll(RegExp(r'\D'), '');
+      if (phone != null && phone.isNotEmpty) {
+        people[phone] = person;
+      }
+    }
+
+    for (final e in employees) {
+      final person = AccessPerson.employee(e);
+      people[terminalUid(e.id)] = person;
+      people[e.id] = person;
+      final phone = e.phone?.replaceAll(RegExp(r'\D'), '');
+      if (phone != null && phone.isNotEmpty) {
+        people[phone] = person;
+      }
+    }
+
     _people = people;
     _peopleAt = DateTime.now();
     return people;
@@ -233,7 +261,25 @@ class TerminalAccessService {
 
   void invalidate() => _people = null;
 
-  Future<AccessPerson?> resolve(String uid) async => (await _loadPeople())[uid];
+  Future<AccessPerson?> resolve(String uid) async {
+    final clean = uid.trim();
+    if (clean.isEmpty || clean == '-') return null;
+    final map = await _loadPeople();
+    final direct = map[clean] ?? map[clean.toLowerCase()] ?? map[clean.replaceAll('-', '')];
+    if (direct != null) return direct;
+
+    // Fallback sou chif sèlman (egz: W2 voye "1" oswa "0001")
+    final digits = clean.replaceAll(RegExp(r'\D'), '');
+    if (digits.isNotEmpty) {
+      final byDigits = map[digits];
+      if (byDigits != null) return byDigits;
+      final intVal = int.tryParse(digits);
+      if (intVal != null && map['$intVal'] != null) {
+        return map['$intVal'];
+      }
+    }
+    return null;
+  }
 
   int _endOfDayEpoch(DateTime date, int extraDays) {
     final d = date.add(Duration(days: extraDays));
@@ -348,7 +394,9 @@ class TerminalAccessService {
       final snapshot = <String, dynamic>{
         'name': person?.name ??
             (decision.outcome == AccessOutcome.legacy
-                ? 'Itilizatè BioStar (Ansyen)'
+                ? (decision.uid != null && decision.uid!.isNotEmpty && decision.uid != '-'
+                    ? 'Manm BioStar #${decision.uid}'
+                    : 'Itilizatè BioStar (Ansyen)')
                 : 'Anprent pa rekonèt'),
         'is_employee': person?.isEmployee ?? false,
         'allowed': person?.allowed ?? isGranted,
@@ -366,15 +414,34 @@ class TerminalAccessService {
         if (member?.id != null) 'member_id': member!.id,
       };
 
-      await client.from('access_events').insert({
-        'gym_id': gymId,
-        if (member != null) 'member_id': member.id,
-        'event_type': eventType,
-        'source': source,
-        'reason': snapshot['reason'],
-        'member_snapshot': snapshot,
-        'occurred_at': DateTime.now().toUtc().toIso8601String(),
-      }).timeout(const Duration(seconds: 4));
+      // 1. Enskri prezans lan nan SQLite lokal si aksè akòde pou yon manm (mache 100% offline)
+      if (member != null && isGranted) {
+        try {
+          final attendanceRepo = AttendanceRepository(db, session);
+          await attendanceRepo.verifyFingerprintAndGrant(
+            member: member,
+            fingerprintMatched: true,
+            scannedAt: DateTime.now(),
+            offline: true,
+            suspectClock: false,
+          );
+        } catch (_) {}
+      }
+
+      // 2. Voye evènman an sou Supabase Realtime (tablèt Wi-Fi) ak yon kout timeout
+      try {
+        await client.from('access_events').insert({
+          'gym_id': gymId,
+          if (member != null) 'member_id': member.id,
+          'event_type': eventType,
+          'source': source,
+          'reason': snapshot['reason'],
+          'member_snapshot': snapshot,
+          'occurred_at': DateTime.now().toUtc().toIso8601String(),
+        }).timeout(const Duration(seconds: 3));
+      } catch (_) {
+        // Pa bloke operasyon aksè si rezo a ralanti oswa offline
+      }
     } catch (_) {
       // Pa bloke operasyon aksè si rezo a ralanti
     }

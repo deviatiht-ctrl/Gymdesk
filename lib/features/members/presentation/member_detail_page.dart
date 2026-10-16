@@ -29,6 +29,7 @@ import '../data/members_repository.dart';
 import '../domain/member.dart';
 import 'fingerprint_enrollment_dialog.dart';
 import '../../../core/sync/sync_models.dart';
+import '../../../core/biometrics/access_agent_client.dart';
 
 class MemberDetailPage extends ConsumerStatefulWidget {
   const MemberDetailPage({super.key, required this.memberId});
@@ -429,6 +430,23 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
         payment: command,
       );
     });
+    if (created != null && member.fingerprintRegistered) {
+      final tmpls = <String>[];
+      if (member.fingerprintTemplate != null && member.fingerprintTemplate!.isNotEmpty) {
+        tmpls.add(member.fingerprintTemplate!);
+      }
+      if (member.row['fingerprint_backup_template'] is String &&
+          (member.row['fingerprint_backup_template'] as String).isNotEmpty) {
+        tmpls.add(member.row['fingerprint_backup_template'] as String);
+      }
+      unawaited(AccessAgentClient().syncTerminalMember(
+        userId: member.id,
+        name: member.fullName,
+        startDate: created!.startDate,
+        endDate: created!.endDate,
+        templates: tmpls,
+      ).catchError((_) => false));
+    }
     if (mounted && command != null) {
       await _openReceipt(member, created, command);
     }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -47,6 +48,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   bool _agentOnline = true;
   AccessStatus _status = AccessStatus.none;
   Member? _matchedMember;
+  String? _matchedName;
   int? _daysLeft;
 
   final _searchController = TextEditingController();
@@ -70,8 +72,10 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     final runtime = ref.read(appRuntimeProvider);
     try {
       _cfg = await TerminalAccessService.loadConfig(runtime.client, runtime.session!);
-      _terminalOnline = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
-      _terminalSub = _agent.terminalEvents().listen(_onTerminalEvent);
+      if (!kIsWeb) {
+        _terminalOnline = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
+        _terminalSub = _agent.terminalEvents().listen(_onTerminalEvent);
+      }
 
       final gymId = runtime.session?.gymId;
       if (gymId != null) {
@@ -129,6 +133,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         setState(() {
           _status = AccessStatus.granted;
           _matchedMember = null;
+          _matchedName = decision.uid != null && decision.uid!.isNotEmpty && decision.uid != '-'
+              ? 'Manm BioStar #${decision.uid}'
+              : 'Itilizatè BioStar (Ansyen)';
           _daysLeft = null;
           _processing = false;
         });
@@ -139,6 +146,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         setState(() {
           _status = AccessStatus.deniedUnrecognized;
           _matchedMember = null;
+          _matchedName = null;
           _daysLeft = null;
           _processing = false;
         });
@@ -149,15 +157,41 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
   Future<void> _handleRealtimeAccessEvent(Map<String, dynamic> row) async {
     final memberId = row['member_id']?.toString();
-    if (memberId == null) return;
-    if (_matchedMember?.id == memberId && _status != AccessStatus.none) return;
-    try {
-      final entries = await _membersRepo.watch().first;
-      final entry = entries.where((e) => e.member.id == memberId).firstOrNull;
-      if (entry != null && mounted) {
-        await _evaluateMemberAccess(entry.member, recordToCloud: false);
+    final eventType = row['event_type']?.toString() ?? 'unknown';
+    final isGranted = eventType == 'granted';
+    final snapshot = Map<String, dynamic>.from(row['member_snapshot'] as Map? ?? {});
+
+    Member? member;
+    if (memberId != null) {
+      try {
+        final entries = await _membersRepo.watch().first;
+        final entry = entries.where((e) => e.member.id == memberId).firstOrNull;
+        member = entry?.member;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+
+    final name = snapshot['name']?.toString() ?? member?.fullName ?? 'Manm';
+    final days = (snapshot['days_left'] as num?)?.toInt();
+
+    setState(() {
+      _matchedMember = member;
+      _matchedName = name;
+      _daysLeft = days;
+      _processing = false;
+      if (isGranted) {
+        _status = AccessStatus.granted;
+      } else if (eventType == 'denied_expired') {
+        _status = AccessStatus.deniedExpired;
+      } else if (eventType == 'denied_no_subscription') {
+        _status = AccessStatus.deniedNoSubscription;
+      } else {
+        _status = AccessStatus.deniedUnrecognized;
       }
-    } catch (_) {}
+    });
+
+    _scheduleDismiss(Duration(seconds: isGranted ? 6 : 5));
   }
 
   void _startBiometricListener() {
@@ -397,6 +431,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         setState(() {
           _status = AccessStatus.none;
           _matchedMember = null;
+          _matchedName = null;
         });
       }
     });
@@ -467,102 +502,195 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // Bandeau d'état dynamique : Tèminal Pòt + Lektè USB
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              color: const Color(0xFF1E293B),
-              child: Row(
-                children: [
-                  Icon(
-                    _terminalOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
-                    color: _terminalOnline ? const Color(0xFF10B981) : Colors.amber,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _terminalOnline
-                          ? (isFr
-                              ? 'Terminal de porte (${_cfg.terminalIp}) : Connecté & Prêt'
-                              : 'Tèminal Pòt (${_cfg.terminalIp}) : Konekte & Pare')
-                          : (isFr
-                              ? 'Terminal de porte (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Non connecté (vérifiez le réseau)'
-                              : 'Tèminal Pòt (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Pa konekte (verifye rezo a)'),
-                      style: TextStyle(
-                        color: _terminalOnline ? Colors.white70 : Colors.amber.shade200,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  ValueListenableBuilder<BiometricSensorState>(
-                    valueListenable: _biometricService.state,
-                    builder: (context, sensorState, _) {
-                      final usbReady = sensorState == BiometricSensorState.ready;
-                      return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: usbReady ? const Color(0xFF10B981).withAlpha(40) : Colors.white.withAlpha(20),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: usbReady ? const Color(0xFF10B981) : Colors.white24,
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+            // Bandeau d'état dynamique : Tèminal Pòt + Lektè USB (Responsive)
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 650;
+                return Container(
+                  padding: EdgeInsets.symmetric(horizontal: isNarrow ? 12 : 24, vertical: isNarrow ? 8 : 12),
+                  color: const Color(0xFF1E293B),
+                  child: isNarrow
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  _terminalOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
+                                  color: _terminalOnline ? const Color(0xFF10B981) : Colors.amber,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _terminalOnline
+                                        ? (isFr
+                                            ? 'Terminal (${_cfg.terminalIp}) : Connecté'
+                                            : 'Tèminal (${_cfg.terminalIp}) : Konekte')
+                                        : (isFr
+                                            ? 'Terminal (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Non connecté'
+                                            : 'Tèminal (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Pa konekte'),
+                                    style: TextStyle(
+                                      color: _terminalOnline ? Colors.white70 : Colors.amber.shade200,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                if (!kIsWeb)
+                                  ValueListenableBuilder<BiometricSensorState>(
+                                    valueListenable: _biometricService.state,
+                                    builder: (context, sensorState, _) {
+                                      final usbReady = sensorState == BiometricSensorState.ready;
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: usbReady ? const Color(0xFF10B981).withAlpha(40) : Colors.white.withAlpha(20),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: usbReady ? const Color(0xFF10B981) : Colors.white24,
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(LucideIcons.usb, size: 12, color: usbReady ? const Color(0xFF34D399) : Colors.white38),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              usbReady ? (isFr ? 'USB : Prêt' : 'USB : Pare') : (isFr ? 'USB : Débranché' : 'USB : Deploge'),
+                                              style: TextStyle(fontSize: 10, color: usbReady ? const Color(0xFF34D399) : Colors.white38, fontWeight: FontWeight.w600),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  )
+                                else
+                                  const SizedBox.shrink(),
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      tooltip: isFr ? 'Tester' : 'Teste',
+                                      icon: const Icon(LucideIcons.refreshCw, size: 15, color: Colors.white70),
+                                      onPressed: () async {
+                                        final termOk = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
+                                        await _biometricService.checkSensorConnection();
+                                        if (mounted) setState(() => _terminalOnline = termOk);
+                                      },
+                                    ),
+                                    TextButton.icon(
+                                      onPressed: () => context.push('/settings/biometrics'),
+                                      icon: const Icon(LucideIcons.settings, size: 15, color: Colors.white70),
+                                      label: Text(s.text('settings'), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        )
+                      : Row(
                           children: [
                             Icon(
-                              LucideIcons.usb,
-                              size: 13,
-                              color: usbReady ? const Color(0xFF34D399) : Colors.white38,
+                              _terminalOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
+                              color: _terminalOnline ? const Color(0xFF10B981) : Colors.amber,
+                              size: 20,
                             ),
-                            const SizedBox(width: 5),
-                            Text(
-                              usbReady
-                                  ? (isFr ? 'USB : Prêt' : 'USB : Pare')
-                                  : (isFr ? 'USB : Débranché' : 'USB : Deploge'),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: usbReady ? const Color(0xFF34D399) : Colors.white38,
-                                fontWeight: FontWeight.w600,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _terminalOnline
+                                    ? (isFr
+                                        ? 'Terminal de porte (${_cfg.terminalIp}) : Connecté & Prêt'
+                                        : 'Tèminal Pòt (${_cfg.terminalIp}) : Konekte & Pare')
+                                    : (isFr
+                                        ? 'Terminal de porte (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Non connecté (vérifiez le réseau)'
+                                        : 'Tèminal Pòt (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Pa konekte (verifye rezo a)'),
+                                style: TextStyle(
+                                  color: _terminalOnline ? Colors.white70 : Colors.amber.shade200,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
+                            ),
+                            ValueListenableBuilder<BiometricSensorState>(
+                              valueListenable: _biometricService.state,
+                              builder: (context, sensorState, _) {
+                                final usbReady = sensorState == BiometricSensorState.ready;
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: usbReady ? const Color(0xFF10B981).withAlpha(40) : Colors.white.withAlpha(20),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: usbReady ? const Color(0xFF10B981) : Colors.white24,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        LucideIcons.usb,
+                                        size: 13,
+                                        color: usbReady ? const Color(0xFF34D399) : Colors.white38,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        usbReady
+                                            ? (isFr ? 'USB : Prêt' : 'USB : Pare')
+                                            : (isFr ? 'USB : Débranché' : 'USB : Deploge'),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: usbReady ? const Color(0xFF34D399) : Colors.white38,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(width: 12),
+                            IconButton(
+                              tooltip: isFr ? 'Tester la connexion' : 'Teste koneksyon an',
+                              icon: const Icon(LucideIcons.refreshCw, size: 16, color: Colors.white70),
+                              onPressed: () async {
+                                final termOk = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
+                                await _biometricService.checkSensorConnection();
+                                if (mounted) setState(() => _terminalOnline = termOk);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      duration: const Duration(seconds: 2),
+                                      content: Text(
+                                        termOk
+                                            ? (isFr ? 'Terminal connecté avec succès' : 'Tèminal konekte avèk siksè')
+                                            : (isFr ? 'Échec de connexion au terminal (${_cfg.terminalIp})' : 'Tèminal la pa reponn nan ${_cfg.terminalIp}'),
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                            TextButton.icon(
+                              onPressed: () => context.push('/settings/biometrics'),
+                              icon: const Icon(LucideIcons.settings, size: 16, color: Colors.white70),
+                              label: Text(s.text('settings'), style: const TextStyle(color: Colors.white70, fontSize: 13)),
                             ),
                           ],
                         ),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 12),
-                  IconButton(
-                    tooltip: isFr ? 'Tester la connexion' : 'Teste koneksyon an',
-                    icon: const Icon(LucideIcons.refreshCw, size: 16, color: Colors.white70),
-                    onPressed: () async {
-                      final termOk = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
-                      await _biometricService.checkSensorConnection();
-                      if (mounted) setState(() => _terminalOnline = termOk);
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            duration: const Duration(seconds: 2),
-                            content: Text(
-                              termOk
-                                  ? (isFr ? 'Terminal connecté avec succès' : 'Tèminal konekte avèk siksè')
-                                  : (isFr ? 'Échec de connexion au terminal (${_cfg.terminalIp})' : 'Tèminal la pa reponn nan ${_cfg.terminalIp}'),
-                            ),
-                          ),
-                        );
-                      }
-                    },
-                  ),
-                  TextButton.icon(
-                    onPressed: () => context.push('/settings/biometrics'),
-                    icon: const Icon(LucideIcons.settings, size: 16, color: Colors.white70),
-                    label: Text(s.text('settings'), style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
 
             Expanded(
@@ -744,8 +872,8 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
     if (isGranted) {
       title = s.text('access_granted');
-      subtitle = _daysLeft != null && _daysLeft! <= 5
-          ? (isFr ? 'Attention : fin dans $_daysLeft jour(s) !' : 'Atansyon : fini nan $_daysLeft jou !')
+      subtitle = _daysLeft != null
+          ? (isFr ? 'Abonnement valide · Reste $_daysLeft jour(s)' : 'Abònman valab · Rete $_daysLeft jou')
           : (isFr ? 'Porte ouverte. Bon entraînement !' : 'Pòt louvri. Bon antrenman !');
     } else if (_status == AccessStatus.deniedExpired) {
       title = s.text('access_denied');
@@ -757,6 +885,8 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       title = s.text('access_denied');
       subtitle = s.text('unrecognized_fingerprint');
     }
+
+    final displayName = _matchedMember?.fullName ?? _matchedName;
 
     return Card(
       elevation: 8,
@@ -791,31 +921,44 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white70, fontSize: 16),
             ),
-            if (_matchedMember != null) ...[
+            if (displayName != null) ...[
               const SizedBox(height: 18),
               const Divider(color: Colors.white24),
               const SizedBox(height: 12),
               Text(
-                _matchedMember!.fullName,
+                displayName,
                 style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 4),
-              Text(
-                'S/N: ${_matchedMember!.id.substring(0, 8)}',
-                style: const TextStyle(color: Colors.white60, fontSize: 13),
-              ),
-              if (!isGranted) ...[
-                const SizedBox(height: 18),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: const Color(0xFF7F1D1D),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              if (_daysLeft != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  isFr ? '$_daysLeft jour(s) restant(s)' : 'Rete $_daysLeft jou',
+                  style: TextStyle(
+                    color: _daysLeft! <= 5 ? Colors.amberAccent : const Color(0xFF34D399),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                   ),
-                  onPressed: () => context.push('/members/${_matchedMember!.id}'),
-                  icon: const Icon(LucideIcons.refreshCw, size: 18),
-                  label: Text(s.text('renew_now'), style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
+              ],
+              if (_matchedMember != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'ID: ${_matchedMember!.memberNumber.isNotEmpty ? _matchedMember!.memberNumber : _matchedMember!.id.substring(0, 8)}',
+                  style: const TextStyle(color: Colors.white60, fontSize: 13),
+                ),
+                if (!isGranted) ...[
+                  const SizedBox(height: 18),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF7F1D1D),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                    onPressed: () => context.push('/members/${_matchedMember!.id}'),
+                    icon: const Icon(LucideIcons.refreshCw, size: 18),
+                    label: Text(s.text('renew_now'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ],
             ],
           ],

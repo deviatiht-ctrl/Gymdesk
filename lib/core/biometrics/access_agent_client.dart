@@ -191,22 +191,21 @@ class AccessAgentClient {
     required DateTime startDate,
     required DateTime endDate,
     required List<String> templates,
+    String? terminalIp,
   }) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/api/terminals/sync'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'user': {
-            'user_id': userId,
-            'name': name,
-            'start_date': startDate.toIso8601String(),
-            'end_date': endDate.toIso8601String(),
-            'templates': templates,
-          }
-        }),
-      ).timeout(const Duration(seconds: 5));
-      return res.statusCode == 200;
+      final start = startDate.millisecondsSinceEpoch ~/ 1000;
+      final end = endDate.millisecondsSinceEpoch ~/ 1000;
+      final res = await syncTerminalMembers([
+        {
+          'id': userId,
+          'name': name.length > 48 ? name.substring(0, 48) : name,
+          'start': start,
+          'end': end,
+          'fingers': templates.isEmpty ? [] : [templates],
+        }
+      ], terminalIp: terminalIp);
+      return res?['success'] == true;
     } catch (_) {
       return false;
     }

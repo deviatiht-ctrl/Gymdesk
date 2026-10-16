@@ -634,7 +634,22 @@ Future<void> _handleRequest(HttpRequest request) async {
       final cfg = terminalConfig();
       final ip = body['ip']?.toString() ?? cfg['ip'] as String;
       final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
-      final members = (body['members'] as List?) ?? const [];
+      var members = (body['members'] as List?) ?? const [];
+      if (members.isEmpty && body['user'] is Map) {
+        final u = body['user'] as Map;
+        final startSec = (DateTime.tryParse(u['start_date']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0) ~/ 1000;
+        final endSec = (DateTime.tryParse(u['end_date']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0) ~/ 1000;
+        final tpls = (u['templates'] as List?)?.map((t) => t.toString()).toList() ?? [];
+        members = [
+          {
+            'id': u['user_id'] ?? u['id'],
+            'name': u['name'] ?? '',
+            'start': startSec > 0 ? startSec : 978307200,
+            'end': endSec > 0 ? endSec : 1924991999,
+            'fingers': tpls.isEmpty ? [] : [tpls],
+          }
+        ];
+      }
       final remove = [
         for (final r in (body['remove'] as List?) ?? const [])
           if (r.toString().replaceAll('-', '').isNotEmpty) r.toString().replaceAll('-', '')

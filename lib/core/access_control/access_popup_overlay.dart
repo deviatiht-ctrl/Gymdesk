@@ -132,12 +132,18 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
 
     if (isGranted) {
       title = isFr ? 'Accès Autorisé' : isEn ? 'Access Granted' : 'Aksè Otorize';
-      message = daysLeft != null && daysLeft <= 5
-          ? (isFr
-              ? 'Porte déverrouillée. Attention : expiration dans $daysLeft jour(s) !'
-              : isEn
-                  ? 'Door unlocked. Warning: expires in $daysLeft day(s)!'
-                  : 'Pòt louvri. Atansyon: abònman fini nan $daysLeft jou!')
+      message = daysLeft != null
+          ? (daysLeft <= 5
+              ? (isFr
+                  ? 'Porte déverrouillée. Attention : expiration dans $daysLeft jour(s) !'
+                  : isEn
+                      ? 'Door unlocked. Warning: expires in $daysLeft day(s)!'
+                      : 'Pòt louvri. Atansyon: abònman fini nan $daysLeft jou!')
+              : (isFr
+                  ? 'Porte déverrouillée. Abonnement valide ($daysLeft jours restants).'
+                  : isEn
+                      ? 'Door unlocked. Active subscription ($daysLeft days left).'
+                      : 'Pòt louvri. Abònman valab (rete $daysLeft jou).'))
           : (isFr ? 'Porte déverrouillée avec succès.' : isEn ? 'Door unlocked successfully.' : 'Pòt la louvri avèk siksè.');
     } else if (eventType == 'denied_expired') {
       title = isFr ? 'Accès Refusé — Abonnement Expiré' : isEn ? 'Access Denied — Subscription Expired' : 'Aksè Refize — Abònman Fini';

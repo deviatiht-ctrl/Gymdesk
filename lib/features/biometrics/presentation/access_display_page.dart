@@ -9,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/access_control/terminal_access_service.dart';
@@ -26,33 +25,8 @@ import '../../settings/data/settings_repository.dart';
 Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = false]) async {
   final target = isTablet ? '/tablet-access' : '/access-display';
   if (context != null && context.mounted) {
-    final width = MediaQuery.sizeOf(context).width;
-    final isMobileOrTablet = isTablet ||
-        width < 900 ||
-        defaultTargetPlatform == TargetPlatform.iOS ||
-        defaultTargetPlatform == TargetPlatform.android;
-    if (isMobileOrTablet) {
-      context.push(target);
-      return;
-    }
-  }
-  if (kIsWeb) {
-    try {
-      final uri = Uri.base.replace(fragment: target, query: null);
-      final launched = await launchUrl(
-        uri,
-        webOnlyWindowName: isTablet ? 'gymdesk_tablet_access' : 'gymdesk_access_display',
-      );
-      if (!launched && context != null && context.mounted) {
-        context.push(target);
-      }
-    } catch (_) {
-      if (context != null && context.mounted) {
-        context.push(target);
-      }
-    }
-  } else if (context != null && context.mounted) {
     context.push(target);
+    return;
   }
 }
 
