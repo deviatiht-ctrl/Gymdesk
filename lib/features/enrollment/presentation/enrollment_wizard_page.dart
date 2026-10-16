@@ -301,7 +301,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           planId: plan.id,
           startDate: _startDate,
           endDate: endDate,
-          price: plan.price,
+          price: _isExistingMember ? plan.price : plan.registrationPrice,
           status: 'active',
         ),
         payment: PaymentCommand(
@@ -887,6 +887,10 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             onChanged: (val) {
               setState(() {
                 _isExistingMember = val;
+                if (_selectedPlan != null) {
+                  final effective = val ? _selectedPlan!.price : _selectedPlan!.registrationPrice;
+                  _paymentAmountController.text = effective.toStringAsFixed(0);
+                }
               });
             },
           ),
@@ -896,6 +900,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         const SizedBox(height: 10),
         ..._plans.map((plan) {
           final isSelected = _selectedPlan?.id == plan.id;
+          final effectivePrice = _isExistingMember ? plan.price : plan.registrationPrice;
           return Card(
             elevation: isSelected ? 3 : 1,
             shape: RoundedRectangleBorder(
@@ -906,7 +911,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               onTap: () {
                 setState(() {
                   _selectedPlan = plan;
-                  _paymentAmountController.text = plan.price.toStringAsFixed(0);
+                  _paymentAmountController.text = effectivePrice.toStringAsFixed(0);
                 });
               },
               leading: Icon(
@@ -914,9 +919,13 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 color: isSelected ? const Color(0xFF0F766E) : Colors.grey,
               ),
               title: Text(plan.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text('${plan.durationDays} ${s.text('days')}'),
+              subtitle: Text(
+                plan.enrollmentPrice != null && !_isExistingMember
+                    ? '${plan.durationDays} ${s.text('days')} · (Renouvèlman: ${plan.price.toStringAsFixed(0)} ${plan.currency})'
+                    : '${plan.durationDays} ${s.text('days')}',
+              ),
               trailing: Text(
-                '${plan.price.toStringAsFixed(0)} ${plan.currency}',
+                '${effectivePrice.toStringAsFixed(0)} ${plan.currency}',
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
               ),
             ),
@@ -927,6 +936,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   }
 
   Widget _buildStep3(AppStrings s) {
+    final effectivePrice = _selectedPlan == null
+        ? 0.0
+        : (_isExistingMember ? _selectedPlan!.price : _selectedPlan!.registrationPrice);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -939,7 +951,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${s.text('plans')}: ${_selectedPlan?.name ?? ''} (${_selectedPlan?.price.toStringAsFixed(0) ?? '0'} $_currency)',
+                  '${s.text('plans')}: ${_selectedPlan?.name ?? ''} (${effectivePrice.toStringAsFixed(0)} $_currency)',
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
