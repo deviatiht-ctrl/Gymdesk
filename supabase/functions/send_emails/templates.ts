@@ -40,7 +40,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
     const startStr = date(p.start_date);
     const endStr = date(p.end_date);
     title = 'Votre inscription est confirmée';
-    subject = `Confirmation de votre inscription - ${brand}`;
+    subject = 'Confirmation de votre inscription';
     intro = p.imported
       ? 'Merci de faire partie de notre salle. Votre dossier et votre période déjà réglée ont été repris, sans nouveaux frais d’inscription.'
       : `Bienvenue chez ${brand} ! Votre inscription a bien été enregistrée. Voici le récapitulatif de votre abonnement.`;
@@ -52,7 +52,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
       ['Montant réglé', p.imported ? 'Période déjà réglée' : money(p.price, p.currency)],
       ['Statut', p.status === 'pending' ? 'En attente de validation' : 'Actif'],
     ];
-    note = `⚠️ Rappel important : Votre abonnement débutera officiellement le ${startStr}. Veuillez impérativement vous présenter à la salle à cette date exacte, car c'est à ce moment précis que votre période d'accès commencera à être décomptée. Pour entrer, posez simplement votre doigt sur le lecteur à l’entrée.`;
+    note = `Rappel : Votre abonnement débutera officiellement le ${startStr}. Veuillez vous présenter à la salle à cette date, car c'est à ce moment que votre période d'accès commencera à être décomptée. Pour entrer, posez simplement votre doigt sur le lecteur à l’entrée.`;
   } else if (job.kind === 'member_renewal') {
     title = 'Votre renouvellement est confirmé';
     subject = 'Renouvellement de votre abonnement';
@@ -185,6 +185,9 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
   <title>${escape(title)}</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f5f7;color:#1f2937;font-family:Arial,Helvetica,sans-serif">
+  <div style="display:none;font-size:1px;color:#f4f5f7;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;mso-hide:all">
+    ${escape(line(intro || title))}
+  </div>
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f5f7">
     <tr>
       <td align="center" style="padding:24px 12px">
@@ -231,8 +234,15 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
 </body>
 </html>`;
 
+  const rawSubject = line(subject || title);
+  const cleanSubject = job.kind === 'campaign'
+    ? rawSubject
+    : rawSubject.toLowerCase().includes(brand.toLowerCase())
+      ? rawSubject
+      : `${rawSubject} – ${line(brand)}`;
+
   return {
-    subject: job.kind === 'campaign' ? line(subject) : `${line(subject || title)} – ${line(brand)}`,
+    subject: cleanSubject,
     html,
     text: [
       greet ? `${t('Bonjour', 'Bonjou', 'Hello')} ${p.name},` : '',

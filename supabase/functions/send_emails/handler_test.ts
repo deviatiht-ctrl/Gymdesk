@@ -62,9 +62,13 @@ Deno.test('member emails are sent under the gym name with the gym as Reply-To an
   assert(body.sender.name === 'Gym Elite PAP' && body.sender.email === config.senderEmail);
   assert(body.replyTo?.email === 'contact@gym.example' && body.textContent.includes('Répondez'));
   assert(!('List-Unsubscribe' in body.headers));
+  assert(!('Auto-Submitted' in body.headers));
+  assert(!('Feedback-ID' in body.headers));
+  assert(body.headers['X-Priority'] === '3');
   const campaign = { ...branded, kind: 'campaign' as const, payload: { ...branded.payload, subject: 'Promo', body_text: 'Bonjour Marie,\nSalut' } };
   const sent = brevoPayload(campaign, config, renderEmail(campaign, null));
   assert(sent.subject === 'Promo' && sent.headers['List-Unsubscribe'] === '<mailto:contact@gym.example?subject=STOP>');
+  assert(sent.headers['Feedback-ID'] === 'campaign:gymdesk');
   assert(!sent.htmlContent.includes('&lt;script&gt;') && sent.textContent.includes('STOP'));
   const noReply = brevoPayload({ ...job, payload: { ...job.payload, reply_to: 'not-an-email' } }, config, renderEmail(job, null));
   assert(!('replyTo' in noReply));

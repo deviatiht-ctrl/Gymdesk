@@ -32,14 +32,15 @@ export function brevoPayload(job: EmailJob, config: Pick<Config, 'senderEmail' |
   const headers: Record<string, string> = {
     'X-GymDesk-Event': job.id,
     'X-Entity-Ref-ID': job.id,
-    'Feedback-ID': `${job.kind}:gymdesk`,
   };
   if (isMarketing) {
+    headers['Feedback-ID'] = `${job.kind}:gymdesk`;
     if (replyTo) headers['List-Unsubscribe'] = `<mailto:${replyTo}?subject=STOP>`;
     headers['Precedence'] = 'bulk';
   } else {
     headers['X-Auto-Response-Suppress'] = 'OOF, AutoReply';
-    headers['Auto-Submitted'] = 'auto-generated';
+    headers['X-Priority'] = '3';
+    headers['Importance'] = 'Normal';
   }
   return {
     sender: { name, email: config.senderEmail },
