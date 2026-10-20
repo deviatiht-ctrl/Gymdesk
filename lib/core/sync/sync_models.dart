@@ -76,6 +76,19 @@ class StaffSession {
   bool get isSupervisor => role == 'supervisor';
   bool get isReception => role == 'reception';
   bool get canManageGym => role == 'owner' || role == 'supervisor';
+
+  Map<String, dynamic> get permissions => staff['permissions'] is Map
+      ? Map<String, dynamic>.from(staff['permissions'] as Map)
+      : const {};
+
+  String get jobTitle => permissions['job_title'] as String? ?? (isSupervisor ? 'superviseur' : (isReception ? 'reception' : role));
+  bool get canAddMembers => isOwner || (permissions['can_add_members'] as bool? ?? true);
+  bool get canCashier => isOwner || (permissions['can_cashier'] as bool? ?? (isReception || isSupervisor));
+  bool get canViewPayments => isOwner || (permissions['can_view_payments'] as bool? ?? true);
+  bool get canViewReceipts => isOwner || (permissions['can_view_receipts'] as bool? ?? true);
+  bool get canViewReports => isOwner || (permissions['can_view_reports'] as bool? ?? isSupervisor);
+  bool get canManagePlans => isOwner || (permissions['can_manage_plans'] as bool? ?? isSupervisor);
+  bool get canAccessControl => isOwner || (permissions['can_access_control'] as bool? ?? true);
   bool get active =>
       staff['active'] == true &&
       staff['deleted_at'] == null &&

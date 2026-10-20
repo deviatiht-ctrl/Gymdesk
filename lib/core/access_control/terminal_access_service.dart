@@ -298,8 +298,10 @@ class TerminalAccessService {
     final grace = ((session.settings['grace_days'] as num?)?.toInt() ?? 0).clamp(0, 365);
     final payload = <Map<String, dynamic>>[];
     var withoutFingerprint = 0;
-    for (final entry in people.entries) {
-      final person = entry.value;
+    // Kach la gen plizyè kle pa moun (id, uid, nimewo, telefòn): yon sèl fwa pa moun.
+    final seen = <String>{};
+    for (final person in people.values) {
+      if (!seen.add(person.id)) continue;
       final List<List<String>> fingers;
       if (person.isEmployee) {
         final t = person.employee!.fingerprintTemplates;
@@ -364,34 +366,37 @@ class TerminalAccessService {
 
   /// Pibliye evènman aksè a sou Supabase Realtime (tablo `access_events`)
   /// pou tout aparèy (tablèt Wi-Fi, lòt ekran) resevwa l an tan reyèl.
-  Future<void> recordAccessEvent({
-    required AccessDecision decision,
-    String source = 'terminal',
-  }) async {
-    final gymId = session.gymId;
-    if (gymId == null) return;
-    try {
-      final isGranted = decision.outcome == AccessOutcome.granted || decision.outcome == AccessOutcome.legacy;
-      final person = decision.person;
-      final member = person?.entry?.member;
+  static bool isGrantedDecision(AccessDecision decision) =>
+      decision.outcome == AccessOutcome.granted || decision.outcome == AccessOutcome.legacy;
 
-      String eventType;
-      if (isGranted) {
-        eventType = 'granted';
-      } else {
-        final reason = person?.reason ?? '';
-        if (reason == 'expired') {
-          eventType = 'denied_expired';
-        } else if (reason == 'suspended') {
-          eventType = 'denied_suspended';
-        } else if (reason == 'no_subscription') {
-          eventType = 'denied_no_subscription';
-        } else {
-          eventType = 'denied_unknown';
-        }
-      }
+  static String eventTypeFor(AccessDecision decision) {
+    if (isGrantedDecision(decision)) return 'granted';
+    return switch (decision.person?.reason ?? '') {
+      'expired' => 'denied_expired',
+      'suspended' => 'denied_suspended',
+      'no_subscription' => 'denied_no_subscription',
+      'pending_payment' => 'denied_pending',
+      _ => 'denied_unknown',
+    };
+  }
 
-      final snapshot = <String, dynamic>{
+  /// Ranje evènman an menm jan ak yon ranje `access_events` (popup lokal enstantane).
+  static Map<String, dynamic> eventRowFor(AccessDecision decision, {String source = 'terminal'}) {
+    final snapshot = snapshotFor(decision);
+    return {
+      'event_type': eventTypeFor(decision),
+      'source': source,
+      'reason': snapshot['reason'],
+      'member_id': ?decision.person?.entry?.member.id,
+      'member_snapshot': snapshot,
+    };
+  }
+
+  static Map<String, dynamic> snapshotFor(AccessDecision decision) {
+    final isGranted = isGrantedDecision(decision);
+    final person = decision.person;
+    final member = person?.entry?.member;
+    return <String, dynamic>{
         'name': person?.name ??
             (decision.outcome == AccessOutcome.legacy
                 ? (decision.uid != null && decision.uid!.isNotEmpty && decision.uid != '-'
@@ -412,7 +417,20 @@ class TerminalAccessService {
         if (member?.memberNumber != null) 'member_number': member!.memberNumber,
         if (member?.phone != null) 'phone': member!.phone,
         if (member?.id != null) 'member_id': member!.id,
+        if (person?.employee?.jobType != null) 'job_type': person!.employee!.jobType,
       };
+  }
+
+  Future<void> recordAccessEvent({
+    required AccessDecision decision,
+    String source = 'terminal',
+  }) async {
+    final gymId = session.gymId;
+    if (gymId == null) return;
+    try {
+      final isGranted = isGrantedDecision(decision);
+      final member = decision.person?.entry?.member;
+      final row = eventRowFor(decision, source: source);
 
       // 1. Enskri prezans lan nan SQLite lokal si aksè akòde pou yon manm (mache 100% offline)
       if (member != null && isGranted) {
@@ -432,11 +450,7 @@ class TerminalAccessService {
       try {
         await client.from('access_events').insert({
           'gym_id': gymId,
-          if (member != null) 'member_id': member.id,
-          'event_type': eventType,
-          'source': source,
-          'reason': snapshot['reason'],
-          'member_snapshot': snapshot,
+          ...row,
           'occurred_at': DateTime.now().toUtc().toIso8601String(),
         }).timeout(const Duration(seconds: 3));
       } catch (_) {

@@ -12,6 +12,8 @@ class PaymentsRepository {
     String? memberId,
     String method = 'all',
     int limit = 1000,
+    DateTime? from,
+    DateTime? to,
   }) => db.watchRecords(SyncEntity.payments, limit: limit).map((rows) {
     final payments = rows
         .map(
@@ -21,8 +23,11 @@ class PaymentsRepository {
         )
         .where(
           (p) =>
+              p.deletedAt == null &&
               (memberId == null || p.memberId == memberId) &&
-              (method == 'all' || p.method == method),
+              (method == 'all' || p.method == method) &&
+              (from == null || !p.paidAt.isBefore(from)) &&
+              (to == null || p.paidAt.isBefore(to)),
         )
         .toList();
     payments.sort(

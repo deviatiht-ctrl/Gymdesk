@@ -53,37 +53,24 @@ class ReceiptService {
     if (!email.contains('@')) return;
     try {
       final logo = await logoBytes(logoPath);
-      final pdf = await buildReceiptPdf(
-        ReceiptData(
-          paymentId: data.paymentId,
-          memberName: data.memberName,
-          memberNumber: data.memberNumber,
-          planName: data.planName,
-          amount: data.amount,
-          currency: data.currency,
-          method: data.method,
-          paidAt: data.paidAt,
-          gymName: data.gymName,
-          accentColor: data.accentColor,
-          periodStart: data.periodStart,
-          periodEnd: data.periodEnd,
-          receivedAmount: data.receivedAmount,
-          creditUsed: data.creditUsed,
-          creditAdded: data.creditAdded,
-          creditBalance: data.creditBalance,
-          memberEmail: data.memberEmail,
-          memberPhone: data.memberPhone,
-          gymAddress: data.gymAddress,
-          gymPhone: data.gymPhone,
-          gymEmail: data.gymEmail,
-          logoBytes: logo,
-          reference: data.reference,
-        ),
-        _defaultLabels,
-      );
+      final pdf = await buildReceiptPdf(data.withLogo(logo), _defaultLabels);
       final path = await upload(data.paymentId, pdf);
-      await enqueueEmail(data.paymentId, path);
+      await enqueueEmailWithRetry(data.paymentId, path);
     } catch (_) {}
+  }
+
+  /// Le paiement est créé hors ligne puis synchronisé : tant qu'il n'est pas
+  /// sur le serveur, l'RPC échoue. On réessaie (2 s, 4 s, 8 s…) au lieu
+  /// d'abandonner en silence — c'est pourquoi certains reçus ne partaient pas.
+  Future<String> enqueueEmailWithRetry(String paymentId, String path, {int attempts = 6}) async {
+    for (var i = 0;; i++) {
+      try {
+        return await enqueueEmail(paymentId, path);
+      } on PostgrestException {
+        if (i >= attempts - 1) rethrow;
+        await Future<void>.delayed(Duration(seconds: 2 << i));
+      }
+    }
   }
 
   static const _defaultLabels = <String, String>{
@@ -96,6 +83,8 @@ class ReceiptService {
     'receipt_credited': 'Crédité sur la balance',
     'receipt_paid_by_balance': 'Payé avec la balance',
     'receipt_change': 'Monnaie rendue',
+    'receipt_paid_in': 'Payé en',
+    'received_by': 'Encaissé par',
     'receipt_balance': 'Balance restante',
     'receipt_reference': 'Référence',
     'receipt_signature': 'Signature',

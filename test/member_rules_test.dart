@@ -166,6 +166,21 @@ void main() {
     expect(result.reason, 'suspended');
   });
 
+  test('subscription starting today is valid regardless of machine timezone', () {
+    final sub = subscription(start: '2026-01-15', end: '2026-02-13');
+    expect(sub.startDate.isUtc, isTrue);
+    expect(sub.startDate, DateTime.utc(2026, 1, 15));
+    final result = memberValidity(
+      member(),
+      [sub],
+      const {},
+      DateTime.utc(2026, 1, 15, 13),
+      'America/Port-au-Prince',
+    );
+    expect(result.reason, 'ok');
+    expect(result.daysLeft, 29);
+  });
+
   test('subscription end dates are inclusive', () {
     expect(ymd(subscriptionEnd(DateTime.utc(2026, 1, 1), 30)), '2026-01-30');
     expect(

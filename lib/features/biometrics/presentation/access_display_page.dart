@@ -11,13 +11,14 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/access_control/access_monitor.dart';
 import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../l10n/app_strings.dart';
-import '../../attendance/data/attendance_repository.dart';
 import '../../employees/data/employees_repository.dart';
 import '../../members/data/members_repository.dart';
+import '../../members/domain/member.dart';
 import '../../settings/data/settings_repository.dart';
 
 /// Ouvri ekran aksè a nan yon fenèt apa (web) pou li ka ale sou 2yèm ekran
@@ -45,12 +46,11 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   final _agent = AccessAgentClient();
   late final BiometricService _biometricService;
   late final TerminalAccessService _service;
-  late final AttendanceRepository _attendance;
   late final MembersRepository _members;
   TerminalAccessConfig _cfg = const TerminalAccessConfig();
   late bool _isTabletWifiMode = widget.isTabletMode;
 
-  StreamSubscription<Map<String, dynamic>>? _events;
+  StreamSubscription<AccessDecision>? _events;
   RealtimeChannel? _realtimeSub;
   Timer? _clock;
   Timer? _dismiss;
@@ -84,7 +84,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     _biometricService = BiometricService(agentClient: _agent);
     final runtime = ref.read(appRuntimeProvider);
     _service = TerminalAccessService(runtime.client, runtime.database!, runtime.session!, agent: _agent);
-    _attendance = AttendanceRepository(runtime.database!, runtime.session!);
     _members = MembersRepository(runtime.client, runtime.database!, runtime.session!);
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
@@ -104,9 +103,16 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     } catch (_) {}
     if (mounted) setState(() {});
 
-    // 1. Koute tèminal la dirèkteman si agent lokal la disponib (PC)
-    _terminalOnline = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
-    _events = _agent.terminalEvents().listen(_onEvent);
+    // 1. PC: siveyan global la (AccessMonitor) trete evènman W2 yo.
+    if (!kIsWeb) {
+      final monitor = AccessMonitor.instance;
+      unawaited(monitor.start(runtime));
+      _terminalOnline = monitor.terminalOnline.value;
+      _agentOnline = monitor.agentOnline.value;
+      monitor.terminalOnline.addListener(_onMonitorStatus);
+      monitor.agentOnline.addListener(_onMonitorStatus);
+      _events = monitor.decisions.listen(_onDecision);
+    }
 
     // 2. Koute Supabase Realtime (Pou tablèt Wi-Fi resevwa evènman yo menm san agent lokal)
     final gymId = runtime.session?.gymId;
@@ -126,6 +132,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
               ),
               callback: (payload) {
                 final row = payload.newRecord;
+                if (AccessMonitor.instance.active && row['source'] == 'terminal') return;
                 _handleRealtimeAccessEvent(row);
               },
             )
@@ -133,8 +140,18 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       } catch (_) {}
     }
 
-    unawaited(_syncTerminal());
-    _syncTimer = Timer.periodic(const Duration(minutes: 10), (_) => unawaited(_syncTerminal()));
+    if (kIsWeb) {
+      unawaited(_syncTerminal());
+      _syncTimer = Timer.periodic(const Duration(minutes: 10), (_) => unawaited(_syncTerminal()));
+    }
+  }
+
+  void _onMonitorStatus() {
+    if (!mounted) return;
+    setState(() {
+      _agentOnline = AccessMonitor.instance.agentOnline.value;
+      _terminalOnline = AccessMonitor.instance.terminalOnline.value;
+    });
   }
 
   /// Senkronizasyon otomatik: dat abònman yo (renouvèlman, ekspirasyon)
@@ -145,41 +162,26 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     try {
       final runtime = ref.read(appRuntimeProvider);
       _cfg = await TerminalAccessService.loadConfig(runtime.client, runtime.session!);
-      await _service.syncToTerminal(_cfg);
+      if (kIsWeb) {
+        await _service.syncToTerminal(_cfg);
+      } else {
+        await AccessMonitor.instance.syncNow();
+      }
     } catch (_) {
     } finally {
       _syncing = false;
     }
   }
 
-  /// Tretman evènman ki soti nan agent lokal la (PC)
-  Future<void> _onEvent(Map<String, dynamic> event) async {
-    final type = event['type'];
-    if (type == 'agent_status') {
-      final online = event['online'] == true;
-      final terminal = event['terminal_watch'] == true;
-      if (online != _agentOnline || terminal != _terminalOnline) {
-        setState(() {
-          _agentOnline = online;
-          _terminalOnline = terminal;
-        });
-      }
-      return;
-    }
-    if (type == 'terminal_watch') {
-      setState(() => _terminalOnline = event['online'] == true);
-      return;
-    }
-
+  /// Desizyon AccessMonitor la (PC): pòt, prezans ak evènman deja trete.
+  Future<void> _onDecision(AccessDecision decision) async {
+    if (!mounted) return;
     final bool checkOnly = _inquiryActive;
     if (checkOnly && _inquiryContext != null && _inquiryContext!.mounted) {
       Navigator.of(_inquiryContext!).pop();
       _inquiryContext = null;
       _inquiryActive = false;
     }
-
-    final decision = await _service.handleTerminalEvent(event, _cfg);
-    if (decision == null || !mounted) return;
 
     if (_kioskUnlockContext != null && _kioskUnlockContext!.mounted) {
       final runtime = ref.read(appRuntimeProvider);
@@ -200,17 +202,11 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       }
     }
 
-    Uint8List? photo;
     final member = decision.person?.entry?.member;
-    if (member != null) {
-      try {
-        photo = await _members.photoBytes(member).timeout(const Duration(seconds: 3));
-      } catch (_) {}
-    }
-    if (!mounted) return;
+    if (member != null) unawaited(_loadPhoto(member, decision));
     setState(() {
       _decision = decision;
-      _photo = photo;
+      _photo = null;
       _isCheckOnly = checkOnly;
       _quote = math.Random().nextInt(8) + 1;
       if (!checkOnly && (decision.outcome == AccessOutcome.granted || decision.outcome == AccessOutcome.legacy)) {
@@ -229,17 +225,13 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
         if (mounted) setState(() => _decision = null);
       },
     );
-    if (!checkOnly && decision.outcome == AccessOutcome.granted && member != null) {
-      unawaited(_attendance
-          .verifyFingerprintAndGrant(
-            member: member,
-            fingerprintMatched: true,
-            scannedAt: DateTime.now().toUtc(),
-            offline: false,
-            suspectClock: false,
-          )
-          .then((_) {}, onError: (_) {}));
-    }
+  }
+
+  Future<void> _loadPhoto(Member member, AccessDecision decision) async {
+    try {
+      final photo = await _members.photoBytes(member).timeout(const Duration(seconds: 4));
+      if (mounted && identical(_decision, decision)) setState(() => _photo = photo);
+    } catch (_) {}
   }
 
   /// Tretman evènman an tan reyèl ki soti nan Supabase (Pou Tablèt sou Wi-Fi)
@@ -256,39 +248,29 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       _inquiryActive = false;
     }
 
-    AccessPerson? person;
-    if (memberId != null) {
-      try {
-        person = await _service.resolve(terminalUid(memberId)).timeout(const Duration(seconds: 2));
-      } catch (_) {}
-    }
-    if (person == null && snapshot.isNotEmpty) {
-      person = AccessPerson.fromSnapshot(snapshot);
-    }
-
-    Uint8List? photo;
-    if (person?.entry?.member != null) {
-      try {
-        photo = await _members.photoBytes(person!.entry!.member).timeout(const Duration(seconds: 3));
-      } catch (_) {}
-    }
-
+    // Tablèt: afiche touswit ak snapshot evènman an (pa gen chajman lou).
+    final person = snapshot.isNotEmpty ? AccessPerson.fromSnapshot(snapshot) : null;
     if (!mounted) return;
     final outcome = isGranted
-        ? (snapshot['is_legacy'] == true ? AccessOutcome.legacy : AccessOutcome.granted)
+        ? (snapshot['reason'] == 'legacy_biostar' ? AccessOutcome.legacy : AccessOutcome.granted)
         : (eventType == 'denied_unknown' ? AccessOutcome.unrecognized : AccessOutcome.denied);
-
+    final decision = AccessDecision(outcome, person: person);
     setState(() {
-      _decision = AccessDecision(
-        outcome,
-        person: person,
-      );
-      _photo = photo;
+      _decision = decision;
+      _photo = null;
       _isCheckOnly = checkOnly;
       _quote = math.Random().nextInt(8) + 1;
       if (!checkOnly && isGranted) _todayCount++;
     });
+    if (memberId != null) unawaited(_loadPhotoById(memberId, decision));
     _scheduleDismiss(Duration(seconds: isGranted ? 8 : 6));
+  }
+
+  Future<void> _loadPhotoById(String memberId, AccessDecision decision) async {
+    try {
+      final member = await _members.watchMember(memberId).first.timeout(const Duration(seconds: 3));
+      if (member != null) await _loadPhoto(member, decision);
+    } catch (_) {}
   }
 
   void _scheduleDismiss(Duration duration) {
@@ -306,6 +288,8 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   @override
   void dispose() {
     _events?.cancel();
+    AccessMonitor.instance.terminalOnline.removeListener(_onMonitorStatus);
+    AccessMonitor.instance.agentOnline.removeListener(_onMonitorStatus);
     _realtimeSub?.unsubscribe();
     _clock?.cancel();
     _dismiss?.cancel();

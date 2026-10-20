@@ -17,6 +17,7 @@ import 'package:uuid/uuid.dart';
 import '../../payments/data/receipt_pdf.dart';
 import '../../payments/data/receipt_service.dart';
 import '../../payments/domain/payment.dart';
+import '../../payments/domain/currency.dart';
 import '../../payments/presentation/collect_payment_dialog.dart';
 import '../../payments/presentation/receipt_sheet.dart';
 import '../../plans/data/plans_repository.dart';
@@ -153,8 +154,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Retire Anprent'),
-        content: Text('Èske w vle efase anprent anrejistre pou ${member.fullName}?'),
+        title: Text(s.text('remove_fingerprint')),
+        content: Text('${s.text('remove_fingerprint_confirm')} ${member.fullName} ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -200,7 +201,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
   Future<void> _syncMemberDoor(Member member) async {
     if (member.fingerprintTemplate == null || member.fingerprintTemplate!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Manb sa a pa gen anprent anrejistre.')),
+        SnackBar(content: Text(AppStrings.of(context).text('member_no_fingerprint'))),
       );
       return;
     }
@@ -214,9 +215,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         backgroundColor: ok ? const Color(0xff1f6f4a) : Colors.red,
-        content: Text(ok
-            ? '✅ Anprent senkronize sou Pòt FSTW F30 !'
-            : '❌ Pòt la pa reponn. Kòmand anrejistre nan file d\'attente.'),
+        content: Text(AppStrings.of(context).text(ok ? 'door_sync_ok' : 'door_sync_queued')),
       ),
     );
   }
@@ -230,24 +229,24 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Kòd PIN Tanporè'),
+        title: Text(AppStrings.of(context).text('temp_pin_title')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Kòd PIN pou antre nan pòt FSTW F30 jodi a :'),
+            Text(AppStrings.of(context).text('temp_pin_body')),
             const SizedBox(height: 12),
             SelectableText(
               code,
               style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 4),
             ),
             const SizedBox(height: 8),
-            const Text('Valab pandan 24 èdtan.', style: TextStyle(color: Colors.grey)),
+            Text(AppStrings.of(context).text('temp_pin_valid'), style: const TextStyle(color: Colors.grey)),
           ],
         ),
         actions: [
           FilledButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Fèmen'),
+            child: Text(AppStrings.of(context).text('close')),
           ),
         ],
       ),
@@ -466,6 +465,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
       title: '${s.text('collect_payment')} · ${member.fullName}',
       due: remaining,
       balance: member.creditBalance,
+      currency: ref.read(appRuntimeProvider).session?.gym?['currency'] as String? ?? 'HTG',
+      rate: gymExchangeRate(ref.read(appRuntimeProvider).session?.settings ?? const {}),
     );
     if (result == null || !mounted) return;
     final command = result.command(
@@ -792,14 +793,14 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                             },
                             itemBuilder: (context) => [
                               if (canManage)
-                                const PopupMenuItem(
+                                PopupMenuItem(
                                   value: 'sync_door',
-                                  child: Text('🚪 Senkronize ak Pòt FSTW F30'),
+                                  child: Text(s.text('sync_door_fstw')),
                                 ),
                               if (canManage)
-                                const PopupMenuItem(
+                                PopupMenuItem(
                                   value: 'temp_pin',
-                                  child: Text('🔑 Jenere PIN Tanporè (1 Jou)'),
+                                  child: Text(s.text('temp_pin_day')),
                                 ),
                               if (canManage)
                                 PopupMenuItem(
@@ -807,9 +808,9 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                   child: Text(s.text('enroll_fingerprint')),
                                 ),
                               if (canManage && member.fingerprintRegistered)
-                                const PopupMenuItem(
+                                PopupMenuItem(
                                   value: 'remove_fingerprint',
-                                  child: Text('Retire anprent'),
+                                  child: Text(s.text('remove_fingerprint')),
                                 ),
                               if (canManage)
                                 PopupMenuItem(
@@ -1077,34 +1078,34 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                       final wa = member.whatsapp ?? member.phone ?? '';
                                       if (wa.isEmpty) {
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Manm sa a pa gen nimewo telefòn oswa WhatsApp.')),
+                                          SnackBar(content: Text(s.text('member_no_phone'))),
                                         );
                                         return;
                                       }
                                       final activeSub = subscriptions.where((s) => s.status == 'active').firstOrNull;
                                       final msg = Uri.encodeComponent(
-                                        'Bonjou ${member.fullName}! Dosye ou nan gym lan aktif.\n'
-                                        'Abonman ou valid jiska: ${activeSub != null ? ymd(activeSub.endDate) : 'N/A'}.\n'
-                                        'Ou ka pase dwèt ou sou lektè a pou antre!',
+                                        s.text('whatsapp_member_active')
+                                            .replaceAll('{name}', member.fullName)
+                                            .replaceAll('{end}', activeSub != null ? ymd(activeSub.endDate) : 'N/A'),
                                       );
                                       final url = 'https://wa.me/${wa.replaceAll('+', '').replaceAll(' ', '')}?text=$msg';
                                       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
                                     },
                               icon: const Icon(LucideIcons.messageCircle, size: 16),
-                              label: const Text('Voye sou WhatsApp'),
+                              label: Text(s.text('send_whatsapp')),
                             ),
                             if (canManage && member.fingerprintRegistered)
                               OutlinedButton.icon(
                                 onPressed: _busy ? null : () => _syncMemberDoor(member),
                                 icon: const Icon(LucideIcons.refreshCw, size: 16),
-                                label: const Text('Senkronize sou Pòt'),
+                                label: Text(s.text('sync_door')),
                               ),
                             if (canManage && member.fingerprintRegistered)
                               OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
                                 onPressed: _busy ? null : () => _removeFingerprint(member),
                                 icon: const Icon(LucideIcons.trash2, size: 16),
-                                label: const Text('Retire Anprent'),
+                                label: Text(s.text('remove_fingerprint')),
                               ),
                           ],
                         ),

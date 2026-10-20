@@ -253,7 +253,7 @@ class MembersRepository {
     if (payment != null && subscription == null) {
       throw const MemberFailure('invalid_record');
     }
-    if (payment != null && payment.amount > subscription!.price + 0.001) {
+    if (payment != null && payment.amount > subscription!.price + payment.registrationFee + 0.001) {
       throw const MemberFailure('invalid_record');
     }
     if (subscription != null) {
@@ -682,6 +682,10 @@ class MembersRepository {
         payment.creditUsed > payment.amount + 0.001 ||
         payment.effectiveReceived < payment.cashDue - 0.001 ||
         !{'HTG', 'USD'}.contains(payment.currency) ||
+        (payment.paidCurrency != null &&
+            (!{'HTG', 'USD'}.contains(payment.paidCurrency) ||
+                (payment.paidCurrency != payment.currency &&
+                    (payment.exchangeRate ?? 0) <= 0))) ||
         payment.reference.length > 120 ||
         payment.notes.length > 500) {
       throw const MemberFailure('invalid_record');
@@ -704,6 +708,15 @@ class MembersRepository {
     'received_amount': command.effectiveReceived,
     'credit_used': command.creditUsed,
     'credit_amount': command.creditAdded,
+    'registration_fee': command.registrationFee,
+    'plan_fee': command.planFee ?? (command.amount - command.registrationFee),
+    if (command.paymentReason != null) 'payment_reason': command.paymentReason,
+    if (command.paidCurrency != null) ...{
+      'paid_currency': command.paidCurrency,
+      'exchange_rate': command.exchangeRate,
+      'paid_amount': command.paidAmount,
+      'tendered_amount': command.tenderedAmount ?? command.paidAmount,
+    },
     'paid_at': changedAt.toUtc().toIso8601String(),
     'received_by': session.staffId,
     'notes': command.notes.trim().isEmpty ? null : command.notes.trim(),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -7,12 +9,14 @@ import 'app/env.dart';
 import 'app/gym_desk_app.dart';
 import 'app/theme.dart';
 import 'core/auth/secure_session_storage.dart';
+import 'core/biometrics/agent_launcher.dart';
 import 'core/widgets/async_panel.dart';
 import 'l10n/app_strings.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   tz.initializeTimeZones();
+  unawaited(ensureAccessAgentRunning());
   runApp(const ProviderScope(child: _Bootstrap()));
 }
 

@@ -8,8 +8,12 @@ class GymSubscription {
   String get gymId => row['gym_id'] as String;
   String get memberId => row['member_id'] as String;
   String? get planId => row['plan_id'] as String?;
-  DateTime get startDate => DateTime.parse(row['start_date'] as String);
-  DateTime get endDate => DateTime.parse(row['end_date'] as String);
+  DateTime get startDate => _day(row['start_date'] as String);
+  DateTime get endDate => _day(row['end_date'] as String);
+  static DateTime _day(String value) {
+    final d = DateTime.parse(value);
+    return value.length <= 10 ? DateTime.utc(d.year, d.month, d.day) : d.toUtc();
+  }
   double get price => (row['price'] as num?)?.toDouble() ?? 0;
   double get openingCredit => (row['opening_credit'] as num?)?.toDouble() ?? 0;
   bool get imported => row['enrollment_kind'] == 'import';

@@ -217,7 +217,7 @@ class _FingerprintEnrollmentDialogState
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text('Erè anrejistreman anprent: $e'),
+            content: Text('${AppStrings.of(context).text('fingerprint_enroll_error')}: $e'),
           ),
         );
       }

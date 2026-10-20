@@ -18,7 +18,9 @@ import '../../members/data/members_repository.dart';
 import '../../members/domain/member.dart';
 import '../../payments/data/receipt_pdf.dart';
 import '../../payments/data/receipt_service.dart';
+import '../../payments/domain/currency.dart';
 import '../../payments/domain/payment.dart';
+import '../../payments/presentation/collect_payment_dialog.dart';
 import '../../payments/presentation/receipt_sheet.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
@@ -28,7 +30,22 @@ import '../../../core/biometrics/access_agent_client.dart';
 import '../../members/data/member_pin_service.dart';
 
 class EnrollmentWizardPage extends ConsumerStatefulWidget {
-  const EnrollmentWizardPage({super.key});
+  const EnrollmentWizardPage({
+    super.key,
+    this.initialFirstName,
+    this.initialLastName,
+    this.initialPhone,
+    this.initialEmail,
+    this.initialPlanId,
+    this.portalRequestId,
+  });
+
+  final String? initialFirstName;
+  final String? initialLastName;
+  final String? initialPhone;
+  final String? initialEmail;
+  final String? initialPlanId;
+  final String? portalRequestId;
 
   @override
   ConsumerState<EnrollmentWizardPage> createState() => _EnrollmentWizardPageState();
@@ -36,6 +53,7 @@ class EnrollmentWizardPage extends ConsumerStatefulWidget {
 
 class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   int _currentStep = 0;
+  bool _quickMode = true;
 
   // Step 1: Idantite
   final _firstNameController = TextEditingController();
@@ -59,6 +77,50 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   List<GymPlan> _plans = [];
   bool _loadingPlans = true;
 
+  // Frais d'inscription (Demande utilisateur & Phase 7)
+  String _registrationFeeMode = 'separate'; // 'separate', 'included', 'waived'
+  double _customRegistrationFee = 0.0;
+  final _registrationFeeController = TextEditingController();
+
+  double get _effectiveRegistrationFee {
+    if (_isExistingMember) return 0.0;
+    if (_registrationFeeMode == 'waived') return 0.0;
+    if (_registrationFeeMode == 'included') return 0.0;
+    return _customRegistrationFee > 0
+        ? _customRegistrationFee
+        : (_selectedPlan?.registrationFee ?? 0.0);
+  }
+
+  double _calculateTotalDue() {
+    if (_selectedPlan == null) return 0.0;
+    if (_isExistingMember) return _selectedPlan!.price;
+    if (_registrationFeeMode == 'separate') {
+      return _selectedPlan!.price + _effectiveRegistrationFee;
+    }
+    if (_registrationFeeMode == 'included') {
+      return _selectedPlan!.registrationPrice;
+    }
+    return _selectedPlan!.price;
+  }
+
+  void _onSelectPlan(GymPlan plan) {
+    setState(() {
+      _selectedPlan = plan;
+      _customRegistrationFee = plan.registrationFee;
+      _registrationFeeController.text = plan.registrationFee > 0
+          ? plan.registrationFee.toStringAsFixed(0)
+          : '';
+      _paymentAmountController.text = _calculateTotalDue().toStringAsFixed(0);
+    });
+  }
+
+  void _setRegistrationFeeMode(String mode) {
+    setState(() {
+      _registrationFeeMode = mode;
+      _paymentAmountController.text = _calculateTotalDue().toStringAsFixed(0);
+    });
+  }
+
   String get _currency {
     final p = _selectedPlan?.currency;
     if (p != null && p.isNotEmpty) return p;
@@ -69,10 +131,17 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
 
   // Step 3: Peman
   String _paymentMethod = 'cash';
+  String? _paidCurrency;
+  double get _rate => gymExchangeRate(ref.read(appRuntimeProvider).session?.settings ?? const {});
+  CashierMath get _cashier {
+    final due = double.tryParse(_paymentAmountController.text.replaceAll(',', '.')) ?? 0;
+    return CashierMath(currency: _currency, paidCurrency: _paidCurrency ?? _currency, rate: _rate, cashDue: due, tendered: double.tryParse(_paymentReceivedController.text.replaceAll(',', '.')));
+  }
+
   final _paymentAmountController = TextEditingController();
   final _paymentReceivedController = TextEditingController();
   final _referenceController = TextEditingController();
-  bool _paymentConfirmed = false;
+  bool _paymentConfirmed = true;
   bool _keepChangeAsCredit = false;
   String _lastPaymentId = '';
   String _lastMemberNumber = '';
@@ -98,13 +167,22 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialFirstName != null) {
+      _firstNameController.text = widget.initialFirstName!;
+    }
+    if (widget.initialLastName != null) {
+      _lastNameController.text = widget.initialLastName!;
+    }
+    if (widget.initialPhone != null) {
+      _phoneController.text = widget.initialPhone!;
+      _whatsappController.text = widget.initialPhone!;
+    }
+    if (widget.initialEmail != null) {
+      _emailController.text = widget.initialEmail!;
+    }
     _biometricService = BiometricService();
     final runtime = ref.read(appRuntimeProvider);
-    _members = MembersRepository(
-      runtime.client,
-      runtime.database!,
-      runtime.session!,
-    );
+    _members = MembersRepository(runtime.client, runtime.database!, runtime.session!);
     _plansRepo = PlansRepository(runtime.database!, runtime.session!);
     _loadPlans();
   }
@@ -116,8 +194,12 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         setState(() {
           _plans = list.where((p) => p.active && p.deletedAt == null).toList();
           if (_plans.isNotEmpty) {
-            _selectedPlan = _plans.first;
-            _paymentAmountController.text = _selectedPlan!.price.toStringAsFixed(0);
+            GymPlan initial = _plans.first;
+            if (widget.initialPlanId != null) {
+              final found = _plans.where((p) => p.id == widget.initialPlanId).firstOrNull;
+              if (found != null) initial = found;
+            }
+            _onSelectPlan(initial);
           }
           _loadingPlans = false;
         });
@@ -140,9 +222,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Photo error: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photo error: $e')));
       }
     }
   }
@@ -172,10 +252,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             if (m.fingerprintTemplate?.isNotEmpty ?? false) enrolled.add(m);
           } catch (_) {}
         }
-        final dup = await _biometricService.match1toN(
-          candidateTemplate: sample,
-          members: enrolled,
-        );
+        final dup = await _biometricService.match1toN(candidateTemplate: sample, members: enrolled);
         if (dup != null && mounted) {
           final dupName = '${dup.firstName} ${dup.lastName}';
           showDialog<void>(
@@ -184,9 +261,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               icon: const Icon(LucideIcons.triangleAlert, color: Colors.orange, size: 36),
               title: Text(s.text('duplicate_fingerprint_alert')),
               content: Text('${s.text('duplicate_fingerprint_alert')}\n($dupName)'),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.text('ok'))),
-              ],
+              actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.text('ok')))],
             ),
           );
           setState(() => _isCapturing = false);
@@ -215,11 +290,15 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     final fn = _firstNameController.text.trim();
     final ln = _lastNameController.text.trim();
     final email = _emailController.text.trim();
-    final wa = _whatsappController.text.trim();
-    final nifCin = _nifCinController.text.trim();
+    final phone = _whatsappController.text.trim().isNotEmpty ? _whatsappController.text.trim() : _phoneController.text.trim();
 
-    if (fn.length < 2 || ln.length < 2 || wa.isEmpty || email.isEmpty || !email.contains('@') || nifCin.length < 5) {
+    // Enskripsyon rapid: non, siyati, telefòn. Imèl ak NIF/CIN opsyonèl.
+    if (fn.length < 2 || ln.length < 2 || phone.replaceAll(RegExp(r'\D'), '').length < 8) {
       setState(() => _errorMessage = s.text('fill_required_fields'));
+      return false;
+    }
+    if (email.isNotEmpty && !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      setState(() => _errorMessage = s.text('invalid_email'));
       return false;
     }
     return true;
@@ -245,6 +324,48 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       setState(() => _errorMessage = s.text('select_payment_required'));
       return false;
     }
+    if (!_cashier.enough) {
+      setState(() => _errorMessage = s.text('amount_insufficient'));
+      return false;
+    }
+    return true;
+  }
+
+  bool _validateQuickForm(AppStrings s) {
+    setState(() => _errorMessage = null);
+    final fn = _firstNameController.text.trim();
+    final ln = _lastNameController.text.trim();
+    final phone = _whatsappController.text.trim().isNotEmpty ? _whatsappController.text.trim() : _phoneController.text.trim();
+    final email = _emailController.text.trim();
+
+    if (fn.length < 2 || ln.length < 2 || phone.replaceAll(RegExp(r'\D'), '').length < 8) {
+      setState(() => _errorMessage = s.text('fill_required_fields'));
+      return false;
+    }
+    if (email.isNotEmpty && !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      setState(() => _errorMessage = s.text('invalid_email'));
+      return false;
+    }
+    if (_selectedPlan == null) {
+      setState(() => _errorMessage = s.text('select_plan_required'));
+      return false;
+    }
+    final amt = double.tryParse(_paymentAmountController.text) ?? 0;
+    if (amt <= 0 && !_isExistingMember) {
+      setState(() => _errorMessage = s.text('select_payment_required'));
+      return false;
+    }
+    if (!_paymentConfirmed) {
+      setState(() => _errorMessage = s.text('select_payment_required'));
+      return false;
+    }
+    if (!_cashier.enough) {
+      setState(() => _errorMessage = s.text('amount_insufficient'));
+      return false;
+    }
+    if (_primaryTemplate == null && _pinController.text.trim().isEmpty) {
+      _skipFingerprintForNow = true;
+    }
     return true;
   }
 
@@ -254,10 +375,16 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     final hasPin = _pinController.text.trim().isNotEmpty;
     final isFr = s.locale.languageCode == 'fr';
     if (_primaryTemplate == null && !_skipFingerprintForNow && !hasPin) {
-      setState(() => _errorMessage = isFr
-          ? 'Veuillez enregistrer une empreinte, saisir un code PIN, ou cocher "Salle sans empreinte".'
-          : 'Tanpri anrejistre yon anprent, mete yon kòd PIN, oswa koche "Sal san anprent".');
-      return;
+      if (_quickMode) {
+        _skipFingerprintForNow = true;
+      } else {
+        setState(
+          () => _errorMessage = isFr
+              ? 'Veuillez enregistrer une empreinte, saisir un code PIN, ou cocher "Salle sans empreinte".'
+              : 'Tanpri anrejistre yon anprent, mete yon kòd PIN, oswa koche "Sal san anprent".',
+        );
+        return;
+      }
     }
 
     setState(() {
@@ -270,11 +397,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       final plan = _selectedPlan!;
       final endDate = subscriptionEnd(_startDate, plan.durationDays);
       final amt = double.tryParse(_paymentAmountController.text) ?? plan.price;
-      final received =
-          double.tryParse(_paymentReceivedController.text.replaceAll(',', '.')) ??
-              amt;
-      final creditAdded =
-          _keepChangeAsCredit && received > amt ? received - amt : 0.0;
+      final cashier = _cashier;
+      final received = cashier.receivedInBase;
+      final creditAdded = _keepChangeAsCredit && received > amt ? received - amt : 0.0;
       final paymentId = const Uuid().v4();
 
       final draft = MemberRegistration(
@@ -295,13 +420,21 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         photo: _photoBytes,
       );
 
+      final effectiveFee = _effectiveRegistrationFee;
+      final planFee = (amt - effectiveFee).clamp(0.0, double.infinity).toDouble();
+      final reason = effectiveFee > 0
+          ? 'Inscription + 1er mois'
+          : (_registrationFeeMode == 'included'
+              ? 'Inscription (1er mois inclus)'
+              : 'Inscription');
+
       final result = await _members.register(
         draft,
         subscription: SubscriptionCommand(
           planId: plan.id,
           startDate: _startDate,
           endDate: endDate,
-          price: _isExistingMember ? plan.price : plan.registrationPrice,
+          price: _isExistingMember ? plan.price : (planFee > 0 ? planFee : plan.registrationPrice),
           status: 'active',
         ),
         payment: PaymentCommand(
@@ -314,10 +447,28 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           reference: _referenceController.text.trim(),
           receivedAmount: received,
           keepChangeAsCredit: _keepChangeAsCredit,
-          notes: _paymentConfirmed ? 'Paiement confirmé en caisse' : '',
+          paidCurrency: cashier.paidCurrency,
+          exchangeRate: _rate > 0 ? _rate : null,
+          tenderedAmount: cashier.given,
+          registrationFee: effectiveFee,
+          planFee: planFee,
+          paymentReason: reason,
+          notes: _paymentConfirmed
+              ? '$reason · Frais: ${effectiveFee.toStringAsFixed(0)} $_currency, Plan: ${planFee.toStringAsFixed(0)} $_currency'
+              : '',
         ),
         changedAt: now,
       );
+
+      if (widget.portalRequestId != null) {
+        try {
+          await runtime.client.from('portal_requests').update({
+            'status': 'completed',
+            'member_id': result.memberId,
+            'updated_at': now.toUtc().toIso8601String(),
+          }).eq('id', widget.portalRequestId!);
+        } catch (_) {}
+      }
       _lastPaymentId = paymentId;
       _lastAmount = amt;
       _lastReceived = received;
@@ -325,27 +476,19 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       _lastMemberNumber = result.memberNumber;
 
       if (_primaryTemplate != null && runtime.database != null) {
-        await runtime.database!.save(
-          SyncEntity.members,
-          {
-            'id': result.memberId,
-            'gym_id': runtime.session!.gymId,
-            'fingerprint_registered': true,
-            'fingerprint_template': _primaryTemplate,
-            'fingerprint_backup_template': _backupTemplate,
-            'fingerprint_enrolled_at': now.toUtc().toIso8601String(),
-          },
-          changedAt: now,
-        );
+        await runtime.database!.save(SyncEntity.members, {
+          'id': result.memberId,
+          'gym_id': runtime.session!.gymId,
+          'fingerprint_registered': true,
+          'fingerprint_template': _primaryTemplate,
+          'fingerprint_backup_template': _backupTemplate,
+          'fingerprint_enrolled_at': now.toUtc().toIso8601String(),
+        }, changedAt: now);
       }
 
       if (hasPin && runtime.database != null && runtime.session?.gymId != null) {
         final pinService = MemberPinService(runtime.database!);
-        final pinData = await pinService.createPinData(
-          result.memberId,
-          runtime.session!.gymId!,
-          _pinController.text.trim(),
-        );
+        final pinData = await pinService.createPinData(result.memberId, runtime.session!.gymId!, _pinController.text.trim());
         await pinService.savePinData(pinData);
       }
 
@@ -358,13 +501,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         final agentClient = AccessAgentClient();
         final tmpls = [_primaryTemplate!];
         if (_backupTemplate != null) tmpls.add(_backupTemplate!);
-        unawaited(agentClient.syncTerminalMember(
-          userId: result.memberId,
-          name: fullName,
-          startDate: _startDate,
-          endDate: endDate,
-          templates: tmpls,
-        ).catchError((_) => false));
+        unawaited(agentClient.syncTerminalMember(userId: result.memberId, name: fullName, startDate: _startDate, endDate: endDate, templates: tmpls).catchError((_) => false));
       }
 
       final email = draft.email.trim();
@@ -373,12 +510,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       final gym = runtime.session?.gym ?? const <String, dynamic>{};
       final gymId = runtime.session?.gymId;
       if (gymId != null && _lastPaymentId.isNotEmpty) {
-        unawaited(
-          ReceiptService(runtime.client, gymId).autoEnqueue(
-            _receiptData(fullName, plan.name, endDate, gym),
-            gym['logo_url'] as String?,
-          ),
-        );
+        unawaited(ReceiptService(runtime.client, gymId).autoEnqueue(_receiptData(fullName, plan.name, endDate, gym), gym['logo_url'] as String?));
       }
 
       if (mounted) {
@@ -395,52 +527,36 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   }
 
   /// Resi PDF peman enskripsyon an (download / print / email / WhatsApp).
-  Future<void> _openReceipt(
-    String fullName,
-    String planName,
-    String memberId,
-    DateTime endDate,
-  ) async {
+  Future<void> _openReceipt(String fullName, String planName, String memberId, DateTime endDate) async {
     final runtime = ref.read(appRuntimeProvider);
     final gym = runtime.session?.gym ?? const <String, dynamic>{};
     if (!mounted) return;
-    await showReceiptSheet(
-      context,
-      ref,
-      _receiptData(fullName, planName, endDate, gym),
-    );
+    await showReceiptSheet(context, ref, _receiptData(fullName, planName, endDate, gym));
   }
 
-  ReceiptData _receiptData(
-    String fullName,
-    String planName,
-    DateTime endDate,
-    Map<String, dynamic> gym,
-  ) => ReceiptData(
-        paymentId: _lastPaymentId,
-        memberName: fullName,
-        memberNumber: _lastMemberNumber,
-        planName: planName,
-        amount: _lastAmount,
-        currency: _currency,
-        method: _paymentMethod,
-        paidAt: DateTime.now().toUtc(),
-        gymName: gym['name'] as String? ?? 'GymDesk',
-        accentColor: gym['accent_color'] as String? ?? '#0F766E',
-        periodStart: _startDate,
-        periodEnd: endDate,
-        receivedAmount: _lastReceived,
-        creditAdded: _lastCreditAdded,
-        creditBalance: _lastCreditAdded,
-        memberEmail: _emailController.text.trim(),
-        memberPhone: _whatsappController.text.trim().isNotEmpty
-            ? _whatsappController.text.trim()
-            : _phoneController.text.trim(),
-        gymAddress: gym['address'] as String?,
-        gymPhone: gym['phone'] as String?,
-        gymEmail: gym['email'] as String?,
-        reference: _referenceController.text.trim(),
-      );
+  ReceiptData _receiptData(String fullName, String planName, DateTime endDate, Map<String, dynamic> gym) => ReceiptData(
+    paymentId: _lastPaymentId,
+    memberName: fullName,
+    memberNumber: _lastMemberNumber,
+    planName: planName,
+    amount: _lastAmount,
+    currency: _currency,
+    method: _paymentMethod,
+    paidAt: DateTime.now().toUtc(),
+    gymName: gym['name'] as String? ?? 'GymDesk',
+    accentColor: gym['accent_color'] as String? ?? '#0F766E',
+    periodStart: _startDate,
+    periodEnd: endDate,
+    receivedAmount: _lastReceived,
+    creditAdded: _lastCreditAdded,
+    creditBalance: _lastCreditAdded,
+    memberEmail: _emailController.text.trim(),
+    memberPhone: _whatsappController.text.trim().isNotEmpty ? _whatsappController.text.trim() : _phoneController.text.trim(),
+    gymAddress: gym['address'] as String?,
+    gymPhone: gym['phone'] as String?,
+    gymEmail: gym['email'] as String?,
+    reference: _referenceController.text.trim(),
+  );
 
   void _showSuccessDialog(AppStrings s, String memberId, String fullName, String planName, DateTime endDate, String email) {
     final gymName = ref.read(appRuntimeProvider).session?.name ?? 'GymDesk';
@@ -452,19 +568,19 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
 
     final waMessageText = isFr
         ? 'Bonjour $fullName ! Bienvenue chez $gymName.\n'
-          'Votre inscription est confirmée pour la formule : $planName.\n'
-          'Période : du $startStr au $endStr.\n'
-          '⚠️ RAPPEL IMPORTANT : Votre abonnement débutera officiellement le $startStr. Merci de vous présenter à la salle à cette date exacte, car c\'est à ce moment précis que votre abonnement commencera à être décompté.\n'
-          'Votre empreinte sera prête pour l\'accès.\n'
-          'Merci pour votre confiance !'
+              'Votre inscription est confirmée pour la formule : $planName.\n'
+              'Période : du $startStr au $endStr.\n'
+              '⚠️ RAPPEL IMPORTANT : Votre abonnement débutera officiellement le $startStr. Merci de vous présenter à la salle à cette date exacte, car c\'est à ce moment précis que votre abonnement commencera à être décompté.\n'
+              'Votre empreinte sera prête pour l\'accès.\n'
+              'Merci pour votre confiance !'
         : isEn
-            ? 'Hello $fullName! Welcome to $gymName.\n'
+        ? 'Hello $fullName! Welcome to $gymName.\n'
               'Your membership is confirmed for: $planName.\n'
               'Period: from $startStr to $endStr.\n'
               '⚠️ IMPORTANT REMINDER: Your membership officially begins on $startStr. Please make sure to come to the gym on this exact date, as your access begins counting down from that day.\n'
               'Your fingerprint access will be ready.\n'
               'Thank you for choosing us!'
-            : 'Bonjou $fullName! Byenvini nan $gymName.\n'
+        : 'Bonjou $fullName! Byenvini nan $gymName.\n'
               'Enskripsyon ou konfime sou fòmil : $planName.\n'
               'Peryòd : soti $startStr rive $endStr.\n'
               '⚠️ RAPÈL ENPÒTAN : Abònman w lan ap kòmanse ofisyèlman nan dat $startStr la. Tanpri prezante nan sal la egzakteman jou sa a, paske se jou sa a menm abònman w lan ap kòmanse konte.\n'
@@ -513,9 +629,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    isFr
-                        ? 'Rappel : Le membre doit se présenter le $startStr (date de début de son accès).'
-                        : 'Rapèl : Manm nan dwe vini jou $startStr la (se lè sa a abònman an kòmanse).',
+                    isFr ? 'Rappel : Le membre doit se présenter le $startStr (date de début de son accès).' : 'Rapèl : Manm nan dwe vini jou $startStr la (se lè sa a abònman an kòmanse).',
                     style: const TextStyle(fontSize: 12, color: Color(0xFF134E4A)),
                   ),
                 ],
@@ -529,10 +643,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF25D366),
-                foregroundColor: Colors.white,
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white),
               onPressed: () => launchUrl(Uri.parse(waUrl), mode: LaunchMode.externalApplication),
               icon: const Icon(LucideIcons.messageCircle, size: 18),
               label: Text(s.text('send_whatsapp_btn')),
@@ -582,6 +693,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     _paymentAmountController.dispose();
     _paymentReceivedController.dispose();
     _referenceController.dispose();
+    _registrationFeeController.dispose();
     _pinController.dispose();
     _biometricService.dispose();
     super.dispose();
@@ -592,12 +704,35 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     final s = AppStrings.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(s.text('enroll_wizard_title')),
+        title: Text(_quickMode ? s.text('enrollment_mode_quick') : s.text('enroll_wizard_title')),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: SegmentedButton<bool>(
+              segments: [
+                ButtonSegment(
+                  value: true,
+                  icon: const Icon(LucideIcons.zap, size: 16),
+                  label: Text(s.text('enrollment_mode_quick')),
+                ),
+                ButtonSegment(
+                  value: false,
+                  icon: const Icon(LucideIcons.listOrdered, size: 16),
+                  label: Text(s.text('enrollment_mode_wizard')),
+                ),
+              ],
+              selected: {_quickMode},
+              onSelectionChanged: (set) => setState(() => _quickMode = set.first),
+            ),
+          ),
+        ],
       ),
       body: SafeArea(
         child: _loadingPlans
             ? const Center(child: CircularProgressIndicator())
-            : Stepper(
+            : _quickMode
+                ? _buildQuickForm(s)
+                : Stepper(
                 currentStep: _currentStep,
                 type: StepperType.horizontal,
                 onStepTapped: (step) {
@@ -624,58 +759,737 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                           )
                         else
                           ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF0F766E),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                            ),
+                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)),
                             onPressed: _isSaving ? null : () => _submitEnrollment(s),
                             icon: _isSaving
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                  )
+                                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                 : const Icon(LucideIcons.checkCheck, size: 18),
                             label: Text(_isSaving ? s.text('saving') : s.text('submit_enrollment')),
                           ),
                         const SizedBox(width: 12),
-                        if (_currentStep > 0)
-                          OutlinedButton(
-                            onPressed: () => setState(() => _currentStep--),
-                            child: Text(s.text('back_btn')),
-                          ),
+                        if (_currentStep > 0) OutlinedButton(onPressed: () => setState(() => _currentStep--), child: Text(s.text('back_btn'))),
                       ],
                     ),
                   );
                 },
                 steps: [
-                  Step(
-                    title: Text(s.text('step_identity')),
-                    isActive: _currentStep >= 0,
-                    state: _currentStep > 0 ? StepState.complete : StepState.indexed,
-                    content: _buildStep1(s),
+                  Step(title: Text(s.text('step_identity')), isActive: _currentStep >= 0, state: _currentStep > 0 ? StepState.complete : StepState.indexed, content: _buildStep1(s)),
+                  Step(title: Text(s.text('step_plan')), isActive: _currentStep >= 1, state: _currentStep > 1 ? StepState.complete : StepState.indexed, content: _buildStep2(s)),
+                  Step(title: Text(s.text('step_payment')), isActive: _currentStep >= 2, state: _currentStep > 2 ? StepState.complete : StepState.indexed, content: _buildStep3(s)),
+                  Step(title: Text(s.text('step_biometrics')), isActive: _currentStep >= 3, state: _primaryTemplate != null ? StepState.complete : StepState.indexed, content: _buildStep4(s)),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _buildQuickForm(AppStrings s) {
+    final cashier = _cashier;
+    final isFr = s.locale.languageCode == 'fr';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 820),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_errorMessage != null) _buildErrorBanner(),
+
+              // SECTION 1: IDENTITE PRINCIPALE
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: Colors.grey.shade300),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(LucideIcons.user, color: Color(0xFF0F766E), size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            s.text('step_identity'),
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _firstNameController,
+                              textCapitalization: TextCapitalization.words,
+                              decoration: InputDecoration(
+                                labelText: '${s.text('first_name')} *',
+                                prefixIcon: const Icon(LucideIcons.user, size: 18),
+                                border: const OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: _lastNameController,
+                              textCapitalization: TextCapitalization.characters,
+                              decoration: InputDecoration(
+                                labelText: '${s.text('last_name')} *',
+                                prefixIcon: const Icon(LucideIcons.user, size: 18),
+                                border: const OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _whatsappController,
+                              keyboardType: TextInputType.phone,
+                              decoration: InputDecoration(
+                                labelText: '${s.text('whatsapp_number')} *',
+                                prefixIcon: const Icon(LucideIcons.messageCircle, color: Color(0xFF25D366), size: 18),
+                                border: const OutlineInputBorder(),
+                                hintText: '+509 3000 0000',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              decoration: InputDecoration(
+                                labelText: '${s.text('email')} (${s.text('optional')})',
+                                prefixIcon: const Icon(LucideIcons.mail, size: 18),
+                                border: const OutlineInputBorder(),
+                                hintText: 'nom@gmail.com',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  Step(
-                    title: Text(s.text('step_plan')),
-                    isActive: _currentStep >= 1,
-                    state: _currentStep > 1 ? StepState.complete : StepState.indexed,
-                    content: _buildStep2(s),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // SECTION 2: FORMULE & ABONNEMENT
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: Colors.grey.shade300),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(LucideIcons.calendarDays, color: Color(0xFF0F766E), size: 20),
+                              const SizedBox(width: 8),
+                              Text(
+                                s.text('enrollment_plan_select'),
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                              ),
+                            ],
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(LucideIcons.calendar, size: 16),
+                            label: Text('${s.text('start_date')}: ${ymd(_startDate)}'),
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: _startDate,
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime(2035),
+                              );
+                              if (picked != null) setState(() => _startDate = picked);
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Existing member toggle
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(s.text('existing_member_no_fee'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                        value: _isExistingMember,
+                        onChanged: (val) {
+                          setState(() {
+                            _isExistingMember = val ?? false;
+                            _paymentAmountController.text = _calculateTotalDue().toStringAsFixed(0);
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      // Plans tiles
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 10,
+                        children: _plans.map((plan) {
+                          final isSelected = _selectedPlan?.id == plan.id;
+                          final price = _isExistingMember ? plan.price : plan.registrationPrice;
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => _onSelectPlan(plan),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 150),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: isSelected ? const Color(0xFFF0FDFA) : Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isSelected ? const Color(0xFF0F766E) : Colors.grey.shade300,
+                                  width: isSelected ? 2 : 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    isSelected ? LucideIcons.circleCheck : LucideIcons.circle,
+                                    size: 18,
+                                    color: isSelected ? const Color(0xFF0F766E) : Colors.grey,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        plan.name,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: isSelected ? const Color(0xFF0F766E) : Colors.black87,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${plan.durationDays} ${s.text('days')} · ${price.toStringAsFixed(0)} ${plan.currency}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: isSelected ? const Color(0xFF115E59) : Colors.grey.shade700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
                   ),
-                  Step(
-                    title: Text(s.text('step_payment')),
-                    isActive: _currentStep >= 2,
-                    state: _currentStep > 2 ? StepState.complete : StepState.indexed,
-                    content: _buildStep3(s),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              _buildRegistrationFeeSection(s),
+              const SizedBox(height: 16),
+
+              // SECTION 3: PAIEMENT & CAISSE
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: Colors.grey.shade300),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(LucideIcons.banknote, color: Color(0xFF0F766E), size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            s.text('enrollment_cashier_section'),
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: DropdownButtonFormField<String>(
+                              value: _paymentMethod,
+                              decoration: InputDecoration(labelText: s.text('payment_method'), border: const OutlineInputBorder()),
+                              items: const [
+                                DropdownMenuItem(value: 'cash', child: Text('Espèces / Cash')),
+                                DropdownMenuItem(value: 'moncash', child: Text('MonCash')),
+                                DropdownMenuItem(value: 'natcash', child: Text('NatCash')),
+                                DropdownMenuItem(value: 'bank', child: Text('Virement')),
+                                DropdownMenuItem(value: 'card', child: Text('Carte')),
+                                DropdownMenuItem(value: 'other', child: Text('Autre')),
+                              ],
+                              onChanged: (val) => setState(() => _paymentMethod = val ?? 'cash'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: _paymentAmountController,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: '${s.text('amount_due')} ($_currency) *',
+                                border: const OutlineInputBorder(),
+                              ),
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 3,
+                            child: TextField(
+                              controller: _paymentReceivedController,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                labelText: '${s.text('amount_received')} (${cashier.paidCurrency})',
+                                border: const OutlineInputBorder(),
+                                hintText: cashier.dueInPaid.toStringAsFixed(2),
+                                errorText: cashier.enough ? null : s.text('amount_insufficient'),
+                              ),
+                              onChanged: (_) => setState(() {}),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_rate > 0) ...[
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(s.text('paid_in_currency')),
+                            SegmentedButton<String>(
+                              segments: [for (final c in supportedCurrencies) ButtonSegment(value: c, label: Text(c))],
+                              selected: {cashier.paidCurrency},
+                              onSelectionChanged: (v) => setState(() {
+                                _paidCurrency = v.first;
+                                _paymentReceivedController.clear();
+                              }),
+                            ),
+                            Text(
+                              '${s.text('amount_due')}: ${money(cashier.dueInPaid, cashier.paidCurrency)}'
+                              '  ·  1 USD = ${_rate.toStringAsFixed(2)} HTG',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ],
+                      if (cashier.changeInPaid > 0.004) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0FDF4),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFBBF7D0)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '${s.text('change_due')}: ${money(cashier.changeInPaid, cashier.paidCurrency)}',
+                                style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF047857), fontSize: 15),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Checkbox(
+                                    value: _keepChangeAsCredit,
+                                    onChanged: (v) => setState(() => _keepChangeAsCredit = v == true),
+                                  ),
+                                  Text(s.text('keep_change_as_credit'), style: const TextStyle(fontSize: 13)),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(s.text('payment_collected_confirmed'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                        subtitle: Text(
+                          isFr ? 'Le montant a bien été encaissé et vérifié' : 'Kòb la fin konte epi verifye nan kès la',
+                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                        ),
+                        value: _paymentConfirmed,
+                        onChanged: (v) => setState(() => _paymentConfirmed = v ?? true),
+                        activeColor: const Color(0xFF059669),
+                      ),
+                    ],
                   ),
-                  Step(
-                    title: Text(s.text('step_biometrics')),
-                    isActive: _currentStep >= 3,
-                    state: _primaryTemplate != null ? StepState.complete : StepState.indexed,
-                    content: _buildStep4(s),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // SECTION 4: OPTIONS AVANCEES (Replié par défaut)
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  backgroundColor: Colors.white,
+                  collapsedBackgroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  collapsedShape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  leading: const Icon(LucideIcons.listPlus, color: Color(0xFF0F766E)),
+                  title: Text(
+                    s.text('enrollment_optional_section'),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    s.text('enrollment_fingerprint_quick_hint'),
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                  ),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Divider(),
+                          const SizedBox(height: 12),
+                          // Photo + Sexe + NIF
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              GestureDetector(
+                                onTap: _pickPhoto,
+                                child: Container(
+                                  width: 90,
+                                  height: 105,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.grey.shade300),
+                                  ),
+                                  child: _photoBytes != null
+                                      ? ClipRRect(
+                                          borderRadius: BorderRadius.circular(10),
+                                          child: Image.memory(_photoBytes!, fit: BoxFit.cover),
+                                        )
+                                      : Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            const Icon(LucideIcons.camera, size: 28, color: Colors.grey),
+                                            const SizedBox(height: 4),
+                                            Text(s.text('take_photo'), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                          ],
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: DropdownButtonFormField<String>(
+                                            value: _sex,
+                                            decoration: InputDecoration(labelText: s.text('sex'), border: const OutlineInputBorder()),
+                                            items: [
+                                              DropdownMenuItem(value: 'male', child: Text(s.text('male'))),
+                                              DropdownMenuItem(value: 'female', child: Text(s.text('female'))),
+                                            ],
+                                            onChanged: (val) => setState(() => _sex = val ?? 'male'),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: TextField(
+                                            controller: _nifCinController,
+                                            decoration: InputDecoration(
+                                              labelText: s.text('nif_cin'),
+                                              prefixIcon: const Icon(LucideIcons.idCard, size: 18),
+                                              border: const OutlineInputBorder(),
+                                              hintText: '000-000-000-0',
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    TextField(
+                                      controller: _addressController,
+                                      decoration: InputDecoration(
+                                        labelText: s.text('address'),
+                                        prefixIcon: const Icon(LucideIcons.mapPin, size: 18),
+                                        border: const OutlineInputBorder(),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          // Contact d'urgence
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _emergencyNameController,
+                                  decoration: InputDecoration(
+                                    labelText: isFr ? 'Contact d\'urgence (nom)' : 'Moun pou kontakte an ijans',
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextField(
+                                  controller: _emergencyPhoneController,
+                                  keyboardType: TextInputType.phone,
+                                  decoration: InputDecoration(
+                                    labelText: isFr ? 'Téléphone d\'urgence' : 'Telefòn ijans',
+                                    border: const OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          // PIN & Empreinte
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _pinController,
+                                  keyboardType: TextInputType.number,
+                                  maxLength: 6,
+                                  decoration: InputDecoration(
+                                    labelText: isFr ? 'Code PIN d\'accès (4 à 6 chiffres)' : 'Kòd PIN pou antre',
+                                    prefixIcon: const Icon(LucideIcons.lock, size: 18),
+                                    border: const OutlineInputBorder(),
+                                    counterText: '',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 18),
+                                    side: BorderSide(
+                                      color: _primaryTemplate != null ? const Color(0xFF059669) : const Color(0xFF0F766E),
+                                    ),
+                                  ),
+                                  onPressed: _isCapturing
+                                      ? null
+                                      : () async {
+                                          _consentGiven = true;
+                                          await _captureFingerprint(s);
+                                        },
+                                  icon: _isCapturing
+                                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                      : Icon(
+                                          _primaryTemplate != null ? LucideIcons.circleCheck : LucideIcons.fingerprint,
+                                          color: _primaryTemplate != null ? const Color(0xFF059669) : const Color(0xFF0F766E),
+                                        ),
+                                  label: Text(
+                                    _primaryTemplate != null
+                                        ? (isFr ? 'Empreinte enregistrée' : 'Anprent anrejistre')
+                                        : (_isCapturing ? s.text('finger_capturing') : (isFr ? 'Scanner empreinte (USB)' : 'Skane anprent (USB)')),
+                                    style: TextStyle(
+                                      color: _primaryTemplate != null ? const Color(0xFF059669) : const Color(0xFF0F766E),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // BOUTON ACTION PRINCIPAL
+              SizedBox(
+                height: 52,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: _isSaving
+                      ? null
+                      : () {
+                          if (_validateQuickForm(s)) {
+                            _submitEnrollment(s);
+                          }
+                        },
+                  icon: _isSaving
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(LucideIcons.checkCheck, size: 22),
+                  label: Text(
+                    _isSaving ? s.text('saving') : s.text('enroll_and_collect'),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 30),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRegistrationFeeSection(AppStrings s) {
+    if (_isExistingMember) return const SizedBox.shrink();
+
+    final isFr = s.locale.languageCode == 'fr';
+    final regFee = _effectiveRegistrationFee;
+    final planPrice = _selectedPlan?.price ?? 0.0;
+    final total = _calculateTotalDue();
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(LucideIcons.tag, color: Color(0xFF0F766E), size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  s.text('registration_fee'),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                  value: 'separate',
+                  label: Text(s.text('reg_fee_separate')),
+                  icon: const Icon(LucideIcons.plusCircle, size: 16),
+                ),
+                ButtonSegment(
+                  value: 'included',
+                  label: Text(s.text('reg_fee_included')),
+                  icon: const Icon(LucideIcons.checkCircle, size: 16),
+                ),
+                ButtonSegment(
+                  value: 'waived',
+                  label: Text(s.text('reg_fee_waived')),
+                  icon: const Icon(LucideIcons.gift, size: 16),
+                ),
+              ],
+              selected: {_registrationFeeMode},
+              onSelectionChanged: (set) => _setRegistrationFeeMode(set.first),
+            ),
+            if (_registrationFeeMode == 'separate') ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _registrationFeeController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: '${s.text('registration_fee_amount')} ($_currency)',
+                        prefixIcon: const Icon(LucideIcons.dollarSign, size: 18),
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onChanged: (val) {
+                        setState(() {
+                          _customRegistrationFee = double.tryParse(val.replaceAll(',', '.')) ?? 0.0;
+                          _paymentAmountController.text = _calculateTotalDue().toStringAsFixed(0);
+                        });
+                      },
+                    ),
                   ),
                 ],
               ),
+            ],
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDFA),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF99F6E4)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _registrationFeeMode == 'separate'
+                            ? '${isFr ? 'Frais' : 'Frè'}: ${regFee.toStringAsFixed(0)} $_currency + ${isFr ? '1er mois' : '1ye mwa'}: ${planPrice.toStringAsFixed(0)} $_currency'
+                            : _registrationFeeMode == 'included'
+                                ? (isFr ? 'Frais d’adhésion inclus dans le 1er mois' : 'Frè enskripsyon ladan l nan 1ye mwa a')
+                                : (isFr ? 'Frais d’inscription offerts (0 $_currency)' : 'Frè enskripsyon gratis (0 $_currency)'),
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF134E4A)),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${s.text('amount_due')}: ${total.toStringAsFixed(0)} $_currency',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F766E)),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F766E),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      '${total.toStringAsFixed(0)} $_currency',
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -752,7 +1566,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
                 decoration: InputDecoration(
-                  labelText: '${s.text('email')} *',
+                  labelText: '${s.text('email')} (${s.text('optional')})',
                   prefixIcon: const Icon(LucideIcons.mail),
                   border: const OutlineInputBorder(),
                   hintText: 'member@gmail.com',
@@ -761,41 +1575,44 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _nifCinController,
-                decoration: InputDecoration(
-                  labelText: s.text('nif_cin'),
-                  prefixIcon: const Icon(LucideIcons.idCard),
-                  border: const OutlineInputBorder(),
-                  hintText: '000-000-000-0',
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                value: _sex,
-                decoration: InputDecoration(labelText: s.text('sex'), border: const OutlineInputBorder()),
-                items: [
-                  DropdownMenuItem(value: 'male', child: Text(s.text('male'))),
-                  DropdownMenuItem(value: 'female', child: Text(s.text('female'))),
+        const SizedBox(height: 8),
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            leading: const Icon(LucideIcons.listPlus),
+            title: Text('${s.text('more_info')} (${s.text('optional')})'),
+            children: [
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _nifCinController,
+                      decoration: InputDecoration(labelText: s.text('nif_cin'), prefixIcon: const Icon(LucideIcons.idCard), border: const OutlineInputBorder(), hintText: '000-000-000-0'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _sex,
+                      decoration: InputDecoration(labelText: s.text('sex'), border: const OutlineInputBorder()),
+                      items: [
+                        DropdownMenuItem(value: 'male', child: Text(s.text('male'))),
+                        DropdownMenuItem(value: 'female', child: Text(s.text('female'))),
+                      ],
+                      onChanged: (val) => setState(() => _sex = val ?? 'male'),
+                    ),
+                  ),
                 ],
-                onChanged: (val) => setState(() => _sex = val ?? 'male'),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _addressController,
-          decoration: InputDecoration(
-            labelText: s.text('address'),
-            prefixIcon: const Icon(LucideIcons.mapPin),
-            border: const OutlineInputBorder(),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _addressController,
+                decoration: InputDecoration(labelText: s.text('address'), prefixIcon: const Icon(LucideIcons.mapPin), border: const OutlineInputBorder()),
+              ),
+            ],
           ),
         ),
       ],
@@ -830,10 +1647,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  s.text('start_date_hint'),
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-                ),
+                Text(s.text('start_date_hint'), style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
                 const SizedBox(height: 12),
                 ListTile(
                   tileColor: Colors.white,
@@ -842,14 +1656,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                     side: BorderSide(color: Colors.grey.shade300),
                   ),
                   leading: const Icon(LucideIcons.calendar, color: Color(0xFF0F766E)),
-                  title: Text(
-                    ymd(_startDate),
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
+                  title: Text(ymd(_startDate), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   subtitle: Text(
-                    _selectedPlan != null
-                        ? '${s.text('subscription_period')}: ${ymd(_startDate)} → ${ymd(subscriptionEnd(_startDate, _selectedPlan!.durationDays))}'
-                        : ymd(_startDate),
+                    _selectedPlan != null ? '${s.text('subscription_period')}: ${ymd(_startDate)} → ${ymd(subscriptionEnd(_startDate, _selectedPlan!.durationDays))}' : ymd(_startDate),
                     style: const TextStyle(color: Color(0xFF0F766E), fontSize: 13, fontWeight: FontWeight.w500),
                   ),
                   trailing: OutlinedButton.icon(
@@ -887,10 +1696,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             onChanged: (val) {
               setState(() {
                 _isExistingMember = val;
-                if (_selectedPlan != null) {
-                  final effective = val ? _selectedPlan!.price : _selectedPlan!.registrationPrice;
-                  _paymentAmountController.text = effective.toStringAsFixed(0);
-                }
+                _paymentAmountController.text = _calculateTotalDue().toStringAsFixed(0);
               });
             },
           ),
@@ -908,16 +1714,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               side: BorderSide(color: isSelected ? const Color(0xFF0F766E) : Colors.transparent, width: 2),
             ),
             child: ListTile(
-              onTap: () {
-                setState(() {
-                  _selectedPlan = plan;
-                  _paymentAmountController.text = effectivePrice.toStringAsFixed(0);
-                });
-              },
-              leading: Icon(
-                isSelected ? LucideIcons.checkCircle2 : LucideIcons.circle,
-                color: isSelected ? const Color(0xFF0F766E) : Colors.grey,
-              ),
+              onTap: () => _onSelectPlan(plan),
+              leading: Icon(isSelected ? LucideIcons.checkCircle2 : LucideIcons.circle, color: isSelected ? const Color(0xFF0F766E) : Colors.grey),
               title: Text(plan.name, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text(
                 plan.enrollmentPrice != null && !_isExistingMember
@@ -931,14 +1729,17 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             ),
           );
         }),
+        const SizedBox(height: 16),
+        _buildRegistrationFeeSection(s),
       ],
     );
   }
 
   Widget _buildStep3(AppStrings s) {
-    final effectivePrice = _selectedPlan == null
-        ? 0.0
-        : (_isExistingMember ? _selectedPlan!.price : _selectedPlan!.registrationPrice);
+    final isFr = s.locale.languageCode == 'fr';
+    final totalDue = _calculateTotalDue();
+    final regFee = _effectiveRegistrationFee;
+    final planPrice = _selectedPlan?.price ?? 0.0;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -950,10 +1751,18 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '${s.text('plans')}: ${_selectedPlan?.name ?? ''} (${effectivePrice.toStringAsFixed(0)} $_currency)',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
+                Text('${s.text('plans')}: ${_selectedPlan?.name ?? ''}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                if (!_isExistingMember && regFee > 0)
+                  Text(
+                    '${isFr ? 'Frais inscription' : 'Frè enskripsyon'}: ${regFee.toStringAsFixed(0)} $_currency + ${isFr ? 'Abonnement' : 'Abònman'}: ${planPrice.toStringAsFixed(0)} $_currency = ${totalDue.toStringAsFixed(0)} $_currency',
+                    style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0F766E), fontSize: 13),
+                  )
+                else
+                  Text(
+                    '${s.text('amount_due')}: ${totalDue.toStringAsFixed(0)} $_currency',
+                    style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0F766E), fontSize: 13),
+                  ),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -992,10 +1801,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               child: TextField(
                 controller: _paymentAmountController,
                 keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: '${s.text('amount_paid')} ($_currency) *',
-                  border: const OutlineInputBorder(),
-                ),
+                decoration: InputDecoration(labelText: '${s.text('amount_paid')} ($_currency) *', border: const OutlineInputBorder()),
                 onChanged: (_) => setState(() {}),
               ),
             ),
@@ -1005,44 +1811,67 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 controller: _paymentReceivedController,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  labelText: '${s.text('amount_received')} ($_currency)',
+                  labelText: '${s.text('amount_received')} (${_cashier.paidCurrency})',
                   border: const OutlineInputBorder(),
-                  hintText: _paymentAmountController.text,
+                  hintText: _cashier.dueInPaid.toStringAsFixed(2),
+                  errorText: _cashier.enough ? null : s.text('amount_insufficient'),
                 ),
                 onChanged: (_) => setState(() {}),
               ),
             ),
           ],
         ),
+        if (_rate > 0) ...[
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(s.text('paid_in_currency')),
+              SegmentedButton<String>(
+                segments: [for (final c in supportedCurrencies) ButtonSegment(value: c, label: Text(c))],
+                selected: {_cashier.paidCurrency},
+                onSelectionChanged: (v) => setState(() {
+                  _paidCurrency = v.first;
+                  _paymentReceivedController.clear();
+                }),
+              ),
+              Text(
+                '${s.text('amount_due')}: ${money(_cashier.dueInPaid, _cashier.paidCurrency)}'
+                '  ·  1 USD = ${_rate.toStringAsFixed(2)} HTG',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ],
         Builder(
           builder: (context) {
-            final due =
-                double.tryParse(_paymentAmountController.text.replaceAll(',', '.')) ??
-                    0;
-            final got = double.tryParse(
-              _paymentReceivedController.text.replaceAll(',', '.'),
-            );
-            final rest = (got ?? due) - due;
-            if (rest <= 0.004) return const SizedBox.shrink();
-            return CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(s.text('keep_change_as_credit')),
-              subtitle: Text('+${rest.toStringAsFixed(2)} $_currency'),
-              value: _keepChangeAsCredit,
-              onChanged: (v) =>
-                  setState(() => _keepChangeAsCredit = v == true),
+            final cashier = _cashier;
+            if (cashier.changeInPaid <= 0.004) return const SizedBox.shrink();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 8),
+                Text(
+                  '${s.text('change_due')}: ${money(cashier.changeInPaid, cashier.paidCurrency)}',
+                  style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF0F766E)),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(s.text('keep_change_as_credit')),
+                  subtitle: Text('+${money(cashier.receivedInBase - cashier.cashDue, _currency)}'),
+                  value: _keepChangeAsCredit,
+                  onChanged: (v) => setState(() => _keepChangeAsCredit = v == true),
+                ),
+              ],
             );
           },
         ),
         const SizedBox(height: 16),
         TextField(
           controller: _referenceController,
-          decoration: InputDecoration(
-            labelText: s.text('reference_receipt'),
-            prefixIcon: const Icon(LucideIcons.hash),
-            border: const OutlineInputBorder(),
-            hintText: 'Ex: MC-89234712',
-          ),
+          decoration: InputDecoration(labelText: s.text('reference_receipt'), prefixIcon: const Icon(LucideIcons.hash), border: const OutlineInputBorder(), hintText: 'Ex: MC-89234712'),
         ),
         const SizedBox(height: 24),
         Container(
@@ -1050,36 +1879,24 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           decoration: BoxDecoration(
             color: _paymentConfirmed ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: _paymentConfirmed ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-            ),
+            border: Border.all(color: _paymentConfirmed ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Icon(
-                    _paymentConfirmed ? LucideIcons.circleCheck : LucideIcons.shieldAlert,
-                    color: _paymentConfirmed ? const Color(0xFF059669) : const Color(0xFFDC2626),
-                  ),
+                  Icon(_paymentConfirmed ? LucideIcons.circleCheck : LucideIcons.shieldAlert, color: _paymentConfirmed ? const Color(0xFF059669) : const Color(0xFFDC2626)),
                   const SizedBox(width: 10),
                   Text(
                     _paymentConfirmed ? s.text('confirm') : s.text('pending_renewals_title'),
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: _paymentConfirmed ? const Color(0xFF065F46) : const Color(0xFF991B1B),
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _paymentConfirmed ? const Color(0xFF065F46) : const Color(0xFF991B1B)),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _paymentConfirmed ? const Color(0xFF059669) : const Color(0xFFDC2626),
-                  foregroundColor: Colors.white,
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: _paymentConfirmed ? const Color(0xFF059669) : const Color(0xFFDC2626), foregroundColor: Colors.white),
                 onPressed: () => setState(() => _paymentConfirmed = !_paymentConfirmed),
                 icon: Icon(_paymentConfirmed ? LucideIcons.check : LucideIcons.checkCheck),
                 label: Text(_paymentConfirmed ? s.text('confirm') : s.text('select_payment_required')),
@@ -1111,10 +1928,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                   children: [
                     const Icon(LucideIcons.keyRound, color: Color(0xFF0F766E), size: 22),
                     const SizedBox(width: 10),
-                    Text(
-                      isFr ? 'Code PIN d\'Accès (Optionnel)' : 'Kòd PIN pou Antre (Opsyonèl)',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
+                    Text(isFr ? 'Code PIN d\'Accès (Optionnel)' : 'Kòd PIN pou Antre (Opsyonèl)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   ],
                 ),
                 const SizedBox(height: 6),
@@ -1151,14 +1965,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
             side: BorderSide(color: _skipFingerprintForNow ? Colors.blue : Colors.grey.shade300),
           ),
           child: CheckboxListTile(
-            title: Text(
-              isFr ? 'Salle sans empreinte / Enregistrer plus tard' : 'Sal san anprent / Anrejistre pita',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
+            title: Text(isFr ? 'Salle sans empreinte / Enregistrer plus tard' : 'Sal san anprent / Anrejistre pita', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             subtitle: Text(
-              isFr
-                  ? 'Cochez si cette salle utilise le code PIN uniquement ou n\'a pas de lecteur Suprema.'
-                  : 'Koche sa si sal sa a itilize kòd PIN sèlman oswa pa gen lektè Suprema.',
+              isFr ? 'Cochez si cette salle utilise le code PIN uniquement ou n\'a pas de lecteur Suprema.' : 'Koche sa si sal sa a itilize kòd PIN sèlman oswa pa gen lektè Suprema.',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
             ),
             value: _skipFingerprintForNow,
@@ -1214,36 +2023,20 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                     width: 120,
                     height: 120,
                     decoration: BoxDecoration(
-                      color: (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
-                          ? const Color(0xFF059669)
-                          : const Color(0xFF0F766E),
+                      color: (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null) ? const Color(0xFF059669) : const Color(0xFF0F766E),
                       shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF0F766E).withOpacity(0.3),
-                          blurRadius: 16,
-                          spreadRadius: 4,
-                        ),
-                      ],
+                      boxShadow: [BoxShadow(color: const Color(0xFF0F766E).withOpacity(0.3), blurRadius: 16, spreadRadius: 4)],
                     ),
                     child: Center(
                       child: _isCapturing
                           ? const CircularProgressIndicator(color: Colors.white)
-                          : Icon(
-                              (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
-                                  ? LucideIcons.checkCheck
-                                  : LucideIcons.fingerprint,
-                              size: 56,
-                              color: Colors.white,
-                            ),
+                          : Icon((_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null) ? LucideIcons.checkCheck : LucideIcons.fingerprint, size: 56, color: Colors.white),
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
-                      ? s.text('finger_captured_success')
-                      : s.text('capture_finger_btn'),
+                  (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null) ? s.text('finger_captured_success') : s.text('capture_finger_btn'),
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ],

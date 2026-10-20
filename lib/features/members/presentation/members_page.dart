@@ -106,20 +106,21 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                       );
                     },
                     icon: const Icon(LucideIcons.fingerprint, size: 18),
-                    label: const Text('Transfere / Senkronize Anprent'),
+                    label: Text(s.text('fp_transfer_sync')),
                   );
                 },
               ),
-              FilledButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F766E),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              if (ref.watch(appRuntimeProvider).session?.canAddMembers ?? true)
+                FilledButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F766E),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  ),
+                  onPressed: () => context.go('/members/new'),
+                  icon: const Icon(LucideIcons.userPlus, size: 18),
+                  label: Text(s.text('enroll_new_member')),
                 ),
-                onPressed: () => context.go('/members/new'),
-                icon: const Icon(LucideIcons.userPlus, size: 18),
-                label: const Text('Enskri Nouvo Manm (Anprent)'),
-              ),
             ],
           ),
         ),
@@ -178,7 +179,7 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                     ])
                       ChoiceChip(
                         label: Text(
-                          '${filter == 'pending_fingerprint' ? 'An atann anprent (Pou rele)' : s.text('member_filter_$filter')}'
+                          '${s.text('member_filter_$filter')}'
                           '${counts[filter] == null ? '' : ' · ${counts[filter]}'}',
                         ),
                         selected: _filter == filter,
@@ -211,7 +212,7 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                   padding: const EdgeInsets.all(24),
                   child: MessagePanel(
                     message: s.text('members_empty'),
-                    action: 'Enskri yon Nouvo Manm',
+                    action: s.text('enroll_new_member'),
                     onAction: () => context.go('/members/new'),
                   ),
                 );
@@ -244,7 +245,7 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     subtitle: Text(
-                      '${member.memberNumber}${member.phone == null ? '' : ' · ${member.phone}'}\n${subscription == null ? s.text('no_subscription') : '${subscription.startDate.toLocal().toString().substring(0, 10)} → ${DateFormat.yMd(locale).format(subscription.endDate)} · ${s.text(subscription.status)}'}',
+                      '${member.memberNumber}${member.phone == null ? '' : ' · ${member.phone}'}\n${subscription == null ? s.text('no_subscription') : '${DateFormat.yMd(locale).format(subscription.startDate)} → ${DateFormat.yMd(locale).format(subscription.endDate)} · ${s.text(subscription.status)}${entry.validity.daysLeft != null && entry.validity.valid ? ' · ${s.text('days_left_n').replaceAll('{n}', '${entry.validity.daysLeft}')}' : ''}'}',
                     ),
                     trailing: Container(
                       padding: const EdgeInsets.symmetric(

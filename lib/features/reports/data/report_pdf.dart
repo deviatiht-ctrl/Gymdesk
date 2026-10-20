@@ -37,6 +37,11 @@ Future<Uint8List> buildReportPdf(
               labels['revenue']!,
               '${snapshot.revenue.toStringAsFixed(2)} $currency',
             ),
+            for (final entry in snapshot.collected.entries)
+              _metric(
+                '${labels['collected'] ?? ''} ${entry.key}',
+                '${entry.value.toStringAsFixed(2)} ${entry.key}',
+              ),
             _metric(labels['entries']!, snapshot.granted.toString()),
             _metric(labels['denied']!, snapshot.denied.toString()),
           ],
@@ -47,6 +52,7 @@ Future<Uint8List> buildReportPdf(
           [
             labels['date']!,
             labels['member']!,
+            labels['reason'] ?? 'Motif',
             labels['amount']!,
             labels['method']!,
             labels['staff']!,
@@ -57,6 +63,7 @@ Future<Uint8List> buildReportPdf(
                 (payment) => [
                   date.format(payment.paidAt.toLocal()),
                   snapshot.memberName(payment.memberId),
+                  payment.paymentReason,
                   '${payment.amount.toStringAsFixed(2)} ${payment.currency}',
                   payment.method,
                   snapshot.staffName(payment.receivedBy),

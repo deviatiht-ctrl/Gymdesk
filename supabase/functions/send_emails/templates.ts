@@ -148,6 +148,20 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
       note = 'Conservez ce reçu comme justificatif de paiement.';
     }
     rows = rows.filter(([label]) => label !== '');
+  } else if (job.kind === 'daily_report') {
+    const reportDate = date(p.report_date);
+    title = \Rapport d’activité du \;
+    subject = \Rapport quotidien · \ · \;
+    intro = \Bonjour \, voici le résumé complet des encaissements et de l’activité de votre salle pour la journée du \.\;
+    rows = [
+      ['Date du rapport', reportDate],
+      ['Total encaissé (USD)', \ USD\],
+      ['Total encaissé (HTG)', \ HTG\],
+      ['Nombre de paiements', String(p.payments_count ?? 0)],
+      ['Nouvelles inscriptions', String(p.new_members_count ?? 0)],
+      ['Passages / Accès', String(p.checkins_count ?? 0)],
+    ];
+    note = 'Ce rapport est généré automatiquement par SecurGYM.';
   }
   const greet = p.name && !/^\s*(bonjour|bonjou|bonsoir|hello|hi|salut|cher|chère)(?![a-zà-ÿ])/i.test(intro);
 

@@ -120,3 +120,24 @@ Deno.test('payment receipt is localized and carries the PDF download button', ()
   const noLink = renderEmail({ ...job, kind: 'payment_receipt', payload: { ...job.payload, language: 'en', method: 'cash', paid_at: '2026-10-14' } }, null, null);
   assert(!noLink.html.includes('Download receipt'));
 });
+
+Deno.test('daily report renders summary for owner', () => {
+  const daily = renderEmail({
+    ...job,
+    kind: 'daily_report',
+    payload: {
+      report_date: '2026-10-20',
+      owner_name: 'Boss Gym',
+      total_usd: 120,
+      total_htg: 15000,
+      payments_count: 5,
+      checkins_count: 32,
+      new_members_count: 2,
+    },
+  }, null);
+  assert(daily.subject.includes('Rapport quotidien'));
+  assert(daily.subject.includes('20/10/2026'));
+  assert(daily.text.includes('120 USD'));
+  assert(daily.text.includes('15000 HTG'));
+  assert(daily.text.includes('Boss Gym'));
+});

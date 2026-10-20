@@ -34,6 +34,7 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
       'pin_lock_minutes',
       'grace_days',
       'entry_duplicate_seconds',
+      'exchange_rate_htg',
     ])
       key: TextEditingController(),
   };
@@ -108,6 +109,7 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
               '${gym.settings['auto_logout_minutes'] ?? 30}',
             'pin_lock_minutes' => '${gym.settings['pin_lock_minutes'] ?? 5}',
             'grace_days' => '${gym.settings['grace_days'] ?? 0}',
+            'exchange_rate_htg' => '${gym.settings['exchange_rate_htg'] ?? 0}',
             _ => '${gym.settings['entry_duplicate_seconds'] ?? 3}',
           };
         }
@@ -189,6 +191,10 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
       return s.text('invalid_record');
     }
     if (key == 'phone' && text.length > 32) return s.text('invalid_record');
+    if (key == 'exchange_rate_htg') {
+      final rate = double.tryParse(text.replaceAll(',', '.'));
+      return rate == null || rate < 0 || rate > 100000 ? s.text('invalid_record') : null;
+    }
     const limits = {
       'offline_lease_hours': (1, 72),
       'auto_logout_minutes': (0, 1440),
@@ -233,6 +239,7 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
         'door_terminal_port': int.tryParse(_doorPortController.text) ?? 5005,
         'temporary_pin_duration_hours': int.tryParse(_tempPinHoursController.text) ?? 24,
         'member_language': _memberLanguage,
+        'exchange_rate_htg': double.parse(_fields['exchange_rate_htg']!.text.trim().replaceAll(',', '.')),
         ..._booleans,
       };
       final changedAt =
@@ -357,6 +364,18 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
                                     ? null
                                     : (value) =>
                                           _fields['currency']!.text = value!,
+                              ),
+                            ),
+                            SizedBox(
+                              width: width,
+                              child: TextFormField(
+                                controller: _fields['exchange_rate_htg'],
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: InputDecoration(
+                                  labelText: s.text('exchange_rate_htg'),
+                                  helperText: s.text('exchange_rate_hint'),
+                                ),
+                                validator: (v) => _validate('exchange_rate_htg', v, s),
                               ),
                             ),
                             SizedBox(

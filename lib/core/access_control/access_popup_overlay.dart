@@ -5,6 +5,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/runtime.dart';
+import '../../features/subscriptions/domain/subscription_rules.dart';
+import '../../l10n/app_strings.dart';
+import 'access_monitor.dart';
+import 'terminal_access_service.dart';
 
 class AccessEventNotification {
   const AccessEventNotification({
@@ -41,10 +45,12 @@ class AccessPopupOverlay extends StatefulWidget {
     super.key,
     required this.runtime,
     required this.child,
+    this.location = '',
   });
 
   final AppRuntime runtime;
   final Widget child;
+  final String location;
 
   @override
   State<AccessPopupOverlay> createState() => AccessPopupOverlayState();
@@ -57,11 +63,16 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
   AccessEventNotification? _currentEvent;
   Timer? _dismissTimer;
   RealtimeChannel? _subscription;
+  StreamSubscription<AccessDecision>? _local;
 
   @override
   void initState() {
     super.initState();
     _setupRealtimeListener();
+    _local = AccessMonitor.instance.decisions.listen(
+      (d) => _handleNewEvent(TerminalAccessService.eventRowFor(d)),
+    );
+    unawaited(AccessMonitor.instance.start(widget.runtime));
   }
 
   @override
@@ -69,6 +80,7 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
     super.didUpdateWidget(oldWidget);
     if (widget.runtime.session?.gymId != oldWidget.runtime.session?.gymId) {
       _setupRealtimeListener();
+      unawaited(AccessMonitor.instance.start(widget.runtime));
     }
   }
 
@@ -92,6 +104,8 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
             ),
             callback: (payload) {
               final row = payload.newRecord;
+              // PC sa a deja montre evènman tèminal li te trete a (popup lokal).
+              if (AccessMonitor.instance.active && row['source'] == 'terminal') return;
               _handleNewEvent(row);
             },
           )
@@ -113,52 +127,44 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
   }
 
   void _handleNewEvent(Map<String, dynamic> row) {
+    if (!mounted || widget.location == '/door_access') return;
     final eventType = row['event_type']?.toString() ?? 'unknown';
     final isGranted = eventType == 'granted';
     final snapshot = Map<String, dynamic>.from(row['member_snapshot'] as Map? ?? {});
 
-    final memberName = snapshot['name']?.toString() ?? row['reason']?.toString() ?? 'Manm';
-    final memberId = row['member_id']?.toString() ?? snapshot['member_id']?.toString();
+    final s = AppStrings.of(context);
+    final isEmployee = snapshot['is_employee'] == true;
+    final memberName = snapshot['name']?.toString() ?? s.text('member');
+    final memberId = isEmployee ? null : row['member_id']?.toString() ?? snapshot['member_id']?.toString();
     final planName = snapshot['plan_name']?.toString();
-    final endDate = snapshot['end_date']?.toString();
+    final endRaw = DateTime.tryParse(snapshot['end_date']?.toString() ?? '');
+    final endDate = endRaw == null ? null : ymd(endRaw);
     final daysLeft = (snapshot['days_left'] as num?)?.toInt();
 
-    final lang = Localizations.localeOf(context).languageCode;
-    final isFr = lang == 'fr';
-    final isEn = lang == 'en';
-
-    String title;
-    String message;
-
+    final String title;
+    final String message;
     if (isGranted) {
-      title = isFr ? 'Accès Autorisé' : isEn ? 'Access Granted' : 'Aksè Otorize';
-      message = daysLeft != null
-          ? (daysLeft <= 5
-              ? (isFr
-                  ? 'Porte déverrouillée. Attention : expiration dans $daysLeft jour(s) !'
-                  : isEn
-                      ? 'Door unlocked. Warning: expires in $daysLeft day(s)!'
-                      : 'Pòt louvri. Atansyon: abònman fini nan $daysLeft jou!')
-              : (isFr
-                  ? 'Porte déverrouillée. Abonnement valide ($daysLeft jours restants).'
-                  : isEn
-                      ? 'Door unlocked. Active subscription ($daysLeft days left).'
-                      : 'Pòt louvri. Abònman valab (rete $daysLeft jou).'))
-          : (isFr ? 'Porte déverrouillée avec succès.' : isEn ? 'Door unlocked successfully.' : 'Pòt la louvri avèk siksè.');
-    } else if (eventType == 'denied_expired') {
-      title = isFr ? 'Accès Refusé — Abonnement Expiré' : isEn ? 'Access Denied — Subscription Expired' : 'Aksè Refize — Abònman Fini';
-      message = isFr ? 'L’abonnement de ce membre est expiré. Porte verrouillée.' : isEn ? 'This member\'s subscription has expired. Door locked.' : 'Abònman manm sa a ekspire. Pòt la rete fèmen.';
-    } else if (eventType == 'denied_no_subscription') {
-      title = isFr ? 'Accès Refusé — Pas d’Abonnement' : isEn ? 'Access Denied — No Subscription' : 'Aksè Refize — Pa Gen Abònman';
-      message = isFr ? 'Aucun abonnement actif pour ce membre aujourd’hui.' : isEn ? 'No active subscription for this member today.' : 'Manm lan pa gen okenn abònman aktif pou jodi a.';
+      title = isEmployee ? '${s.text('scan_granted')} · ${s.text('employee_access')}' : s.text('scan_granted');
+      message = isEmployee
+          ? s.text('employee_welcome')
+          : daysLeft == null
+          ? s.text('door_pulse_sent')
+          : daysLeft <= 0
+          ? s.text('expires_today')
+          : s.text('days_left_n').replaceAll('{n}', '$daysLeft');
     } else if (eventType == 'door_forced' || eventType == 'door_manual_open') {
-      title = isFr ? 'Alerte Sécurité — Porte Ouverte Manuellement' : isEn ? 'Security Alert — Door Opened Manually' : 'Alèt Sekirite — Pòt Louvri Manyèlman';
-      message = row['reason']?.toString() ?? (isFr ? 'Porte ouverte sans empreinte validée.' : 'Pòt la louvri san anprent valide.');
+      title = s.text('door_forced_title');
+      message = row['reason']?.toString() ?? '';
     } else {
-      title = isFr ? 'Accès Refusé' : isEn ? 'Access Denied' : 'Aksè Refize';
-      message = row['reason']?.toString() ?? (isFr ? 'Vérification biométrique échouée.' : 'Verifikasyon pa reyisi.');
+      title = s.text('scan_access_denied');
+      message = s.text(switch (eventType) {
+        'denied_expired' => 'validity_expired',
+        'denied_no_subscription' => 'validity_no_subscription',
+        'denied_pending' => 'validity_pending_payment',
+        'denied_suspended' => 'validity_suspended',
+        _ => 'fingerprint_not_recognized',
+      });
     }
-
     final notif = AccessEventNotification(
       id: row['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
       eventType: eventType,
@@ -188,6 +194,7 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
   void dispose() {
     _dismissTimer?.cancel();
     _subscription?.unsubscribe();
+    _local?.cancel();
     super.dispose();
   }
 

@@ -16,13 +16,16 @@ import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
 import '../../subscriptions/data/subscriptions_repository.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
+import '../../subscriptions/domain/subscription_rules.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/payments_repository.dart';
 import '../data/receipt_pdf.dart';
 import '../data/receipt_service.dart';
 import '../domain/payment.dart';
+import '../domain/currency.dart';
 import 'collect_payment_dialog.dart';
+import 'payment_detail_sheet.dart';
 import 'receipt_sheet.dart';
 
 class PaymentsPage extends ConsumerStatefulWidget {
@@ -37,7 +40,12 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
   late final PlansRepository _plans;
   late final MembersRepository _members;
   String _method = 'all';
+  String _period = 'month';
+  DateTimeRange? _range;
+  final _search = TextEditingController();
   bool _busy = false;
+  late final Stream<Map<String, Member>> _memberMap;
+  late final Stream<Map<String, String>> _staffNames;
 
   @override
   void initState() {
@@ -54,9 +62,55 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
       runtime.database!,
       runtime.session!,
     );
+    _memberMap = _watchMembers().asBroadcastStream();
+    _staffNames = runtime.database!
+        .watchRecords(SyncEntity.staff, limit: 500)
+        .map(
+          (rows) => {
+            for (final row in rows)
+              row.id: (jsonDecode(row.payload) as Map)['full_name'] as String? ?? '',
+          },
+        )
+        .asBroadcastStream();
   }
 
-  Stream<Map<String, Member>> get _memberMap => ref
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// Début/fin (heure locale) de la période choisie.
+  (DateTime?, DateTime?) get _bounds {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return switch (_period) {
+      'today' => (today, today.add(const Duration(days: 1))),
+      'week' => (today.subtract(Duration(days: today.weekday - 1)), today.add(const Duration(days: 1))),
+      'month' => (DateTime(now.year, now.month), DateTime(now.year, now.month + 1)),
+      'year' => (DateTime(now.year), DateTime(now.year + 1)),
+      'custom' when _range != null => (_range!.start, _range!.end.add(const Duration(days: 1))),
+      _ => (null, null),
+    };
+  }
+
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 1),
+      initialDateRange: _range,
+    );
+    if (picked != null) {
+      setState(() {
+        _range = picked;
+        _period = 'custom';
+      });
+    }
+  }
+
+  Stream<Map<String, Member>> _watchMembers() => ref
       .read(appRuntimeProvider)
       .database!
       .watchRecords(SyncEntity.members, limit: 50000)
@@ -81,6 +135,8 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
       title: '${s.text('collect_payment')} · ${member.fullName}',
       due: remaining,
       balance: member.creditBalance,
+      currency: ref.read(appRuntimeProvider).session?.gym?['currency'] as String? ?? 'HTG',
+      rate: gymExchangeRate(ref.read(appRuntimeProvider).session?.settings ?? const {}),
     );
     if (result == null || !mounted) return;
     setState(() => _busy = true);
@@ -112,11 +168,7 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
       ref.read(appRuntimeProvider).sync?.clock.correctedNow ??
       DateTime.now().toUtc();
 
-  /// Re-ouvri resi a pou yon peman nan istorik la (re-telechaje, renvoye).
-  Future<void> _receiptForPayment(Member member, GymPayment payment) async {
-    final s = AppStrings.of(context);
-    final runtime = ref.read(appRuntimeProvider);
-    final gym = runtime.session?.gym ?? const <String, dynamic>{};
+  Future<(GymSubscription?, GymPlan?)> _context(GymPayment payment) async {
     GymSubscription? subscription;
     for (final sub in await _subscriptions.watch(limit: 50000).first) {
       if (sub.id == payment.subscriptionId) subscription = sub;
@@ -125,34 +177,41 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
     for (final p in await _plans.watch().first) {
       if (p.id == subscription?.planId) plan = p;
     }
+    return (subscription, plan);
+  }
+
+  /// Re-ouvri resi a pou yon peman nan istorik la (re-telechaje, renvoye).
+  Future<void> _receiptForPayment(Member member, GymPayment payment, {String? cashier}) async {
+    final gym = ref.read(appRuntimeProvider).session?.gym ?? const <String, dynamic>{};
+    final (subscription, plan) = await _context(payment);
     if (!mounted) return;
     await showReceiptSheet(
       context,
       ref,
-      ReceiptData(
-        paymentId: payment.id,
-        memberName: member.fullName,
-        memberNumber: member.memberNumber,
-        planName: plan?.name ?? s.text('plan'),
-        amount: payment.amount,
-        currency: payment.currency,
-        method: payment.method,
-        paidAt: payment.paidAt,
-        gymName: gym['name'] as String? ?? 'GymDesk',
-        accentColor: gym['accent_color'] as String? ?? '#0F766E',
+      ReceiptData.fromPayment(
+        payment: payment,
+        member: member,
+        gym: gym,
+        planName: plan?.name,
         periodStart: subscription?.startDate,
         periodEnd: subscription?.endDate,
-        receivedAmount: payment.receivedAmount,
-        creditUsed: payment.creditUsed,
-        creditAdded: payment.creditAmount,
-        creditBalance: member.creditBalance,
-        memberEmail: member.email,
-        memberPhone: member.whatsapp ?? member.phone,
-        gymAddress: gym['address'] as String?,
-        gymPhone: gym['phone'] as String?,
-        gymEmail: gym['email'] as String?,
-        reference: payment.reference,
+        cashierName: cashier,
       ),
+    );
+  }
+
+  Future<void> _detail(GymPayment payment, Member? member, String? cashier) async {
+    final (subscription, plan) = await _context(payment);
+    if (!mounted) return;
+    await showPaymentDetail(
+      context,
+      payment: payment,
+      member: member,
+      planName: plan?.name,
+      periodStart: subscription?.startDate,
+      periodEnd: subscription?.endDate,
+      cashierName: cashier,
+      onReceipt: member == null ? null : () => _receiptForPayment(member, payment, cashier: cashier),
     );
   }
 
@@ -210,6 +269,7 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
     final locale = Localizations.localeOf(context).toString();
+    final (from, to) = _bounds;
     return StreamBuilder<Map<String, Member>>(
       stream: _memberMap,
       builder: (context, memberSnapshot) {
@@ -217,36 +277,21 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
         return Column(
           children: [
             Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
               child: Wrap(
                 alignment: WrapAlignment.spaceBetween,
                 spacing: 20,
                 runSpacing: 12,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Text(
-                    s.text('payments'),
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
+                  Text(s.text('payments'), style: Theme.of(context).textTheme.headlineMedium),
                   Wrap(
                     spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      for (final method in [
-                        'all',
-                        'cash',
-                        'moncash',
-                        'natcash',
-                        'bank',
-                        'other',
-                      ])
+                      for (final method in ['all', 'cash', 'moncash', 'natcash', 'bank', 'other'])
                         ChoiceChip(
-                          label: Text(
-                            s.text(
-                              method == 'all'
-                                  ? 'member_filter_all'
-                                  : 'method_$method',
-                            ),
-                          ),
+                          label: Text(s.text(method == 'all' ? 'member_filter_all' : 'method_$method')),
                           selected: _method == method,
                           onSelected: (_) => setState(() => _method = method),
                         ),
@@ -255,163 +300,215 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final period in ['today', 'week', 'month', 'year', 'all'])
+                    ChoiceChip(
+                      label: Text(s.text('period_$period')),
+                      selected: _period == period,
+                      onSelected: (_) => setState(() => _period = period),
+                    ),
+                  ActionChip(
+                    avatar: const Icon(LucideIcons.calendarRange, size: 16),
+                    label: Text(
+                      _period == 'custom' && _range != null
+                          ? '${DateFormat.yMd(locale).format(_range!.start)} → ${DateFormat.yMd(locale).format(_range!.end)}'
+                          : s.text('period_custom'),
+                    ),
+                    onPressed: _pickRange,
+                  ),
+                  SizedBox(
+                    width: 320,
+                    child: TextField(
+                      controller: _search,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        prefixIcon: const Icon(LucideIcons.search, size: 18),
+                        hintText: s.text('search_payments'),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             if (_busy) const LinearProgressIndicator(),
             Expanded(
-              child: StreamBuilder<List<GymSubscription>>(
-                stream: _subscriptions.watch(status: 'pending', limit: 5000),
-                builder: (context, subscriptionSnapshot) {
-                  return StreamBuilder<List<GymPlan>>(
-                    stream: _plans.watch(),
-                    builder: (context, planSnapshot) {
-                      final plans = {
-                        for (final plan
-                            in planSnapshot.data ?? const <GymPlan>[])
-                          plan.id: plan,
-                      };
-                      return StreamBuilder<List<GymPayment>>(
-                        stream: _payments.watch(method: _method, limit: 5000),
-                        builder: (context, paymentSnapshot) {
-                          if (subscriptionSnapshot.hasError ||
-                              paymentSnapshot.hasError ||
-                              memberSnapshot.hasError) {
-                            return SingleChildScrollView(
-                              padding: const EdgeInsets.all(24),
-                              child: MessagePanel(
-                                message: s.text('local_storage'),
-                              ),
-                            );
-                          }
-                          if (!subscriptionSnapshot.hasData ||
-                              !paymentSnapshot.hasData) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 24),
-                              child: LoadingPanel(),
-                            );
-                          }
-                          final pending = subscriptionSnapshot.data!;
-                          final payments = paymentSnapshot.data!;
-                          final total = payments.fold<double>(
-                            0,
-                            (sum, payment) => sum + payment.amount,
-                          );
-                          if (pending.isEmpty && payments.isEmpty) {
-                            return SingleChildScrollView(
-                              padding: const EdgeInsets.all(24),
-                              child: MessagePanel(
-                                message: s.text('payments_empty'),
-                              ),
-                            );
-                          }
-                          return ListView(
-                            padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                            children: [
-                              Card(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(20),
-                                  child: Text(
-                                    '${s.text('payments_total')}: ${total.toStringAsFixed(2)} ${ref.read(appRuntimeProvider).session?.gym?['currency'] as String? ?? 'USD'}',
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleLarge,
-                                  ),
-                                ),
-                              ),
-                              if (pending.isNotEmpty) ...[
-                                const SizedBox(height: 20),
-                                Text(
-                                  s.text('pending_subscriptions'),
-                                  style: Theme.of(context).textTheme.titleLarge,
-                                ),
-                                const SizedBox(height: 8),
-                                Card(
-                                  child: Column(
-                                    children: [
-                                      for (final subscription in pending)
-                                        Builder(
-                                          builder: (context) {
-                                            final member =
-                                                members[subscription.memberId];
-                                            final plan =
-                                                subscription.planId == null
-                                                ? null
-                                                : plans[subscription.planId];
-                                            return ListTile(
-                                              title: Text(
-                                                member?.fullName ??
-                                                    subscription.memberId,
-                                              ),
-                                              subtitle: Text(
-                                                '${plan?.name ?? s.text('plan')} · ${subscription.price.toStringAsFixed(2)} · ${DateFormat.yMd(locale).format(subscription.endDate)}',
-                                              ),
-                                              trailing: member == null
-                                                  ? null
-                                                  : TextButton(
-                                                      onPressed: _busy
-                                                          ? null
-                                                          : () => _collect(
-                                                              member,
-                                                              subscription,
-                                                            ),
-                                                      child: Text(
-                                                        s.text(
-                                                          'collect_payment',
-                                                        ),
-                                                      ),
-                                                    ),
-                                            );
-                                          },
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 20),
-                              Text(
-                                s.text('payment_history'),
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 8),
-                              Card(
-                                child: Column(
-                                  children: [
-                                    for (final payment in payments)
-                                      Builder(
-                                        builder: (context) {
-                                          final member =
-                                              members[payment.memberId];
-                                          return ListTile(
-                                            leading: const Icon(
-                                              LucideIcons.banknote,
+              child: StreamBuilder<Map<String, String>>(
+                stream: _staffNames,
+                builder: (context, staffSnapshot) {
+                  final staff = staffSnapshot.data ?? const <String, String>{};
+                  return StreamBuilder<List<GymSubscription>>(
+                    stream: _subscriptions.watch(status: 'pending', limit: 5000),
+                    builder: (context, subscriptionSnapshot) {
+                      return StreamBuilder<List<GymPlan>>(
+                        stream: _plans.watch(),
+                        builder: (context, planSnapshot) {
+                          final plans = {
+                            for (final plan in planSnapshot.data ?? const <GymPlan>[]) plan.id: plan,
+                          };
+                          return StreamBuilder<List<GymPayment>>(
+                            stream: _payments.watch(method: _method, limit: 50000, from: from, to: to),
+                            builder: (context, paymentSnapshot) {
+                              if (subscriptionSnapshot.hasError || paymentSnapshot.hasError || memberSnapshot.hasError) {
+                                return SingleChildScrollView(
+                                  padding: const EdgeInsets.all(24),
+                                  child: MessagePanel(message: s.text('local_storage')),
+                                );
+                              }
+                              if (!subscriptionSnapshot.hasData || !paymentSnapshot.hasData) {
+                                return const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 24),
+                                  child: LoadingPanel(),
+                                );
+                              }
+                              final query = _search.text.trim().toLowerCase();
+                              bool matches(Member? m) =>
+                                  query.isEmpty ||
+                                  (m != null &&
+                                      '${m.fullName} ${m.memberNumber} ${m.phone ?? ''} ${m.whatsapp ?? ''}'
+                                          .toLowerCase()
+                                          .contains(query));
+                              final pending = subscriptionSnapshot.data!.where((sub) => matches(members[sub.memberId])).toList();
+                              final payments = paymentSnapshot.data!.where((p) => matches(members[p.memberId])).toList();
+                              final billed = <String, double>{};
+                              for (final p in payments) {
+                                billed[p.currency] = (billed[p.currency] ?? 0) + p.amount;
+                              }
+                              final collected = collectedByCurrency(payments.map((p) => p.row));
+                              final byDay = <String, List<GymPayment>>{};
+                              for (final p in payments) {
+                                byDay.putIfAbsent(ymd(p.paidAt.toLocal()), () => []).add(p);
+                              }
+                              return ListView(
+                                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                                children: [
+                                  Card(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: Wrap(
+                                        spacing: 32,
+                                        runSpacing: 12,
+                                        children: [
+                                          _Stat(
+                                            label: '${s.text('payments_total')} · ${payments.length} ${s.text('payments_count')}',
+                                            value: billed.isEmpty
+                                                ? '0'
+                                                : billed.entries.map((e) => money(e.value, e.key)).join('  +  '),
+                                          ),
+                                          for (final entry in collected.entries)
+                                            _Stat(
+                                              label: '${s.text('collected_by_currency')} (${entry.key})',
+                                              value: money(entry.value, entry.key),
+                                              highlight: true,
                                             ),
-                                            title: Text(
-                                              '${payment.amount.toStringAsFixed(2)} ${payment.currency} · ${member?.fullName ?? payment.memberId}',
-                                            ),
-                                            subtitle: Text(
-                                              '${s.text('method_${payment.method}')} · ${DateFormat.yMMMd(locale).add_Hm().format(payment.paidAt.toLocal())}${payment.reference == null ? '' : ' · ${payment.reference}'}',
-                                            ),
-                                            trailing: member == null
-                                                ? null
-                                                : IconButton(
-                                                    tooltip: s.text(
-                                                      'view_receipt',
-                                                    ),
-                                                    icon: const Icon(
-                                                      LucideIcons.receipt,
-                                                      size: 18,
-                                                    ),
-                                                    onPressed: () =>
-                                                        _receiptForPayment(
-                                                          member,
-                                                          payment,
-                                                        ),
-                                                  ),
-                                          );
-                                        },
+                                        ],
                                       ),
+                                    ),
+                                  ),
+                                  if (pending.isNotEmpty) ...[
+                                    const SizedBox(height: 20),
+                                    Text(s.text('pending_subscriptions'), style: Theme.of(context).textTheme.titleLarge),
+                                    const SizedBox(height: 8),
+                                    Card(
+                                      child: Column(
+                                        children: [
+                                          for (final subscription in pending)
+                                            Builder(
+                                              builder: (context) {
+                                                final member = members[subscription.memberId];
+                                                final plan = subscription.planId == null ? null : plans[subscription.planId];
+                                                return ListTile(
+                                                  title: Text(member?.fullName ?? subscription.memberId),
+                                                  subtitle: Text(
+                                                    '${plan?.name ?? s.text('plan')} · ${subscription.price.toStringAsFixed(2)} · ${DateFormat.yMd(locale).format(subscription.endDate)}',
+                                                  ),
+                                                  trailing: member == null
+                                                      ? null
+                                                      : TextButton(
+                                                          onPressed: _busy ? null : () => _collect(member, subscription),
+                                                          child: Text(s.text('collect_payment')),
+                                                        ),
+                                                );
+                                              },
+                                            ),
+                                        ],
+                                      ),
+                                    ),
                                   ],
-                                ),
-                              ),
-                            ],
+                                  const SizedBox(height: 20),
+                                  Text(s.text('payment_history'), style: Theme.of(context).textTheme.titleLarge),
+                                  if (payments.isEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: MessagePanel(message: s.text('payments_empty')),
+                                    ),
+                                  for (final day in byDay.entries) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.fromLTRB(4, 16, 4, 6),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              DateFormat.yMMMMEEEEd(locale == 'ht' ? 'fr' : locale)
+                                                  .format(DateTime.parse(day.key)),
+                                              style: Theme.of(context).textTheme.titleSmall,
+                                            ),
+                                          ),
+                                          Text(
+                                            collectedByCurrency(day.value.map((p) => p.row))
+                                                .entries
+                                                .map((e) => money(e.value, e.key))
+                                                .join(' · '),
+                                            style: Theme.of(context).textTheme.titleSmall,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Card(
+                                      child: Column(
+                                        children: [
+                                          for (final payment in day.value)
+                                            Builder(
+                                              builder: (context) {
+                                                final member = members[payment.memberId];
+                                                final cashier = payment.receivedBy == null ? null : staff[payment.receivedBy];
+                                                final foreign = payment.paidCurrency != payment.currency;
+                                                return ListTile(
+                                                  onTap: () => _detail(payment, member, cashier),
+                                                  leading: const Icon(LucideIcons.banknote),
+                                                  title: Text(
+                                                    '${member?.fullName ?? payment.memberId} · ${money(payment.amount, payment.currency)}'
+                                                    '${foreign ? '  (${money(payment.paidAmount, payment.paidCurrency)})' : ''}',
+                                                  ),
+                                                  subtitle: Text(
+                                                    '${s.text('method_${payment.method}')} · ${DateFormat.Hm(locale).format(payment.paidAt.toLocal())}'
+                                                    '${cashier == null || cashier.isEmpty ? '' : ' · $cashier'}'
+                                                    '${payment.reference == null ? '' : ' · ${payment.reference}'}',
+                                                  ),
+                                                  trailing: member == null
+                                                      ? const Icon(LucideIcons.chevronRight, size: 18)
+                                                      : IconButton(
+                                                          tooltip: s.text('view_receipt'),
+                                                          icon: const Icon(LucideIcons.receipt, size: 18),
+                                                          onPressed: () => _receiptForPayment(member, payment, cashier: cashier),
+                                                        ),
+                                                );
+                                              },
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              );
+                            },
                           );
                         },
                       );
@@ -425,4 +522,28 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
       },
     );
   }
+}
+
+class _Stat extends StatelessWidget {
+  const _Stat({required this.label, required this.value, this.highlight = false});
+  final String label;
+  final String value;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(label, style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 4),
+      Text(
+        value,
+        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          fontWeight: FontWeight.w800,
+          color: highlight ? Theme.of(context).colorScheme.primary : null,
+        ),
+      ),
+    ],
+  );
 }

@@ -115,7 +115,7 @@ class WhatsAppService {
     DateTime? endDate,
   }) {
     final endStr = endDate != null
-        ? DateFormat('dd/MM/yyyy').format(endDate.toLocal())
+        ? DateFormat('dd/MM/yyyy').format(endDate)
         : 'Aktif';
 
     return '''
@@ -150,7 +150,7 @@ Mèsi dèske w fè nou konfyans ! Antrenman an kòmanse kounye a ! 💪🔥
     required DateTime endDate,
     int? daysRemaining,
   }) {
-    final endStr = DateFormat('dd/MM/yyyy').format(endDate.toLocal());
+    final endStr = DateFormat('dd/MM/yyyy').format(endDate);
     final statusNotice = (daysRemaining != null && daysRemaining <= 0)
         ? '⚠️ *Abònman ou a ekspire jodi a !*'
         : '⏳ *Abònman ou an ap fini nan ${daysRemaining ?? 3} jou ($endStr) !*';

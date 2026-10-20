@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/access_control/access_monitor.dart';
 import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
@@ -39,16 +40,16 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   TerminalAccessConfig _cfg = const TerminalAccessConfig();
 
   StreamSubscription<BiometricEvent>? _biometricSub;
-  StreamSubscription<Map<String, dynamic>>? _terminalSub;
+  StreamSubscription<AccessDecision>? _terminalSub;
   RealtimeChannel? _realtimeSub;
   Timer? _dismissTimer;
 
   bool _processing = false;
   bool _terminalOnline = false;
-  bool _agentOnline = true;
   AccessStatus _status = AccessStatus.none;
   Member? _matchedMember;
   String? _matchedName;
+  bool _matchedIsEmployee = false;
   int? _daysLeft;
 
   final _searchController = TextEditingController();
@@ -73,8 +74,13 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     try {
       _cfg = await TerminalAccessService.loadConfig(runtime.client, runtime.session!);
       if (!kIsWeb) {
-        _terminalOnline = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
-        _terminalSub = _agent.terminalEvents().listen(_onTerminalEvent);
+        // Siveyan global la (AccessMonitor) trete evènman W2 yo; paj la jis afiche yo.
+        final monitor = AccessMonitor.instance;
+        unawaited(monitor.start(runtime));
+        _terminalOnline = monitor.terminalOnline.value;
+        monitor.terminalOnline.addListener(_onMonitorStatus);
+        monitor.agentOnline.addListener(_onMonitorStatus);
+        _terminalSub = monitor.decisions.listen(_onTerminalDecision);
       }
 
       final gymId = runtime.session?.gymId;
@@ -93,6 +99,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
               ),
               callback: (payload) {
                 final row = payload.newRecord;
+                if (AccessMonitor.instance.active && row['source'] == 'terminal') return;
                 _handleRealtimeAccessEvent(row);
               },
             )
@@ -102,57 +109,39 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _onTerminalEvent(Map<String, dynamic> event) async {
-    final type = event['type'];
-    if (type == 'agent_status') {
-      final online = event['online'] == true;
-      final term = event['terminal_watch'] == true;
-      if (online != _agentOnline || term != _terminalOnline) {
-        if (mounted) {
-          setState(() {
-            _agentOnline = online;
-            _terminalOnline = term;
-          });
-        }
-      }
-      return;
-    }
-    if (type == 'terminal_watch') {
-      if (mounted) setState(() => _terminalOnline = event['online'] == true);
-      return;
-    }
+  void _onMonitorStatus() {
+    if (!mounted) return;
+    setState(() {
+      _terminalOnline = AccessMonitor.instance.terminalOnline.value;
+    });
+  }
 
-    final decision = await _terminalService.handleTerminalEvent(event, _cfg);
-    if (decision == null || !mounted) return;
-
-    final member = decision.person?.entry?.member;
-    if (member != null) {
-      await _evaluateMemberAccess(member, recordToCloud: false);
-    } else if (decision.outcome == AccessOutcome.legacy) {
-      if (mounted) {
-        setState(() {
-          _status = AccessStatus.granted;
-          _matchedMember = null;
-          _matchedName = decision.uid != null && decision.uid!.isNotEmpty && decision.uid != '-'
-              ? 'Manm BioStar #${decision.uid}'
-              : 'Itilizatè BioStar (Ansyen)';
-          _daysLeft = null;
-          _processing = false;
-        });
-        _scheduleDismiss(const Duration(seconds: 5));
-      }
-    } else if (decision.outcome == AccessOutcome.unrecognized) {
-      if (mounted) {
-        setState(() {
-          _status = AccessStatus.deniedUnrecognized;
-          _matchedMember = null;
-          _matchedName = null;
-          _daysLeft = null;
-          _processing = false;
-        });
-        _scheduleDismiss(const Duration(seconds: 4));
-      }
-    }
+  /// Desizyon tèminal la deja pran (pòt ouvri, evènman pibliye, prezans
+  /// anrejistre) pa AccessMonitor: isit la nou jis montre l.
+  void _onTerminalDecision(AccessDecision decision) {
+    if (!mounted) return;
+    final person = decision.person;
+    final granted = TerminalAccessService.isGrantedDecision(decision);
+    setState(() {
+      _processing = false;
+      _matchedMember = person?.entry?.member;
+      _matchedIsEmployee = person?.isEmployee == true;
+      _matchedName = person?.name ??
+          (decision.outcome == AccessOutcome.legacy
+              ? (decision.uid != null && decision.uid!.isNotEmpty && decision.uid != '-'
+                  ? 'BioStar #${decision.uid}'
+                  : 'BioStar')
+              : null);
+      _daysLeft = person?.isEmployee == true ? null : person?.daysLeft;
+      _status = granted
+          ? AccessStatus.granted
+          : decision.outcome == AccessOutcome.unrecognized || person == null
+          ? AccessStatus.deniedUnrecognized
+          : person.reason == 'expired'
+          ? AccessStatus.deniedExpired
+          : AccessStatus.deniedNoSubscription;
+    });
+    _scheduleDismiss(Duration(seconds: granted ? 6 : 6));
   }
 
   Future<void> _handleRealtimeAccessEvent(Map<String, dynamic> row) async {
@@ -172,11 +161,12 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
     if (!mounted) return;
 
-    final name = snapshot['name']?.toString() ?? member?.fullName ?? 'Manm';
+    final name = snapshot['name']?.toString() ?? member?.fullName ?? '';
     final days = (snapshot['days_left'] as num?)?.toInt();
 
     setState(() {
       _matchedMember = member;
+      _matchedIsEmployee = snapshot['is_employee'] == true;
       _matchedName = name;
       _daysLeft = days;
       _processing = false;
@@ -456,6 +446,8 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   void dispose() {
     _biometricSub?.cancel();
     _terminalSub?.cancel();
+    AccessMonitor.instance.terminalOnline.removeListener(_onMonitorStatus);
+    AccessMonitor.instance.agentOnline.removeListener(_onMonitorStatus);
     _realtimeSub?.unsubscribe();
     _dismissTimer?.cancel();
     _biometricService.dispose();
@@ -872,9 +864,13 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
     if (isGranted) {
       title = s.text('access_granted');
-      subtitle = _daysLeft != null
-          ? (isFr ? 'Abonnement valide · Reste $_daysLeft jour(s)' : 'Abònman valab · Rete $_daysLeft jou')
-          : (isFr ? 'Porte ouverte. Bon entraînement !' : 'Pòt louvri. Bon antrenman !');
+      subtitle = _matchedIsEmployee
+          ? '${s.text('employee_access')} · ${s.text('employee_welcome')}'
+          : _daysLeft == null
+          ? s.text('door_pulse_sent')
+          : _daysLeft! <= 0
+          ? s.text('expires_today')
+          : s.text('days_left_n').replaceAll('{n}', '$_daysLeft');
     } else if (_status == AccessStatus.deniedExpired) {
       title = s.text('access_denied');
       subtitle = s.text('subscription_expired');
@@ -932,7 +928,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
               if (_daysLeft != null) ...[
                 const SizedBox(height: 4),
                 Text(
-                  isFr ? '$_daysLeft jour(s) restant(s)' : 'Rete $_daysLeft jou',
+                  s.text('days_left_n').replaceAll('{n}', '$_daysLeft'),
                   style: TextStyle(
                     color: _daysLeft! <= 5 ? Colors.amberAccent : const Color(0xFF34D399),
                     fontSize: 14,

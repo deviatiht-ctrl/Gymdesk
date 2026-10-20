@@ -86,9 +86,9 @@ const stringsCoreV3 = <String, List<String>>{
   'emergency_contact_name': ['Moun pou Kontakte si Gen Ijans', 'Contact d’Urgence (Nom)', 'Emergency Contact Name'],
   'emergency_contact_phone': ['Telefòn Kontak Ijans', 'Téléphone Contact d’Urgence', 'Emergency Contact Phone'],
   'fill_required_fields': [
-    'Tanpri ranpli tout chan obligatwa yo (Prenon, Non, Imèl, WhatsApp, NIF/CIN).',
-    'Veuillez remplir tous les champs obligatoires (Prénom, Nom, Email, WhatsApp, NIF/CIN).',
-    'Please fill in all required fields (First name, Last name, Email, WhatsApp, NIF/CIN).',
+    'Tanpri ranpli chan obligatwa yo (Prenon, Non, Telefòn/WhatsApp). Imèl la opsyonèl.',
+    'Veuillez remplir les champs obligatoires (Prénom, Nom, Téléphone/WhatsApp). L’email est facultatif.',
+    'Please fill in the required fields (First name, Last name, Phone/WhatsApp). Email is optional.',
   ],
   'select_plan_required': [
     'Tanpri chwazi yon fòmil abònman.',

@@ -32,7 +32,10 @@ import '../features/onboarding/presentation/language_selection_page.dart';
 import '../features/onboarding/presentation/onboarding_page.dart';
 import '../features/onboarding/presentation/splash_page.dart';
 import '../features/payments/presentation/payments_page.dart';
+import '../features/payments/presentation/receipts_page.dart';
 import '../features/plans/presentation/plans_page.dart';
+import '../features/portal/presentation/portal_join_page.dart';
+import '../features/portal/presentation/portal_requests_page.dart';
 import '../features/reports/presentation/reports_page.dart';
 import '../features/settings/data/settings_repository.dart';
 import '../features/settings/presentation/branding_page.dart';
@@ -53,6 +56,7 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
   refreshListenable: runtime,
   redirect: (context, state) {
     final path = state.uri.path;
+    if (path.startsWith('/join/')) return null;
     final gate = switch (runtime.phase) {
       SessionPhase.starting => '/startup',
       SessionPhase.signedOut => runtime.onboardingDone
@@ -112,11 +116,11 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
             path.startsWith('/cash') ||
             path.startsWith('/members') ||
             path.startsWith('/plans') ||
-            path.startsWith('/payments'))) {
+            path.startsWith('/payments') ||
+            path.startsWith('/receipts'))) {
       return '/gyms';
     }
-    if (path == '/reports' &&
-        !{'owner', 'supervisor'}.contains(runtime.session?.role)) {
+    if (path == '/reports' && !(runtime.session?.canViewReports ?? false)) {
       return '/';
     }
     if (path.startsWith('/campaigns') &&
@@ -124,8 +128,24 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
             !{'owner', 'supervisor'}.contains(runtime.session?.role))) {
       return '/';
     }
-    if (path.startsWith('/cash') && platform) {
-      return '/gyms';
+    if (path.startsWith('/cash') &&
+        (platform || !(runtime.session?.canCashier ?? false))) {
+      return platform ? '/gyms' : '/';
+    }
+    if (path.startsWith('/plans') &&
+        (platform || !(runtime.session?.canManagePlans ?? false))) {
+      return '/';
+    }
+    if (path.startsWith('/payments') &&
+        (platform || !(runtime.session?.canViewPayments ?? false))) {
+      return '/';
+    }
+    if (path.startsWith('/receipts') &&
+        (platform || !(runtime.session?.canViewReceipts ?? false))) {
+      return '/';
+    }
+    if (path == '/members/new' && !(runtime.session?.canAddMembers ?? false)) {
+      return '/members';
     }
     if (path.startsWith('/settings/branding') &&
         (platform || runtime.session?.role != 'owner')) {
@@ -220,12 +240,19 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
       builder: (context, state) => _AccessPage(runtime: runtime),
     ),
     GoRoute(
+      path: '/join/:code',
+      builder: (context, state) => PortalJoinPage(
+        gymCode: state.pathParameters['code']!,
+      ),
+    ),
+    GoRoute(
       path: '/gyms/new',
       builder: (context, state) => const CreateGymPage(),
     ),
     ShellRoute(
       builder: (context, state, child) => AccessPopupOverlay(
         runtime: runtime,
+        location: state.uri.path,
         child: _AppShell(runtime: runtime, location: state.uri.path, child: child),
       ),
       routes: [
@@ -239,7 +266,22 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         ),
         GoRoute(
           path: '/members/new',
-          builder: (context, state) => const EnrollmentWizardPage(),
+          builder: (context, state) {
+            final extra = state.extra as Map<String, dynamic>?;
+            final qp = state.uri.queryParameters;
+            return EnrollmentWizardPage(
+              initialFirstName: extra?['firstName'] as String? ?? qp['firstName'],
+              initialLastName: extra?['lastName'] as String? ?? qp['lastName'],
+              initialPhone: extra?['phone'] as String? ?? qp['phone'],
+              initialEmail: extra?['email'] as String? ?? qp['email'],
+              initialPlanId: extra?['planId'] as String? ?? qp['planId'],
+              portalRequestId: extra?['portalRequestId'] as String? ?? qp['portalRequestId'],
+            );
+          },
+        ),
+        GoRoute(
+          path: '/portal-requests',
+          builder: (context, state) => const PortalRequestsPage(),
         ),
         GoRoute(
           path: '/members/:id',
@@ -260,6 +302,10 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
         GoRoute(
           path: '/payments',
           builder: (context, state) => const PaymentsPage(),
+        ),
+        GoRoute(
+          path: '/receipts',
+          builder: (context, state) => const ReceiptsPage(),
         ),
         GoRoute(
           path: '/campaigns',
@@ -392,102 +438,76 @@ class _AppShell extends StatelessWidget {
   final AppRuntime runtime;
   final String location;
   final Widget child;
-  List<String> get _paths => runtime.session?.isPlatformAdmin == true
-      ? ['/gyms', '/admin/offers', '/admin/declarations', '/admin/email', '/settings']
-      : {'owner', 'supervisor'}.contains(runtime.session?.role)
-      ? [
-          '/',
-          '/members',
-          '/door_access',
-          '/campaigns',
-          '/cash',
-          '/plans',
-          '/payments',
-          '/reports',
-          '/sync',
-          '/settings',
-        ]
-      : [
-          '/',
-          '/members',
-          '/door_access',
-          '/cash',
-          '/plans',
-          '/payments',
-          '/sync',
-          '/settings',
-        ];
-  List<String> get _narrowPaths => runtime.session?.isPlatformAdmin == true
-      ? _paths
-      : ['/', '/members', '/door_access', '/cash', '/settings'];
-  List<String> get _narrowKeys => runtime.session?.isPlatformAdmin == true
-      ? _keys
-      : ['home', 'members', 'door_access', 'cash', 'settings'];
-  List<IconData> get _narrowIcons => runtime.session?.isPlatformAdmin == true
-      ? _icons
-      : [
-          LucideIcons.house,
-          LucideIcons.users,
-          LucideIcons.fingerprint,
-          LucideIcons.wallet,
-          LucideIcons.settings,
-        ];
-  List<String> get _keys => runtime.session?.isPlatformAdmin == true
-      ? ['gyms', 'offers', 'declarations', 'email_admin', 'settings']
-      : {'owner', 'supervisor'}.contains(runtime.session?.role)
-      ? [
-          'home',
-          'members',
-          'door_access',
-          'campaigns',
-          'cash',
-          'plans',
-          'payments',
-          'reports',
-          'sync',
-          'settings',
-        ]
-      : [
-          'home',
-          'members',
-          'door_access',
-          'cash',
-          'plans',
-          'payments',
-          'sync',
-          'settings',
-        ];
-  List<IconData> get _icons => runtime.session?.isPlatformAdmin == true
-      ? [
-          LucideIcons.building2,
-          LucideIcons.tag,
-          LucideIcons.clipboardCheck,
-          LucideIcons.mail,
-          LucideIcons.settings,
-        ]
-      : {'owner', 'supervisor'}.contains(runtime.session?.role)
-      ? [
-          LucideIcons.house,
-          LucideIcons.users,
-          LucideIcons.fingerprint,
-          LucideIcons.mail,
-          LucideIcons.wallet,
-          LucideIcons.badgeDollarSign,
-          LucideIcons.banknote,
-          LucideIcons.chartColumn,
-          LucideIcons.refreshCw,
-          LucideIcons.settings,
-        ]
-      : [
-          LucideIcons.house,
-          LucideIcons.users,
-          LucideIcons.fingerprint,
-          LucideIcons.wallet,
-          LucideIcons.badgeDollarSign,
-          LucideIcons.banknote,
-          LucideIcons.refreshCw,
-          LucideIcons.settings,
-        ];
+  List<_NavItem> get _navItems {
+    final session = runtime.session;
+    if (session?.isPlatformAdmin == true) {
+      return const [
+        _NavItem('/gyms', 'gyms', LucideIcons.building2),
+        _NavItem('/admin/offers', 'offers', LucideIcons.tag),
+        _NavItem('/admin/declarations', 'declarations', LucideIcons.clipboardCheck),
+        _NavItem('/admin/email', 'email_admin', LucideIcons.mail),
+        _NavItem('/settings', 'settings', LucideIcons.settings),
+      ];
+    }
+    final items = <_NavItem>[
+      const _NavItem('/', 'home', LucideIcons.house),
+    ];
+    if (session?.canAddMembers ?? true) {
+      items.add(const _NavItem('/members', 'members', LucideIcons.users));
+      items.add(const _NavItem('/portal-requests', 'portal_requests', LucideIcons.globe));
+    }
+    if (session?.canAccessControl ?? true) {
+      items.add(const _NavItem('/door_access', 'door_access', LucideIcons.fingerprint));
+    }
+    if (session?.isOwner == true || session?.isSupervisor == true) {
+      items.add(const _NavItem('/campaigns', 'campaigns', LucideIcons.mail));
+    }
+    if (session?.canCashier ?? true) {
+      items.add(const _NavItem('/cash', 'cash', LucideIcons.wallet));
+    }
+    if (session?.canManagePlans ?? true) {
+      items.add(const _NavItem('/plans', 'plans', LucideIcons.badgeDollarSign));
+    }
+    if (session?.canViewPayments ?? true) {
+      items.add(const _NavItem('/payments', 'payments', LucideIcons.banknote));
+    }
+    if (session?.canViewReceipts ?? true) {
+      items.add(const _NavItem('/receipts', 'receipts', LucideIcons.receipt));
+    }
+    if (session?.canViewReports ?? false) {
+      items.add(const _NavItem('/reports', 'reports', LucideIcons.chartColumn));
+    }
+    items.add(const _NavItem('/sync', 'sync', LucideIcons.refreshCw));
+    items.add(const _NavItem('/settings', 'settings', LucideIcons.settings));
+    return items;
+  }
+
+  List<_NavItem> get _narrowNavItems {
+    if (runtime.session?.isPlatformAdmin == true) return _navItems;
+    final session = runtime.session;
+    final items = <_NavItem>[
+      const _NavItem('/', 'home', LucideIcons.house),
+    ];
+    if (session?.canAddMembers ?? true) {
+      items.add(const _NavItem('/members', 'members', LucideIcons.users));
+    }
+    if (session?.canAccessControl ?? true) {
+      items.add(const _NavItem('/door_access', 'door_access', LucideIcons.fingerprint));
+    }
+    if (session?.canCashier ?? true) {
+      items.add(const _NavItem('/cash', 'cash', LucideIcons.wallet));
+    }
+    items.add(const _NavItem('/settings', 'settings', LucideIcons.settings));
+    return items;
+  }
+
+  List<String> get _paths => _navItems.map((e) => e.path).toList();
+  List<String> get _keys => _navItems.map((e) => e.key).toList();
+  List<IconData> get _icons => _navItems.map((e) => e.icon).toList();
+
+  List<String> get _narrowPaths => _narrowNavItems.map((e) => e.path).toList();
+  List<String> get _narrowKeys => _narrowNavItems.map((e) => e.key).toList();
+  List<IconData> get _narrowIcons => _narrowNavItems.map((e) => e.icon).toList();
 
   @override
   Widget build(BuildContext context) {
@@ -734,4 +754,11 @@ class _GymLogoState extends State<_GymLogo> {
           height: 34,
           fit: BoxFit.contain,
         );
+}
+
+class _NavItem {
+  const _NavItem(this.path, this.key, this.icon);
+  final String path;
+  final String key;
+  final IconData icon;
 }

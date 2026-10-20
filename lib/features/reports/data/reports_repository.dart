@@ -1,11 +1,13 @@
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/db/local_database.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../attendance/domain/attendance_entry.dart';
 import '../../members/domain/member.dart';
+import '../../payments/domain/currency.dart';
 import '../../payments/domain/payment.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
@@ -106,6 +108,52 @@ class ReportsRepository {
     final v = dateOnly(value);
     return v.isBefore(start) || v.isAfter(end);
   }
+
+  Future<String> sendDailyReportEmail({
+    required DateTime date,
+    required ReportSnapshot report,
+    required SupabaseClient client,
+  }) async {
+    final dateStr = '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+    final newMembersCount = report.members.values.where((m) {
+      final created = m.row['created_at'] != null ? DateTime.tryParse(m.row['created_at'].toString()) : null;
+      if (created == null) return false;
+      final cDate = dateOnly(gymDate(created, session.timezone));
+      return cDate == dateOnly(date);
+    }).length;
+
+    final payload = <String, dynamic>{
+      'report_date': dateStr,
+      'total_usd': report.collected['USD'] ?? 0.0,
+      'total_htg': report.collected['HTG'] ?? 0.0,
+      'total_registration_fees': report.totalRegistrationFees,
+      'total_subscriptions': report.totalPlanFees,
+      'payments_count': report.payments.length,
+      'checkins_count': report.granted,
+      'new_members_count': newMembersCount,
+    };
+
+    try {
+      final res = await client.rpc('enqueue_daily_report', params: {
+        'p_report_date': dateStr,
+        'p_payload': payload,
+      });
+      return res?.toString() ?? 'queued';
+    } on PostgrestException catch (e) {
+      if (e.code == '42501') throw const ReportsFailure('access_denied');
+      throw ReportsFailure(e.message);
+    } catch (e) {
+      throw ReportsFailure(e.toString());
+    }
+  }
+}
+
+class ReportsFailure implements Exception {
+  const ReportsFailure(this.code);
+  final String code;
+  @override
+  String toString() => code;
 }
 
 class ReportSnapshot {
@@ -132,6 +180,34 @@ class ReportSnapshot {
 
   double get revenue =>
       payments.fold<double>(0, (total, payment) => total + payment.amount);
+
+  /// Billets réellement encaissés par devise (USD / HTG).
+  Map<String, double> get collected => collectedByCurrency(payments.map((p) => p.row));
+
+  /// Total des frais d'inscription encaissés.
+  double get totalRegistrationFees =>
+      payments.fold<double>(0, (total, payment) => total + payment.registrationFee);
+
+  /// Total des abonnements / cotisations réguliers encaissés.
+  double get totalPlanFees =>
+      payments.fold<double>(0, (total, payment) => total + payment.planFee);
+
+  /// Frais d'inscription ventilés par devise.
+  Map<String, double> get registrationCollected =>
+      collectedByCurrency(payments.map((p) => {
+        ...p.row,
+        'amount': p.registrationFee,
+        'received_amount': p.registrationFee,
+      }));
+
+  /// Abonnements / cotisations ventilés par devise.
+  Map<String, double> get planFeesCollected =>
+      collectedByCurrency(payments.map((p) => {
+        ...p.row,
+        'amount': p.planFee,
+        'received_amount': p.planFee,
+      }));
+
   int get granted =>
       attendance.where((entry) => entry.result == 'granted').length;
   int get denied => attendance.length - granted;

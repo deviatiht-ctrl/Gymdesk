@@ -5,6 +5,10 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import '../../../core/sync/sync_models.dart';
+import '../../members/domain/member.dart';
+import '../domain/payment.dart';
+
 /// Tout done resi a — konplete anvan yo jenere PDF la.
 class ReceiptData {
   const ReceiptData({
@@ -32,7 +36,91 @@ class ReceiptData {
     this.logoBytes,
     this.qrPromoBytes,
     this.reference,
+    this.paidCurrency,
+    this.exchangeRate,
+    this.paidAmount,
+    this.tenderedAmount,
+    this.cashierName,
   });
+
+  /// Reçu reconstruit depuis un paiement enregistré (historique, page Reçus).
+  factory ReceiptData.fromPayment({
+    required GymPayment payment,
+    required Member member,
+    required Json gym,
+    String? planName,
+    DateTime? periodStart,
+    DateTime? periodEnd,
+    String? cashierName,
+  }) => ReceiptData(
+    paymentId: payment.id,
+    memberName: member.fullName,
+    memberNumber: member.memberNumber,
+    planName: planName ?? 'Abonnement',
+    amount: payment.amount,
+    currency: payment.currency,
+    method: payment.method,
+    paidAt: payment.paidAt,
+    gymName: gym['name'] as String? ?? 'SecurGYM',
+    accentColor: gym['accent_color'] as String? ?? '#0F766E',
+    periodStart: periodStart,
+    periodEnd: periodEnd,
+    receivedAmount: payment.receivedAmount,
+    creditUsed: payment.creditUsed,
+    creditAdded: payment.creditAmount,
+    creditBalance: member.creditBalance,
+    memberEmail: member.email,
+    memberPhone: member.whatsapp ?? member.phone,
+    gymAddress: gym['address'] as String?,
+    gymPhone: gym['phone'] as String?,
+    gymEmail: gym['email'] as String?,
+    reference: payment.reference,
+    paidCurrency: payment.paidCurrency,
+    exchangeRate: payment.exchangeRate,
+    paidAmount: payment.paidAmount,
+    tenderedAmount: payment.tenderedAmount,
+    cashierName: cashierName,
+  );
+
+  /// Devise réellement donnée (null = même devise que [currency]).
+  final String? paidCurrency;
+  final double? exchangeRate;
+  final double? paidAmount;
+  final double? tenderedAmount;
+  final String? cashierName;
+  bool get foreignPayment => paidCurrency != null && paidCurrency != currency;
+
+  ReceiptData withLogo(Uint8List? logo) => ReceiptData(
+    paymentId: paymentId,
+    memberName: memberName,
+    memberNumber: memberNumber,
+    planName: planName,
+    amount: amount,
+    currency: currency,
+    method: method,
+    paidAt: paidAt,
+    gymName: gymName,
+    accentColor: accentColor,
+    periodStart: periodStart,
+    periodEnd: periodEnd,
+    receivedAmount: receivedAmount,
+    creditUsed: creditUsed,
+    creditAdded: creditAdded,
+    creditBalance: creditBalance,
+    memberEmail: memberEmail,
+    memberPhone: memberPhone,
+    gymAddress: gymAddress,
+    gymPhone: gymPhone,
+    gymEmail: gymEmail,
+    logoBytes: logo,
+    qrPromoBytes: qrPromoBytes,
+    reference: reference,
+    paidCurrency: paidCurrency,
+    exchangeRate: exchangeRate,
+    paidAmount: paidAmount,
+    tenderedAmount: tenderedAmount,
+    cashierName: cashierName,
+  );
 
   final String paymentId;
   final String memberName;
@@ -76,6 +164,9 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, Map<String, String> labels) 
   final day = DateFormat('dd/MM/yyyy');
   final dateTime = DateFormat('dd/MM/yyyy HH:mm');
   String m(double v) => '${money.format(v)} ${data.currency}';
+  String pm(double v) => '${money.format(v)} ${data.paidCurrency}';
+  final paidKept = data.paidAmount ?? 0;
+  final tendered = data.tenderedAmount ?? paidKept;
   String l(String key) => labels[key] ?? key;
 
   Uint8List? promoQr = data.qrPromoBytes;
@@ -231,16 +322,27 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, Map<String, String> labels) 
           _line(l('date'), dateTime.format(data.paidAt.toLocal())),
           if (data.reference != null && data.reference!.isNotEmpty)
             _line(l('receipt_reference'), data.reference!),
+          if (data.cashierName != null && data.cashierName!.isNotEmpty)
+            _line(l('received_by'), data.cashierName!),
           pw.SizedBox(height: 6),
           pw.Divider(color: PdfColors.grey300),
           pw.SizedBox(height: 6),
           _line(l('receipt_amount'), m(data.amount), bold: true),
           if (data.creditUsed > 0)
             _line(l('receipt_paid_by_balance'), '- ${m(data.creditUsed)}'),
-          _line(l('receipt_received'), m(data.received)),
+          if (data.foreignPayment)
+            _line(
+              l('receipt_paid_in'),
+              '${pm(paidKept)}${data.exchangeRate == null ? '' : '  (1 USD = ${money.format(data.exchangeRate)} HTG)'}',
+              bold: true,
+              accent: accent,
+            ),
+          _line(l('receipt_received'), data.foreignPayment ? pm(tendered) : m(data.received)),
           if (data.creditAdded > 0)
             _line(l('receipt_credited'), m(data.creditAdded), accent: accent),
-          if (data.changeReturned > 0)
+          if (data.foreignPayment && data.creditAdded <= 0 && tendered - paidKept > 0.004)
+            _line(l('receipt_change'), pm(tendered - paidKept))
+          else if (!data.foreignPayment && data.changeReturned > 0)
             _line(l('receipt_change'), m(data.changeReturned)),
           if (data.creditAdded > 0 || data.creditBalance > 0)
             _line(l('receipt_balance'), m(data.creditBalance)),

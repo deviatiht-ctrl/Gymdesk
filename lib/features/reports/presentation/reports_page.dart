@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
+import '../../payments/domain/currency.dart';
 import '../data/report_pdf.dart';
 import '../data/reports_repository.dart';
 
@@ -45,6 +46,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         labels: {
           'payments': s.text('payments'),
           'revenue': s.text('revenue'),
+          'collected': s.text('collected_by_currency'),
           'entries': s.text('entries_today'),
           'denied': s.text('denied_today'),
           'date': s.text('date'),
@@ -52,6 +54,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
           'amount': s.text('amount'),
           'method': s.text('payment_method'),
           'staff': s.text('staff'),
+          'reason': s.text('payment_reason'),
           'attendance': s.text('attendance'),
           'result': s.text('result'),
           'entry': s.text('entry_number'),
@@ -90,6 +93,39 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(s.text('report_export_failed'))));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _sendEmailReport(ReportSnapshot report) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final s = AppStrings.of(context);
+    try {
+      final runtime = ref.read(appRuntimeProvider);
+      await _repository.sendDailyReportEmail(
+        date: _start,
+        report: report,
+        client: runtime.client,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xff1f6f4a),
+            content: Text(s.text('report_sent_email')),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red.shade700,
+            content: Text('${s.text('report_send_error')}: $e'),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -188,6 +224,11 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                           Wrap(
                             spacing: 8,
                             children: [
+                              FilledButton.icon(
+                                onPressed: _busy ? null : () => _sendEmailReport(report),
+                                icon: const Icon(LucideIcons.mail, size: 16),
+                                label: Text(s.text('send_report_email')),
+                              ),
                               OutlinedButton.icon(
                                 onPressed: _busy ? null : () => _export(report),
                                 icon: const Icon(LucideIcons.fileDown),
@@ -245,6 +286,23 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         AppStrings.of(context).text('revenue'),
         report.revenue.toStringAsFixed(2),
       ),
+      for (final entry in report.registrationCollected.entries)
+        if (entry.value > 0)
+          _line(
+            '${AppStrings.of(context).text('total_registration_fees')} (${entry.key})',
+            money(entry.value, entry.key),
+          ),
+      for (final entry in report.planFeesCollected.entries)
+        if (entry.value > 0)
+          _line(
+            '${AppStrings.of(context).text('total_subscriptions')} (${entry.key})',
+            money(entry.value, entry.key),
+          ),
+      for (final entry in report.collected.entries)
+        _line(
+          '${AppStrings.of(context).text('collected_by_currency')} (${entry.key})',
+          money(entry.value, entry.key),
+        ),
       _line(AppStrings.of(context).text('entries_today'), '${report.granted}'),
       _line(AppStrings.of(context).text('denied_today'), '${report.denied}'),
       const SizedBox(height: 20),
@@ -277,12 +335,37 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
             for (final payment in report.payments)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text(report.memberName(payment.memberId)),
+                title: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        report.memberName(payment.memberId),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: payment.registrationFee > 0 ? const Color(0xFFEFF6FF) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        payment.paymentReason,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: payment.registrationFee > 0 ? const Color(0xFF1D4ED8) : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 subtitle: Text(
-                  '${DateFormat.yMd(locale).add_Hm().format(payment.paidAt.toLocal())} · ${AppStrings.of(context).text('method_${payment.method}')} · ${report.staffName(payment.receivedBy)}',
+                  '${DateFormat.yMd(locale).add_Hm().format(payment.paidAt.toLocal())} · ${AppStrings.of(context).text('method_${payment.method}')} · ${report.staffName(payment.receivedBy)}${payment.registrationFee > 0 ? ' · ${AppStrings.of(context).text('registration_fee')} : ${payment.registrationFee.toStringAsFixed(0)} ${payment.currency}' : ''}',
                 ),
                 trailing: Text(
                   '${payment.amount.toStringAsFixed(2)} ${payment.currency}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
           ],
@@ -358,8 +441,14 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       [
         'date',
         'member',
+        'reason',
         'amount',
+        'registration_fee',
+        'plan_fee',
         'currency',
+        'paid_currency',
+        'paid_amount',
+        'exchange_rate',
         'method',
         'staff',
       ].map((v) => cell(v)).join(','),
@@ -367,8 +456,14 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         (payment) => [
           payment.paidAt.toIso8601String(),
           report.memberName(payment.memberId),
+          payment.paymentReason,
           payment.amount.toStringAsFixed(2),
+          payment.registrationFee.toStringAsFixed(2),
+          payment.planFee.toStringAsFixed(2),
           payment.currency,
+          payment.paidCurrency,
+          payment.paidAmount.toStringAsFixed(2),
+          payment.exchangeRate?.toStringAsFixed(4) ?? '',
           payment.method,
           report.staffName(payment.receivedBy),
         ].map(cell).join(','),

@@ -53,34 +53,7 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
     final logo = await service.logoBytes(
       runtime.session!.gym?['logo_url'] as String?,
     );
-    final pdf = await buildReceiptPdf(
-      ReceiptData(
-        paymentId: widget.data.paymentId,
-        memberName: widget.data.memberName,
-        memberNumber: widget.data.memberNumber,
-        planName: widget.data.planName,
-        amount: widget.data.amount,
-        currency: widget.data.currency,
-        method: widget.data.method,
-        paidAt: widget.data.paidAt,
-        gymName: widget.data.gymName,
-        accentColor: widget.data.accentColor,
-        periodStart: widget.data.periodStart,
-        periodEnd: widget.data.periodEnd,
-        receivedAmount: widget.data.receivedAmount,
-        creditUsed: widget.data.creditUsed,
-        creditAdded: widget.data.creditAdded,
-        creditBalance: widget.data.creditBalance,
-        memberEmail: widget.data.memberEmail,
-        memberPhone: widget.data.memberPhone,
-        gymAddress: widget.data.gymAddress,
-        gymPhone: widget.data.gymPhone,
-        gymEmail: widget.data.gymEmail,
-        logoBytes: logo,
-        reference: widget.data.reference,
-      ),
-      _labels,
-    );
+    final pdf = await buildReceiptPdf(widget.data.withLogo(logo), _labels);
     if (mounted) setState(() => _pdf = pdf);
     // Resi a voye OTOMATIK pa email lè manm nan gen yon adrès —
     // pa bezwen klike anyen. RPC la idempotent: pa gen doublon.
@@ -102,6 +75,8 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
       'receipt_credited': s.text('receipt_credited'),
       'receipt_paid_by_balance': s.text('receipt_paid_by_balance'),
       'receipt_change': s.text('receipt_change'),
+      'receipt_paid_in': s.text('receipt_paid_in'),
+      'received_by': s.text('received_by'),
       'receipt_balance': s.text('receipt_balance'),
       'receipt_reference': s.text('receipt_reference'),
       'receipt_signature': s.text('receipt_signature'),
@@ -147,7 +122,7 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
       final service = ReceiptService(runtime.client, runtime.session!.gymId!);
       final path = await _upload();
       if (path == null) throw const FormatException('offline');
-      final result = await service.enqueueEmail(widget.data.paymentId, path);
+      final result = await service.enqueueEmailWithRetry(widget.data.paymentId, path);
       if (!mounted) return;
       setState(
         () => _status = switch (result) {
@@ -180,10 +155,23 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
       final path = await _upload();
       if (path == null) throw const FormatException('offline');
       final url = await service.signedUrl(path);
-      final message = '${widget.data.gymName} — '
-          '${s.text('receipt')} #${widget.data.receiptNo} · '
-          '${widget.data.amount.toStringAsFixed(2)} ${widget.data.currency}\n'
-          '$url';
+      final d = widget.data;
+      final day = DateFormat('dd/MM/yyyy');
+      final message = [
+        '*${d.gymName}*',
+        '${s.text('receipt')} *#${d.receiptNo}* - ${s.text('receipt_paid')}',
+        '',
+        '${d.memberName} (${d.memberNumber})',
+        '${s.text('receipt_plan')}: *${d.planName}*',
+        if (d.periodStart != null && d.periodEnd != null)
+          '${s.text('receipt_period')}: ${day.format(d.periodStart!)} -> ${day.format(d.periodEnd!)}',
+        '${s.text('receipt_amount')}: *${d.amount.toStringAsFixed(2)} ${d.currency}*',
+        if (d.foreignPayment && d.paidAmount != null)
+          '${s.text('receipt_paid_in')}: ${d.paidAmount!.toStringAsFixed(2)} ${d.paidCurrency}',
+        '',
+        '${s.text('receipt_download')} (PDF):',
+        url,
+      ].join('\n');
       final ok = await launchUrl(
         Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(message)}'),
         mode: LaunchMode.externalApplication,

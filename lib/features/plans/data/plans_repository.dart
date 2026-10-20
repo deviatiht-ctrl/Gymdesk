@@ -59,6 +59,7 @@ class PlansRepository {
       'duration_days': draft.durationDays,
       'price': draft.price,
       'enrollment_price': draft.enrollmentPrice,
+      'registration_fee': draft.registrationFee,
       'currency': draft.currency,
       'description': draft.description.trim().isEmpty
           ? null
@@ -91,6 +92,9 @@ class PlansRepository {
         draft.durationDays < 1 ||
         draft.durationDays > 3650 ||
         !draft.price.isFinite ||
+        !draft.registrationFee.isFinite ||
+        draft.registrationFee < 0 ||
+        draft.registrationFee > 999999999 ||
         (draft.enrollmentPrice != null &&
             (!draft.enrollmentPrice!.isFinite ||
                 draft.enrollmentPrice! < 0 ||

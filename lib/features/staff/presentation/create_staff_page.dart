@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
@@ -28,10 +29,52 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
   late final StaffDraftStore _store;
   Json? _draft;
   String _role = 'reception';
+  String _jobTitle = 'caissier';
+  bool _permMembersAdd = true;
+  bool _permCashier = true;
+  bool _permPaymentsView = true;
+  bool _permReceiptsView = true;
+  bool _permReportsView = false;
+  bool _permPlansManage = false;
+  bool _permAccessControl = true;
   bool _loading = true;
   bool _busy = false;
   bool _loadFailed = false;
   String? _error;
+
+  void _applyJobPreset(String job) {
+    setState(() {
+      _jobTitle = job;
+      if (job == 'caissier') {
+        _role = 'reception';
+        _permMembersAdd = true;
+        _permCashier = true;
+        _permPaymentsView = true;
+        _permReceiptsView = true;
+        _permReportsView = false;
+        _permPlansManage = false;
+        _permAccessControl = true;
+      } else if (job == 'secretaire') {
+        _role = 'reception';
+        _permMembersAdd = true;
+        _permCashier = false;
+        _permPaymentsView = false;
+        _permReceiptsView = true;
+        _permReportsView = false;
+        _permPlansManage = false;
+        _permAccessControl = true;
+      } else if (job == 'superviseur') {
+        _role = 'supervisor';
+        _permMembersAdd = true;
+        _permCashier = true;
+        _permPaymentsView = true;
+        _permReceiptsView = true;
+        _permReportsView = true;
+        _permPlansManage = true;
+        _permAccessControl = true;
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -61,6 +104,19 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
         _fields['full_name']!.text = saved['full_name'] as String? ?? '';
         _fields['email']!.text = saved['email'] as String? ?? '';
         _fields['phone']!.text = saved['phone'] as String? ?? '';
+        if (saved['permissions'] is Map) {
+          final p = Map<String, dynamic>.from(saved['permissions'] as Map);
+          _jobTitle = p['job_title'] as String? ?? (_role == 'supervisor' ? 'superviseur' : 'caissier');
+          _permMembersAdd = p['can_add_members'] as bool? ?? true;
+          _permCashier = p['can_cashier'] as bool? ?? true;
+          _permPaymentsView = p['can_view_payments'] as bool? ?? true;
+          _permReceiptsView = p['can_view_receipts'] as bool? ?? true;
+          _permReportsView = p['can_view_reports'] as bool? ?? false;
+          _permPlansManage = p['can_manage_plans'] as bool? ?? false;
+          _permAccessControl = p['can_access_control'] as bool? ?? true;
+        } else {
+          _applyJobPreset(_role == 'supervisor' ? 'superviseur' : 'caissier');
+        }
       }
     } catch (_) {
       if (mounted) {
@@ -119,6 +175,16 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
       _error = null;
     });
     final draft = _draft;
+    final permissions = <String, dynamic>{
+      'job_title': _jobTitle,
+      'can_add_members': _permMembersAdd,
+      'can_cashier': _permCashier,
+      'can_view_payments': _permPaymentsView,
+      'can_view_receipts': _permReceiptsView,
+      'can_view_reports': _permReportsView,
+      'can_manage_plans': _permPlansManage,
+      'can_access_control': _permAccessControl,
+    };
     final command = CreateStaffCommand(
       requestId: draft?['request_id'] as String? ?? const Uuid().v4(),
       staffId: draft?['staff_id'] as String? ?? const Uuid().v4(),
@@ -127,6 +193,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
       phone: _fields['phone']!.text.trim(),
       role: _role,
       password: _fields['password']!.text,
+      permissions: permissions,
     );
     try {
       await _store.save(command);
@@ -234,23 +301,103 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                               ),
                             ),
                           DropdownButtonFormField<String>(
-                            initialValue: _role,
+                            value: _jobTitle,
                             decoration: InputDecoration(
-                              labelText: s.text('staff_role'),
+                              labelText: s.text('staff_position'),
+                              prefixIcon: const Icon(LucideIcons.briefcase),
                             ),
                             items: [
                               DropdownMenuItem(
-                                value: 'reception',
-                                child: Text(s.text('reception')),
+                                value: 'caissier',
+                                child: Text(s.text('job_title_cashier')),
                               ),
                               DropdownMenuItem(
-                                value: 'supervisor',
-                                child: Text(s.text('supervisor')),
+                                value: 'secretaire',
+                                child: Text(s.text('job_title_secretary')),
+                              ),
+                              DropdownMenuItem(
+                                value: 'superviseur',
+                                child: Text(s.text('job_title_supervisor')),
+                              ),
+                              DropdownMenuItem(
+                                value: 'personnalise',
+                                child: Text(s.text('job_title_custom')),
                               ),
                             ],
                             onChanged: _busy || _draft != null
                                 ? null
-                                : (value) => setState(() => _role = value!),
+                                : (val) {
+                                    if (val != null) _applyJobPreset(val);
+                                  },
+                          ),
+                          const SizedBox(height: 16),
+                          Card(
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: Colors.grey.shade300),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(LucideIcons.shieldCheck, color: Color(0xFF0F766E), size: 20),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        s.text('staff_permissions'),
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F766E)),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_members_add')),
+                                    value: _permMembersAdd,
+                                    onChanged: _busy ? null : (v) => setState(() => _permMembersAdd = v ?? true),
+                                  ),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_cashier')),
+                                    value: _permCashier,
+                                    onChanged: _busy ? null : (v) => setState(() => _permCashier = v ?? true),
+                                  ),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_payments_view')),
+                                    value: _permPaymentsView,
+                                    onChanged: _busy ? null : (v) => setState(() => _permPaymentsView = v ?? true),
+                                  ),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_receipts_view')),
+                                    value: _permReceiptsView,
+                                    onChanged: _busy ? null : (v) => setState(() => _permReceiptsView = v ?? true),
+                                  ),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_reports_view')),
+                                    value: _permReportsView,
+                                    onChanged: _busy ? null : (v) => setState(() => _permReportsView = v ?? true),
+                                  ),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_plans_manage')),
+                                    value: _permPlansManage,
+                                    onChanged: _busy ? null : (v) => setState(() => _permPlansManage = v ?? true),
+                                  ),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_access_control')),
+                                    value: _permAccessControl,
+                                    onChanged: _busy ? null : (v) => setState(() => _permAccessControl = v ?? true),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                           if (_error != null)
                             MessagePanel(message: s.text(_error!)),

@@ -12,6 +12,7 @@ import '../core/db/local_database.dart';
 import '../core/sync/sync_engine.dart';
 import '../core/sync/sync_models.dart';
 import '../core/sync/sync_remote.dart';
+import '../features/staff/domain/staff_profile.dart';
 
 enum SessionPhase {
   starting,
@@ -347,6 +348,29 @@ class AppRuntime extends ChangeNotifier {
       activity();
     } on PinFailure catch (e) {
       errorCode = e.code;
+    } catch (_) {
+      errorCode = 'pin_storage';
+    } finally {
+      busy = false;
+      _notify();
+    }
+  }
+
+  Future<void> unlockWithStaff(StaffProfile staff) async {
+    final current = session;
+    if (busy || phase != SessionPhase.locked || current == null) return;
+    busy = true;
+    errorCode = null;
+    _notify();
+    try {
+      final staffRow = staff.toJson();
+      session = StaffSession(
+        staff: staffRow,
+        gym: current.gym,
+        verifiedAt: DateTime.now().toUtc(),
+      );
+      phase = SessionPhase.ready;
+      activity();
     } catch (_) {
       errorCode = 'pin_storage';
     } finally {

@@ -34,8 +34,12 @@ export function createStaffHandler(gateway: StaffGateway, origins: ReadonlySet<s
     if (!['manager','reception'].includes(role) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError('invalid_record');
     const password = input.password;
     if (typeof password !== 'string' || password.length < 12 || password.length > 128) throw new ApiError('weak_password');
+    const payload: Json = { email, full_name: fullName, phone, role };
+    if (input.permissions && typeof input.permissions === 'object') {
+      payload.permissions = input.permissions as Json;
+    }
     const record = object(await gateway.rpc('staff_provision_begin', {
-      p_request: request, p_actor: actor, p_staff: staff, p_payload: { email, full_name: fullName, phone, role },
+      p_request: request, p_actor: actor, p_staff: staff, p_payload: payload,
     }));
     let user = record.user_id ?? await gateway.rpc('staff_provision_auth_user', { p_request: request, p_actor: actor });
     if (!user) {

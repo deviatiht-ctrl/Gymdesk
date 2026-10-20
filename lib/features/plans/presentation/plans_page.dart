@@ -38,6 +38,11 @@ class _PlansPageState extends ConsumerState<PlansPage> {
       'price': TextEditingController(
         text: plan == null ? '' : plan.price.toStringAsFixed(2),
       ),
+      'registration_fee': TextEditingController(
+        text: plan != null && plan.registrationFee > 0
+            ? plan.registrationFee.toStringAsFixed(2)
+            : '',
+      ),
       'enrollment_price': TextEditingController(
         text: plan?.enrollmentPrice?.toStringAsFixed(2) ?? '',
       ),
@@ -91,6 +96,25 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                         final amount = double.tryParse(
                           (v ?? '').replaceAll(',', '.'),
                         );
+                        return amount == null || !amount.isFinite || amount < 0
+                            ? s.text('invalid_record')
+                            : null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: fields['registration_fee'],
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: s.text('registration_fee'),
+                        helperText: s.text('registration_fee_hint'),
+                        prefixIcon: const Icon(LucideIcons.ticket, size: 18),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return null;
+                        final amount = double.tryParse(v.replaceAll(',', '.'));
                         return amount == null || !amount.isFinite || amount < 0
                             ? s.text('invalid_record')
                             : null;
@@ -175,6 +199,9 @@ class _PlansPageState extends ConsumerState<PlansPage> {
           enrollmentPrice: double.tryParse(
             fields['enrollment_price']!.text.replaceAll(',', '.'),
           ),
+          registrationFee: double.tryParse(
+            fields['registration_fee']!.text.replaceAll(',', '.'),
+          ) ?? 0.0,
           currency:
               ref.read(appRuntimeProvider).session?.gym?['currency']
                   as String? ??
@@ -310,7 +337,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                     contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     title: Text(plan.name),
                     subtitle: Text(
-                      '${s.text('duration_days')}: ${plan.durationDays} · ${plan.price.toStringAsFixed(2)} ${plan.currency}${plan.description == null ? '' : '\n${plan.description}'}',
+                      '${s.text('duration_days')}: ${plan.durationDays} · ${plan.price.toStringAsFixed(2)} ${plan.currency}${plan.registrationFee > 0 ? ' · +${plan.registrationFee.toStringAsFixed(2)} ${plan.currency} (${s.text('registration_fee').toLowerCase()})' : ''}${plan.description == null ? '' : '\n${plan.description}'}',
                     ),
                     trailing: Wrap(
                       spacing: 8,
