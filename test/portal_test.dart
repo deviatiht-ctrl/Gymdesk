@@ -64,5 +64,26 @@ void main() {
       expect(req.status, 'pending');
       expect(req.kind, 'new_membership');
     });
+
+    test('parses renewal request correctly', () {
+      final json = {
+        'id': 'req-renew-1',
+        'gym_id': 'gym-456',
+        'plan_id': 'plan-789',
+        'first_name': 'Carlos',
+        'last_name': 'Dupont',
+        'phone': '36000000',
+        'kind': 'renewal',
+        'status': 'pending',
+        'created_at': '2026-10-20T12:00:00Z',
+        'updated_at': '2026-10-20T12:00:00Z',
+      };
+
+      final req = PortalRequest.fromJson(json);
+
+      expect(req.id, 'req-renew-1');
+      expect(req.kind, 'renewal');
+      expect(req.fullName, 'Carlos Dupont');
+    });
   });
 }

@@ -108,5 +108,19 @@ const stringsV5 = <String, List<String>>{
   'portal_success_title': ['Demann ou an rive avèk siksè !', 'Demande reçue avec succès !', 'Request received successfully!'],
   'portal_success_message': ['Pase nan resepsyon an pou w peye fòmil ou a epi mete anprent ou.', 'Présentez-vous à la réception pour régler votre formule et enregistrer votre empreinte.', 'Visit the front desk to pay for your plan and enroll your fingerprint.'],
   'validate_and_enroll': ['Valide & Enkese', 'Valider & Encaisser', 'Validate & Collect'],
+  // Kalite demann & Renouvèlman an liy (Demande utilisateur)
+  'request_kind_new': ['Nouvo enskripsyon', 'Nouvelle adhésion', 'New membership'],
+  'request_kind_renewal': ['Renouvèlman abònman', 'Renouvellement d’abonnement', 'Subscription renewal'],
+  'request_type': ['Kalite demann', 'Type de demande', 'Request type'],
+  'all_kinds': ['Tout kalite', 'Tous les types', 'All types'],
+  'qr_code_join': ['Kòd QR pou afiche', 'Code QR à afficher', 'QR Code to display'],
+  'qr_modal_title': ['Kòd QR Enskripsyon & Renouvèlman', 'Code QR Inscription & Renouvellement', 'Registration & Renewal QR Code'],
+  'qr_modal_subtitle': ['Moun ka skane kòd sa a ak telefòn yo pou yo ale sou sit securgym.com la.', 'Scannez ce QR Code avec un smartphone pour accéder directement au portail sécurisé securgym.com.', 'Scan this QR Code with a smartphone to access the securgym.com portal.'],
+  'copy_join_link': ['Kopye lyen enskripsyon', 'Copier le lien d’inscription', 'Copy registration link'],
+  'copy_renewal_link': ['Kopye lyen renouvèlman', 'Copier le lien de renouvellement', 'Copy renewal link'],
+  'identify_member_fingerprint': ['Idantifye pa anprent (USB)', 'Identifier par empreinte (USB)', 'Identify by fingerprint (USB)'],
+  'member_matched': ['Manm jwenn nan baz la !', 'Membre identifié dans la base !', 'Member matched in database!'],
+  'member_not_found_prompt': ['Manm nan pa jwenn otomatikman. Chèche pa non oswa telefòn.', 'Membre introuvable automatiquement. Recherchez par nom ou téléphone.', 'Member not found automatically. Search by name or phone.'],
+  'collect_renewal': ['Enkese Renouvèlman', 'Encaisser le renouvellement', 'Collect Renewal'],
+  'portal_renewal_success': ['Demann renouvèlman ou an voye ! Prezante nan sal la epi poze dwèt ou sou lektè a pou w konfime peman an.', 'Demande de renouvellement transmise ! Présentez-vous à la salle et posez votre doigt sur le lecteur pour valider votre renouvellement.', 'Renewal request sent! Present yourself at the gym and scan your finger on the reader to validate your renewal.'],
 };
-

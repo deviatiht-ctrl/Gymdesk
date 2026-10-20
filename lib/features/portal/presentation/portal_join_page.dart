@@ -7,9 +7,10 @@ import '../../../l10n/app_strings.dart';
 import '../data/portal_repository.dart';
 
 class PortalJoinPage extends ConsumerStatefulWidget {
-  const PortalJoinPage({super.key, required this.gymCode});
+  const PortalJoinPage({super.key, required this.gymCode, this.initialKind});
 
   final String gymCode;
+  final String? initialKind;
 
   @override
   ConsumerState<PortalJoinPage> createState() => _PortalJoinPageState();
@@ -27,6 +28,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   Map<String, dynamic>? _gym;
   List<Map<String, dynamic>> _plans = [];
 
+  String _kind = 'new_membership'; // 'new_membership' or 'renewal'
   String? _selectedPlanId;
   bool _isSubmitting = false;
   String? _formError;
@@ -37,6 +39,9 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialKind == 'renewal') {
+      _kind = 'renewal';
+    }
     final runtime = ref.read(appRuntimeProvider);
     _portalRepo = PortalRepository(runtime.client);
     _loadGymData();
@@ -108,6 +113,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         lastName: ln,
         phone: phone,
         email: email,
+        kind: _kind,
         notes: notes,
       );
 
@@ -224,7 +230,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         ),
         const SizedBox(height: 20),
         Text(
-          s.text('portal_success_title'),
+          _kind == 'renewal' ? 'Demande de renouvellement reçue !' : s.text('portal_success_title'),
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
           textAlign: TextAlign.center,
         ),
@@ -257,7 +263,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      s.text('portal_success_message'),
+                      _kind == 'renewal' ? s.text('portal_renewal_success') : s.text('portal_success_message'),
                       style: const TextStyle(fontSize: 13, color: Color(0xFF134E4A), height: 1.3),
                     ),
                   ],
@@ -320,7 +326,49 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
             ],
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
+        Center(
+          child: SegmentedButton<String>(
+            segments: [
+              ButtonSegment(
+                value: 'new_membership',
+                label: Text(s.text('request_kind_new')),
+                icon: const Icon(LucideIcons.userPlus, size: 16),
+              ),
+              ButtonSegment(
+                value: 'renewal',
+                label: Text(s.text('request_kind_renewal')),
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+              ),
+            ],
+            selected: {_kind},
+            onSelectionChanged: (set) => setState(() => _kind = set.first),
+          ),
+        ),
+        const SizedBox(height: 16),
+        if (_kind == 'renewal') ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+            ),
+            child: const Row(
+              children: [
+                Icon(LucideIcons.info, color: Color(0xFF2563EB), size: 20),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "Renouvellement : Aucun frais d'inscription. Choisissez votre formule, puis présentez-vous à l'accueil pour poser votre doigt sur le lecteur et régler.",
+                    style: TextStyle(fontSize: 13, color: Color(0xFF1E40AF)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
 
         if (_formError != null) ...[
           Container(
@@ -410,7 +458,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                           color: isSelected ? const Color(0xFF115E59) : Colors.grey.shade600,
                         ),
                       ),
-                      if (regFee > 0)
+                      if (_kind == 'new_membership' && regFee > 0)
                         Text(
                           '+ ${regFee.toStringAsFixed(0)} $currency inscription',
                           style: const TextStyle(fontSize: 11, color: Color(0xFF047857), fontWeight: FontWeight.w600),
@@ -500,7 +548,11 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                 : const Icon(LucideIcons.send, size: 18),
             label: Text(
-              _isSubmitting ? 'Envoi en cours...' : s.text('portal_submit_button'),
+              _isSubmitting
+                  ? 'Envoi en cours...'
+                  : (_kind == 'renewal'
+                      ? 'Envoyer ma demande de renouvellement'
+                      : s.text('portal_submit_button')),
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
             ),
           ),

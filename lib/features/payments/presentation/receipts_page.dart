@@ -30,6 +30,38 @@ class ReceiptsPage extends ConsumerStatefulWidget {
 
 class _ReceiptsPageState extends ConsumerState<ReceiptsPage> {
   final _search = TextEditingController();
+  String _period = 'month';
+  DateTimeRange? _range;
+
+  (DateTime?, DateTime?) get _bounds {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return switch (_period) {
+      'today' => (today, today.add(const Duration(days: 1))),
+      'week' => (today.subtract(Duration(days: today.weekday - 1)), today.add(const Duration(days: 1))),
+      'month' => (DateTime(now.year, now.month), DateTime(now.year, now.month + 1)),
+      'year' => (DateTime(now.year), DateTime(now.year + 1)),
+      'custom' when _range != null => (_range!.start, _range!.end.add(const Duration(days: 1))),
+      _ => (null, null),
+    };
+  }
+
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 5),
+      lastDate: DateTime(now.year + 1),
+      initialDateRange: _range ?? DateTimeRange(start: now.subtract(const Duration(days: 7)), end: now),
+    );
+    if (picked != null) {
+      setState(() {
+        _period = 'custom';
+        _range = picked;
+      });
+    }
+  }
+
   late final Stream<List<GymPayment>> _payments;
   late final Stream<Map<String, Json>> _members;
   late final Stream<Map<String, Json>> _subscriptions;
@@ -93,7 +125,12 @@ class _ReceiptsPageState extends ConsumerState<ReceiptsPage> {
                 final staff = staffSnap.data ?? const <String, Json>{};
                 final query = _search.text.trim().toLowerCase();
                 final digits = query.replaceAll(RegExp(r'\D'), '');
+                final bounds = _bounds;
+                final start = bounds.$1;
+                final end = bounds.$2;
                 final list = paySnap.data!.where((p) {
+                  if (start != null && p.paidAt.toLocal().isBefore(start)) return false;
+                  if (end != null && !p.paidAt.toLocal().isBefore(end)) return false;
                   if (query.isEmpty) return true;
                   final row = members[p.memberId];
                   if (row == null) return false;
@@ -116,12 +153,52 @@ class _ReceiptsPageState extends ConsumerState<ReceiptsPage> {
                           const SizedBox(height: 16),
                           TextField(
                             controller: _search,
-                            autofocus: true,
+                            autofocus: false,
                             decoration: InputDecoration(
                               prefixIcon: const Icon(LucideIcons.search),
                               hintText: s.text('search_payments'),
                             ),
                             onChanged: (_) => setState(() {}),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              ChoiceChip(
+                                label: Text(s.text('period_today')),
+                                selected: _period == 'today',
+                                onSelected: (_) => setState(() => _period = 'today'),
+                              ),
+                              ChoiceChip(
+                                label: Text(s.text('period_week')),
+                                selected: _period == 'week',
+                                onSelected: (_) => setState(() => _period = 'week'),
+                              ),
+                              ChoiceChip(
+                                label: Text(s.text('period_month')),
+                                selected: _period == 'month',
+                                onSelected: (_) => setState(() => _period = 'month'),
+                              ),
+                              ChoiceChip(
+                                label: Text(s.text('period_year')),
+                                selected: _period == 'year',
+                                onSelected: (_) => setState(() => _period = 'year'),
+                              ),
+                              ChoiceChip(
+                                label: Text(s.text('period_all')),
+                                selected: _period == 'all',
+                                onSelected: (_) => setState(() => _period = 'all'),
+                              ),
+                              ActionChip(
+                                avatar: const Icon(LucideIcons.calendarDays, size: 16),
+                                label: Text(_period == 'custom' && _range != null
+                                    ? ' - '
+                                    : s.text('period_custom')),
+                                onPressed: _pickRange,
+                              ),
+                            ],
                           ),
                         ],
                       ),

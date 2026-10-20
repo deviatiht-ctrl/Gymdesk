@@ -243,6 +243,7 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
       path: '/join/:code',
       builder: (context, state) => PortalJoinPage(
         gymCode: state.pathParameters['code']!,
+        initialKind: state.uri.queryParameters['kind'],
       ),
     ),
     GoRoute(
