@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -42,6 +43,12 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   String? _lastSubmittedRequestId;
   bool _hasRestoredDraft = false;
   late final String _sessionCode;
+  Timer? _doorScanTimer;
+  Map<String, dynamic>? _identifiedMember;
+  String? _memberId;
+  final _searchPhoneController = TextEditingController();
+  bool _searchingMember = false;
+  String? _searchError;
 
   late final PortalRepository _portalRepo;
 
@@ -71,6 +78,9 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
 
     _loadDraft();
     _loadGymData();
+    if (_kind == 'renewal') {
+      _startDoorScanPolling();
+    }
   }
 
   void _onFieldChanged() {
@@ -223,6 +233,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         email: email,
         kind: _kind,
         notes: notes,
+        memberId: _memberId,
       );
 
       // Si soumèt avèk siksè, nou vide bouyon an pou pwochen moun
@@ -247,8 +258,71 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
     }
   }
 
+
+  void _startDoorScanPolling() {
+    _doorScanTimer?.cancel();
+    _doorScanTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!mounted || _kind != 'renewal' || _identifiedMember != null) return;
+      final scan = await _portalRepo.getLatestDoorScan(_cleanGymCode);
+      if (scan['found'] == true && mounted) {
+        _onMemberIdentified(scan);
+      }
+    });
+  }
+
+  void _onMemberIdentified(Map<String, dynamic> data) {
+    setState(() {
+      _identifiedMember = data;
+      _memberId = data['member_id']?.toString();
+      _firstNameController.text = data['first_name']?.toString() ?? _firstNameController.text;
+      _lastNameController.text = data['last_name']?.toString() ?? _lastNameController.text;
+      _phoneController.text = data['phone']?.toString() ?? _phoneController.text;
+      if (data['email'] != null && (data['email'] as String).isNotEmpty) {
+        _emailController.text = data['email'] as String;
+      }
+      _searchError = null;
+    });
+    _doorScanTimer?.cancel();
+    _saveDraft();
+  }
+
+  Future<void> _searchMemberManual() async {
+    final q = _searchPhoneController.text.trim();
+    if (q.length < 4) {
+      setState(() => _searchError = 'Entrez au moins 4 chiffres de votre téléphone.');
+      return;
+    }
+    setState(() {
+      _searchingMember = true;
+      _searchError = null;
+    });
+    final res = await _portalRepo.lookupMember(gymCode: _cleanGymCode, query: q);
+    if (mounted) {
+      setState(() {
+        _searchingMember = false;
+        if (res['found'] == true) {
+          _onMemberIdentified(res);
+        } else {
+          _searchError = 'Aucun membre trouvé avec ce numéro.';
+        }
+      });
+    }
+  }
+
+  void _resetIdentifiedMember() {
+    setState(() {
+      _identifiedMember = null;
+      _memberId = null;
+      _searchPhoneController.clear();
+      _searchError = null;
+    });
+    _startDoorScanPolling();
+  }
+
   @override
   void dispose() {
+    _doorScanTimer?.cancel();
+    _searchPhoneController.dispose();
     _firstNameController.removeListener(_onFieldChanged);
     _lastNameController.removeListener(_onFieldChanged);
     _phoneController.removeListener(_onFieldChanged);
@@ -497,7 +571,15 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
             ],
             selected: {_kind},
             onSelectionChanged: (set) {
-              setState(() => _kind = set.first);
+              final newKind = set.first;
+              setState(() {
+                _kind = newKind;
+                if (newKind == 'renewal') {
+                  _startDoorScanPolling();
+                } else {
+                  _doorScanTimer?.cancel();
+                }
+              });
               _saveDraft();
             },
           ),
@@ -539,26 +621,120 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         ],
 
         if (_kind == 'renewal') ...[
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF6FF),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFBFDBFE)),
-            ),
-            child: const Row(
-              children: [
-                Icon(LucideIcons.info, color: Color(0xFF2563EB), size: 20),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    "Renouvellement : Aucun frais d'inscription supplémentaire. Choisissez votre formule, puis présentez-vous à l'accueil pour poser votre doigt sur le lecteur et régler.",
-                    style: TextStyle(fontSize: 13, color: Color(0xFF1E40AF)),
+          if (_identifiedMember != null) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF86EFAC)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.circleCheck, color: Color(0xFF16A34A), size: 22),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Compte identifié : ${_identifiedMember!['first_name']} ${_identifiedMember!['last_name']}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF14532D)),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _resetIdentifiedMember,
+                        child: const Text('Changer', style: TextStyle(color: Color(0xFFDC2626), fontSize: 12, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 6),
+                  Text(
+                    'Formule antérieure : ${_identifiedMember!['current_plan_name'] ?? 'Inconnue'} · Statut : ${_identifiedMember!['status'] == 'active' ? "Actif (${_identifiedMember!['days_left']} jours restants)" : "Expiré (${_identifiedMember!['expiration_date'] ?? ''})"}',
+                    style: const TextStyle(fontSize: 13, color: Color(0xFF166534)),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Aucun frais d’inscription pour le renouvellement.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF15803D), fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
             ),
-          ),
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF93C5FD)),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.fingerprint, color: Color(0xFF2563EB), size: 30),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'En attente de votre empreinte...',
+                              style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E40AF), fontSize: 14),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Posez votre doigt sur le lecteur d’empreinte devant la porte du gym pour charger vos informations.',
+                              style: TextStyle(fontSize: 12, color: Color(0xFF1E3A8A)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _searchPhoneController,
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            hintText: 'Ou entrez votre téléphone...',
+                            prefixIcon: Icon(LucideIcons.phone, size: 16),
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          ),
+                          onSubmitted: (_) => _searchMemberManual(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2563EB),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        ),
+                        onPressed: _searchingMember ? null : _searchMemberManual,
+                        child: _searchingMember
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text('Rechercher'),
+                      ),
+                    ],
+                  ),
+                  if (_searchError != null) ...[
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(_searchError!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
         ],
 

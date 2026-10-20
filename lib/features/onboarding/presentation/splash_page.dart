@@ -44,6 +44,12 @@ class _SplashPageState extends ConsumerState<SplashPage> with SingleTickerProvid
 
   void _navigateNext() {
     if (!mounted) return;
+    final baseUri = Uri.base;
+    if (baseUri.path.startsWith('/join') ||
+        baseUri.path.startsWith('/portal') ||
+        baseUri.path.startsWith('/kiosk')) {
+      return;
+    }
     final runtime = ref.read(appRuntimeProvider);
     if (!runtime.onboardingDone) {
       context.go('/language');

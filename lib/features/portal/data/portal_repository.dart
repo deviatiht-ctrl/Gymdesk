@@ -51,7 +51,37 @@ class PortalRepository {
     return <String, dynamic>{};
   }
 
-  /// Soumèt yon demann enskripsyon depi pòtay wèb la.
+  /// Chèche yon manm pou renouvèlman san mande koneksyon (pa telefòn oswa ID).
+  Future<Map<String, dynamic>> lookupMember({
+    required String gymCode,
+    required String query,
+  }) async {
+    try {
+      final res = await _client.rpc('portal_lookup_member', params: {
+        'p_gym_code': gymCode,
+        'p_query': query,
+      });
+      if (res is Map<String, dynamic>) {
+        return res;
+      }
+    } catch (_) {}
+    return {'found': false};
+  }
+
+  /// Rekipere dènye eskanè anprent nan pòt la pou renouvèlman an dirèk.
+  Future<Map<String, dynamic>> getLatestDoorScan(String gymCode) async {
+    try {
+      final res = await _client.rpc('portal_latest_door_scan', params: {
+        'p_gym_code': gymCode,
+      });
+      if (res is Map<String, dynamic>) {
+        return res;
+      }
+    } catch (_) {}
+    return {'found': false};
+  }
+
+  /// Soumèt yon demann enskripsyon oswa renouvèlman depi pòtay wèb la.
   Future<Map<String, dynamic>> submitJoinRequest({
     required String gymCode,
     String? planId,
@@ -61,6 +91,7 @@ class PortalRepository {
     String? email,
     String kind = 'new_membership',
     String? notes,
+    String? memberId,
   }) async {
     final params = <String, dynamic>{
       'p_gym_code': gymCode,
@@ -72,6 +103,7 @@ class PortalRepository {
     if (planId != null) params['p_plan_id'] = planId;
     if (email != null && email.isNotEmpty) params['p_email'] = email;
     if (notes != null && notes.isNotEmpty) params['p_notes'] = notes;
+    if (memberId != null && memberId.isNotEmpty) params['p_member_id'] = memberId;
 
     final res = await _client.rpc('portal_submit', params: params);
     if (res is Map<String, dynamic>) {

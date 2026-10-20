@@ -35,6 +35,7 @@ import '../features/payments/presentation/payments_page.dart';
 import '../features/payments/presentation/receipts_page.dart';
 import '../features/plans/presentation/plans_page.dart';
 import '../features/portal/presentation/portal_join_page.dart';
+import '../features/portal/presentation/portal_kiosk_page.dart';
 import '../features/portal/presentation/portal_requests_page.dart';
 import '../features/reports/presentation/reports_page.dart';
 import '../features/settings/data/settings_repository.dart';
@@ -51,12 +52,26 @@ import 'runtime.dart';
 
 String? _deferredLocation;
 
-GoRouter createRouter(AppRuntime runtime) => GoRouter(
-  initialLocation: '/startup',
-  refreshListenable: runtime,
-  redirect: (context, state) {
-    final path = state.uri.path;
-    if (path.startsWith('/join')) return null;
+GoRouter createRouter(AppRuntime runtime) {
+  final baseUri = Uri.base;
+  final basePath = baseUri.path;
+  final baseQuery = baseUri.hasQuery ? '?${baseUri.query}' : '';
+  final isPublicRoute = basePath.startsWith('/join') ||
+      basePath.startsWith('/portal') ||
+      basePath.startsWith('/kiosk');
+
+  final initialLoc = isPublicRoute ? '$basePath$baseQuery' : '/startup';
+
+  return GoRouter(
+    initialLocation: initialLoc,
+    refreshListenable: runtime,
+    redirect: (context, state) {
+      final path = state.uri.path;
+      if (path.startsWith('/join') ||
+          path.startsWith('/portal') ||
+          path.startsWith('/kiosk')) {
+        return null;
+      }
     final gate = switch (runtime.phase) {
       SessionPhase.starting => '/startup',
       SessionPhase.signedOut => runtime.onboardingDone
@@ -218,7 +233,25 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
     ),
     GoRoute(
       path: '/kiosk',
-      builder: (context, state) => const KioskPage(),
+      builder: (context, state) {
+        final gymId = runtime.session?.gymId;
+        if (gymId != null && gymId.isNotEmpty) {
+          return PortalKioskPage(gymCode: gymId);
+        }
+        return const KioskPage();
+      },
+    ),
+    GoRoute(
+      path: '/kiosk/:code',
+      builder: (context, state) => PortalKioskPage(
+        gymCode: (state.pathParameters['code'] ?? '').replaceAll(RegExp(r'/+$'), '').trim(),
+      ),
+    ),
+    GoRoute(
+      path: '/portal-kiosk/:code',
+      builder: (context, state) => PortalKioskPage(
+        gymCode: (state.pathParameters['code'] ?? '').replaceAll(RegExp(r'/+$'), '').trim(),
+      ),
     ),
     // Ekran aksè pou 2yèm ekran devan pòt la (fenèt apa, plen ekran).
     GoRoute(
@@ -391,7 +424,8 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
       ],
     ),
   ],
-);
+  );
+}
 
 class _AccessPage extends StatelessWidget {
   const _AccessPage({required this.runtime});
