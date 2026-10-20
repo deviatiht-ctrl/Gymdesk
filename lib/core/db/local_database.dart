@@ -342,14 +342,41 @@ class LocalDatabase extends _$LocalDatabase {
         ),
       );
 
-  Future<int> retryFailed() =>
-      (update(outbox)..where((t) => t.status.equals('failed'))).write(
-        const OutboxCompanion(
-          status: Value('pending'),
-          nextAttemptAt: Value(null),
-          lastError: Value(null),
-        ),
+  Future<void> repairSyncPayloads() async {
+    try {
+      await customUpdate(
+        "UPDATE records SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"') WHERE entity = 'members' AND payload LIKE '%portal_web%'",
+        updates: {records},
       );
+      await customUpdate(
+        "UPDATE outbox SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"') WHERE entity = 'members' AND payload LIKE '%portal_web%'",
+        updates: {outbox},
+      );
+      await customUpdate(
+        "UPDATE records SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"') WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
+        updates: {records},
+      );
+      await customUpdate(
+        "UPDATE outbox SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"') WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
+        updates: {outbox},
+      );
+      await customUpdate(
+        "UPDATE outbox SET status = 'pending', attempts = 0, last_error = null, next_attempt_at = null WHERE status = 'failed' AND (entity = 'members' OR entity = 'subscriptions' OR entity = 'payments')",
+        updates: {outbox},
+      );
+    } catch (_) {}
+  }
+
+  Future<int> retryFailed() async {
+    await repairSyncPayloads();
+    return (update(outbox)..where((t) => t.status.equals('failed'))).write(
+      const OutboxCompanion(
+        status: Value('pending'),
+        nextAttemptAt: Value(null),
+        lastError: Value(null),
+      ),
+    );
+  }
 
   Future<int> retryOperation(String id) =>
       (update(outbox)..where((t) => t.id.equals(id))).write(

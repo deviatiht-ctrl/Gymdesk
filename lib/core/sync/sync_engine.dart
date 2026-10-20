@@ -155,6 +155,7 @@ class SyncEngine {
         clock.offset.inMilliseconds.toString(),
       );
       await db.setMetadata('last_wall', ended.toIso8601String());
+      await db.repairSyncPayloads();
       if (retry) await db.retryFailed();
       SyncRejected? pushError;
       try {

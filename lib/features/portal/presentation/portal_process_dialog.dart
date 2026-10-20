@@ -356,7 +356,7 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
           'phone': phone.isNotEmpty ? phone : null,
           'whatsapp': phone.isNotEmpty ? phone : null,
           'email': validEmail,
-          'enrollment_origin': 'portal_web',
+          'enrollment_origin': 'new',
           'address': null,
           'nif': null,
           'cin': null,
@@ -386,7 +386,7 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
           'end_date': ymd(dateOnly(endDate)),
           'price': totalAmount,
           'opening_credit': 0.0,
-          'enrollment_kind': 'new',
+          'enrollment_kind': 'registration',
           'status': 'active',
           'created_by': session.staffId,
           'validated_by': session.staffId,
@@ -434,7 +434,14 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
             'member_id': memberId,
             'updated_at': now.toUtc().toIso8601String(),
           }).eq('id', widget.request.id);
-        } catch (_) {}
+        } catch (_) {
+          try {
+            await runtime.client.from('portal_requests').update({
+              'status': 'completed',
+              'updated_at': now.toUtc().toIso8601String(),
+            }).eq('id', widget.request.id);
+          } catch (_) {}
+        }
 
         await runtime.sync?.synchronize();
 
