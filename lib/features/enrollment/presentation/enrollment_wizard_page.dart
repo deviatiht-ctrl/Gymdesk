@@ -277,6 +277,15 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         }
         _isCapturing = false;
       });
+
+      if (widget.portalRequestId != null && _selectedFingerIndex == 1) {
+        try {
+          ref.read(appRuntimeProvider).client.from('portal_requests').update({
+            'status': 'approved',
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          }).eq('id', widget.portalRequestId!);
+        } catch (_) {}
+      }
     } catch (e) {
       setState(() {
         _isCapturing = false;

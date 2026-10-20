@@ -360,10 +360,19 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
             ),
             icon: const Icon(LucideIcons.wallet, size: 16),
             label: const Text('Ouvrir profil & Encaisser'),
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
-              _updateStatus(req.id, 'completed');
-              context.go('/members/${member.id}');
+              try {
+                await ref.read(appRuntimeProvider).client.from('portal_requests').update({
+                  'status': 'completed',
+                  'member_id': member.id,
+                  'updated_at': DateTime.now().toUtc().toIso8601String(),
+                }).eq('id', req.id);
+              } catch (_) {
+                _updateStatus(req.id, 'completed');
+              }
+              _loadRequests();
+              if (mounted) context.go('/members/${member.id}');
             },
           ),
         ],

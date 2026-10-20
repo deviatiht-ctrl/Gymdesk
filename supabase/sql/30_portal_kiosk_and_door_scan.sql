@@ -228,6 +228,7 @@ revoke all on function public.portal_latest_door_scan(text) from public, anon, a
 grant execute on function public.portal_latest_door_scan(text) to anon, authenticated;
 
 -- 4. Mise à jour de portal_submit pour accepter member_id
+drop function if exists public.portal_submit(text, uuid, text, text, text, text, text, text);
 create or replace function public.portal_submit(
   p_gym_code text,
   p_plan_id uuid,

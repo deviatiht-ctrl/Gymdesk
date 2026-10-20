@@ -58,7 +58,7 @@ class PortalRepository {
             .or('id.eq.$gymCode,name.ilike.$gymCode')
             .limit(1);
         if (gymRows.isNotEmpty) {
-          final gym = gymRows.first as Map<String, dynamic>;
+          final gym = gymRows.first;
           final gymId = gym['id'] as String;
           final planRows = await _client
               .from('plans')
@@ -136,5 +136,48 @@ class PortalRepository {
       return res;
     }
     return <String, dynamic>{'success': true};
+  }
+  /// Rekipere eta demann lan an dirèk (pou swiv anprent ak resi a sou telefòn lan).
+  Future<Map<String, dynamic>> getRequestStatus(String requestId) async {
+    try {
+      final res = await _client.rpc('portal_get_request_status', params: {
+        'p_request_id': requestId,
+      });
+      if (res is Map<String, dynamic>) {
+        return res;
+      }
+    } catch (_) {
+      try {
+        final rows = await _client
+            .from('portal_requests')
+            .select('*, gyms(name, currency, logo_url), plans(name, price, registration_fee)')
+            .eq('id', requestId)
+            .limit(1);
+        if (rows.isNotEmpty) {
+          final r = rows.first;
+          final gym = r['gyms'] as Map<String, dynamic>?;
+          final plan = r['plans'] as Map<String, dynamic>?;
+          return {
+            'found': true,
+            'id': r['id'],
+            'status': r['status'],
+            'kind': r['kind'],
+            'first_name': r['first_name'],
+            'last_name': r['last_name'],
+            'phone': r['phone'],
+            'email': r['email'],
+            'gym_name': gym?['name'] ?? '',
+            'gym_currency': gym?['currency'] ?? 'HTG',
+            'gym_logo_url': gym?['logo_url'],
+            'plan_name': plan?['name'] ?? '',
+            'plan_price': plan?['price'],
+            'registration_fee': plan?['registration_fee'] ?? 0,
+            'has_biometric': r['status'] == 'approved' || r['status'] == 'completed',
+            'member_id': r['member_id'],
+          };
+        }
+      } catch (_) {}
+    }
+    return {'found': false};
   }
 }
