@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gym_desk/features/portal/domain/portal_request.dart';
 
@@ -84,6 +85,32 @@ void main() {
       expect(req.id, 'req-renew-1');
       expect(req.kind, 'renewal');
       expect(req.fullName, 'Carlos Dupont');
+    });
+
+    test('serializes and recovers draft state without loss', () {
+      final draft = {
+        'session_code': 'SEC-8A2F99',
+        'first_name': 'Jean',
+        'last_name': 'Paul',
+        'phone': '50938441122',
+        'email': 'jpaul@test.com',
+        'notes': 'Intéressé par musculation et cardio',
+        'kind': 'new_membership',
+        'plan_id': 'plan-vip-123',
+        'updated_at': '2026-10-20T15:00:00Z',
+      };
+
+      final encoded = jsonEncode(draft);
+      final decoded = jsonDecode(encoded) as Map<String, dynamic>;
+
+      expect(decoded['session_code'], 'SEC-8A2F99');
+      expect(decoded['first_name'], 'Jean');
+      expect(decoded['last_name'], 'Paul');
+      expect(decoded['phone'], '50938441122');
+      expect(decoded['email'], 'jpaul@test.com');
+      expect(decoded['notes'], 'Intéressé par musculation et cardio');
+      expect(decoded['kind'], 'new_membership');
+      expect(decoded['plan_id'], 'plan-vip-123');
     });
   });
 }

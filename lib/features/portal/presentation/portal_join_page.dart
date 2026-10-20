@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
 import '../../../l10n/app_strings.dart';
@@ -17,6 +20,8 @@ class PortalJoinPage extends ConsumerStatefulWidget {
 }
 
 class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
+  static const _storage = FlutterSecureStorage();
+
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -30,21 +35,120 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
 
   String _kind = 'new_membership'; // 'new_membership' or 'renewal'
   String? _selectedPlanId;
+  String? _savedDraftPlanId;
   bool _isSubmitting = false;
   String? _formError;
   bool _submittedSuccess = false;
+  String? _lastSubmittedRequestId;
+  bool _hasRestoredDraft = false;
+  late final String _sessionCode;
 
   late final PortalRepository _portalRepo;
+
+  String get _cleanGymCode => widget.gymCode.trim();
+  String get _draftStorageKey => 'portal_draft_$_cleanGymCode';
 
   @override
   void initState() {
     super.initState();
+    _sessionCode = 'SEC-${const Uuid().v4().substring(0, 8).toUpperCase()}';
+
     if (widget.initialKind == 'renewal') {
       _kind = 'renewal';
+    } else if (widget.initialKind == 'new_membership') {
+      _kind = 'new_membership';
     }
+
     final runtime = ref.read(appRuntimeProvider);
     _portalRepo = PortalRepository(runtime.client);
+
+    // Auto-save listeners pou pa janm pèdi done si moun lan soti nan paj la
+    _firstNameController.addListener(_onFieldChanged);
+    _lastNameController.addListener(_onFieldChanged);
+    _phoneController.addListener(_onFieldChanged);
+    _emailController.addListener(_onFieldChanged);
+    _notesController.addListener(_onFieldChanged);
+
+    _loadDraft();
     _loadGymData();
+  }
+
+  void _onFieldChanged() {
+    _saveDraft();
+  }
+
+  Future<void> _saveDraft() async {
+    try {
+      final draft = {
+        'session_code': _sessionCode,
+        'first_name': _firstNameController.text,
+        'last_name': _lastNameController.text,
+        'phone': _phoneController.text,
+        'email': _emailController.text,
+        'notes': _notesController.text,
+        'kind': _kind,
+        'plan_id': _selectedPlanId,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      await _storage.write(key: _draftStorageKey, value: jsonEncode(draft));
+    } catch (_) {}
+  }
+
+  Future<void> _loadDraft() async {
+    try {
+      final raw = await _storage.read(key: _draftStorageKey);
+      if (raw != null && raw.isNotEmpty) {
+        final data = jsonDecode(raw) as Map<String, dynamic>;
+        if (mounted) {
+          setState(() {
+            if (_firstNameController.text.isEmpty && data['first_name'] != null) {
+              _firstNameController.text = data['first_name'] as String;
+            }
+            if (_lastNameController.text.isEmpty && data['last_name'] != null) {
+              _lastNameController.text = data['last_name'] as String;
+            }
+            if (_phoneController.text.isEmpty && data['phone'] != null) {
+              _phoneController.text = data['phone'] as String;
+            }
+            if (_emailController.text.isEmpty && data['email'] != null) {
+              _emailController.text = data['email'] as String;
+            }
+            if (_notesController.text.isEmpty && data['notes'] != null) {
+              _notesController.text = data['notes'] as String;
+            }
+            if (widget.initialKind == null && data['kind'] != null) {
+              _kind = data['kind'] as String;
+            }
+            if (data['plan_id'] != null) {
+              _savedDraftPlanId = data['plan_id'] as String;
+              if (_plans.any((p) => p['id'] == _savedDraftPlanId)) {
+                _selectedPlanId = _savedDraftPlanId;
+              }
+            }
+            _hasRestoredDraft = _firstNameController.text.isNotEmpty ||
+                _phoneController.text.isNotEmpty ||
+                _notesController.text.isNotEmpty;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _clearDraft() async {
+    try {
+      await _storage.delete(key: _draftStorageKey);
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _firstNameController.clear();
+        _lastNameController.clear();
+        _phoneController.clear();
+        _emailController.clear();
+        _notesController.clear();
+        _hasRestoredDraft = false;
+        _formError = null;
+      });
+    }
   }
 
   Future<void> _loadGymData() async {
@@ -54,7 +158,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
     });
 
     try {
-      final res = await _portalRepo.getPublicGym(widget.gymCode);
+      final res = await _portalRepo.getPublicGym(_cleanGymCode);
       final gymMap = res['gym'] as Map<String, dynamic>?;
       final rawPlans = res['plans'] as List<dynamic>? ?? [];
 
@@ -70,7 +174,11 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         _gym = gymMap;
         _plans = rawPlans.cast<Map<String, dynamic>>();
         if (_plans.isNotEmpty) {
-          _selectedPlanId = _plans.first['id'] as String?;
+          if (_savedDraftPlanId != null && _plans.any((p) => p['id'] == _savedDraftPlanId)) {
+            _selectedPlanId = _savedDraftPlanId;
+          } else {
+            _selectedPlanId = _plans.first['id'] as String?;
+          }
         }
         _loadingGym = false;
       });
@@ -106,8 +214,8 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
     });
 
     try {
-      await _portalRepo.submitJoinRequest(
-        gymCode: widget.gymCode,
+      final res = await _portalRepo.submitJoinRequest(
+        gymCode: _cleanGymCode,
         planId: _selectedPlanId,
         firstName: fn,
         lastName: ln,
@@ -117,10 +225,16 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         notes: notes,
       );
 
+      // Si soumèt avèk siksè, nou vide bouyon an pou pwochen moun
+      try {
+        await _storage.delete(key: _draftStorageKey);
+      } catch (_) {}
+
       if (mounted) {
         setState(() {
           _isSubmitting = false;
           _submittedSuccess = true;
+          _lastSubmittedRequestId = res['request_id'] as String? ?? _sessionCode;
         });
       }
     } catch (e) {
@@ -135,6 +249,11 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
 
   @override
   void dispose() {
+    _firstNameController.removeListener(_onFieldChanged);
+    _lastNameController.removeListener(_onFieldChanged);
+    _phoneController.removeListener(_onFieldChanged);
+    _emailController.removeListener(_onFieldChanged);
+    _notesController.removeListener(_onFieldChanged);
     _firstNameController.dispose();
     _lastNameController.dispose();
     _phoneController.dispose();
@@ -234,9 +353,22 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
           textAlign: TextAlign.center,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE0F2FE),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFFBAE6FD)),
+          ),
+          child: Text(
+            'Réf. Dossier : #${_lastSubmittedRequestId ?? _sessionCode}',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0369A1)),
+          ),
+        ),
+        const SizedBox(height: 14),
         Text(
-          'Merci ${_firstNameController.text.trim()} ! Votre demande pour la formule "$planName" a bien été transmise à $gymName.',
+          'Merci ${_firstNameController.text.trim()} ! Votre demande pour la formule "$planName" a bien été enregistrée pour $gymName.',
           style: TextStyle(fontSize: 15, color: Colors.grey.shade700, height: 1.4),
           textAlign: TextAlign.center,
         ),
@@ -263,7 +395,9 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _kind == 'renewal' ? s.text('portal_renewal_success') : s.text('portal_success_message'),
+                      _kind == 'renewal'
+                          ? "Présentez-vous à l'accueil du gym. Il vous suffira de poser votre doigt sur le lecteur d'empreinte pour vous identifier et régler votre abonnement."
+                          : s.text('portal_success_message'),
                       style: const TextStyle(fontSize: 13, color: Color(0xFF134E4A), height: 1.3),
                     ),
                   ],
@@ -275,13 +409,9 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         const SizedBox(height: 28),
         OutlinedButton.icon(
           onPressed: () {
+            _clearDraft();
             setState(() {
               _submittedSuccess = false;
-              _firstNameController.clear();
-              _lastNameController.clear();
-              _phoneController.clear();
-              _emailController.clear();
-              _notesController.clear();
             });
           },
           icon: const Icon(LucideIcons.plusCircle, size: 16),
@@ -307,7 +437,8 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                     width: 64,
                     height: 64,
                     fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => const Icon(LucideIcons.dumbbell, size: 48, color: Color(0xFF0F766E)),
+                    errorBuilder: (context, error, stackTrace) =>
+                        const Icon(LucideIcons.dumbbell, size: 48, color: Color(0xFF0F766E)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -323,10 +454,33 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 10),
+              // Badge de session unique et privée
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.shieldCheck, size: 14, color: Color(0xFF0F766E)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Session individuelle : #$_sessionCode',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
         const SizedBox(height: 20),
+
+        // Sélecteur Type de Demande (Inscription vs Renouvellement)
         Center(
           child: SegmentedButton<String>(
             segments: [
@@ -342,10 +496,48 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
               ),
             ],
             selected: {_kind},
-            onSelectionChanged: (set) => setState(() => _kind = set.first),
+            onSelectionChanged: (set) {
+              setState(() => _kind = set.first);
+              _saveDraft();
+            },
           ),
         ),
         const SizedBox(height: 16),
+
+        // Bannière brouillon restauré si l'utilisateur avait commencé à écrire
+        if (_hasRestoredDraft) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+            ),
+            child: Row(
+              children: [
+                const Icon(LucideIcons.save, color: Color(0xFF2563EB), size: 18),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Brouillon restauré : vos informations ont été conservées sur cet appareil.',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF1E40AF)),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _clearDraft,
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFDC2626),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  child: const Text('Effacer', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
         if (_kind == 'renewal') ...[
           Container(
             padding: const EdgeInsets.all(12),
@@ -360,7 +552,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                 SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    "Renouvellement : Aucun frais d'inscription. Choisissez votre formule, puis présentez-vous à l'accueil pour poser votre doigt sur le lecteur et régler.",
+                    "Renouvellement : Aucun frais d'inscription supplémentaire. Choisissez votre formule, puis présentez-vous à l'accueil pour poser votre doigt sur le lecteur et régler.",
                     style: TextStyle(fontSize: 13, color: Color(0xFF1E40AF)),
                   ),
                 ),
@@ -415,7 +607,10 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
 
               return InkWell(
                 borderRadius: BorderRadius.circular(10),
-                onTap: () => setState(() => _selectedPlanId = id),
+                onTap: () {
+                  setState(() => _selectedPlanId = id);
+                  _saveDraft();
+                },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -533,7 +728,18 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
             border: OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(LucideIcons.shield, size: 13, color: Colors.grey.shade500),
+            const SizedBox(width: 6),
+            Text(
+              'Vos données saisies restent enregistrées sur votre appareil en cas d’interruption.',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
 
         SizedBox(
           height: 48,

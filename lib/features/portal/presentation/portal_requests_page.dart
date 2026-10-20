@@ -105,7 +105,7 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
     if (isRenewal) {
       return 'https://securgym.com/join/$gymId?kind=renewal';
     }
-    return 'https://securgym.com/join/$gymId';
+    return 'https://securgym.com/join/$gymId?kind=new_membership';
   }
 
   void _copyLink(String url, String label) {
@@ -434,7 +434,66 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
             icon: const Icon(LucideIcons.qrCode, size: 18),
             label: Text(s.text('qr_code_join')),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
+          PopupMenuButton<String>(
+            tooltip: 'Liens du portail',
+            icon: const Icon(LucideIcons.share2, size: 20),
+            onSelected: (val) {
+              if (val == 'copy_new') {
+                _copyLink(_portalUrl(isRenewal: false), "Lien d'inscription");
+              } else if (val == 'copy_renew') {
+                _copyLink(_portalUrl(isRenewal: true), "Lien de renouvellement");
+              } else if (val == 'open_new') {
+                launchUrl(Uri.parse(_portalUrl(isRenewal: false)), mode: LaunchMode.externalApplication);
+              } else if (val == 'open_renew') {
+                launchUrl(Uri.parse(_portalUrl(isRenewal: true)), mode: LaunchMode.externalApplication);
+              }
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(
+                value: 'copy_new',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.copy, size: 16, color: Color(0xFF0F766E)),
+                    SizedBox(width: 8),
+                    Text("Copier lien Inscription"),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'copy_renew',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.refreshCw, size: 16, color: Color(0xFF2563EB)),
+                    SizedBox(width: 8),
+                    Text("Copier lien Renouvellement"),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'open_new',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.externalLink, size: 16),
+                    SizedBox(width: 8),
+                    Text("Ouvrir page Inscription"),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'open_renew',
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.externalLink, size: 16),
+                    SizedBox(width: 8),
+                    Text("Ouvrir page Renouvellement"),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
           IconButton(
             tooltip: 'Actualiser',
             onPressed: _loadRequests,

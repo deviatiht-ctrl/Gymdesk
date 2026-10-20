@@ -56,7 +56,7 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
   refreshListenable: runtime,
   redirect: (context, state) {
     final path = state.uri.path;
-    if (path.startsWith('/join/')) return null;
+    if (path.startsWith('/join')) return null;
     final gate = switch (runtime.phase) {
       SessionPhase.starting => '/startup',
       SessionPhase.signedOut => runtime.onboardingDone
@@ -242,7 +242,7 @@ GoRouter createRouter(AppRuntime runtime) => GoRouter(
     GoRoute(
       path: '/join/:code',
       builder: (context, state) => PortalJoinPage(
-        gymCode: state.pathParameters['code']!,
+        gymCode: (state.pathParameters['code'] ?? '').replaceAll(RegExp(r'/+$'), '').trim(),
         initialKind: state.uri.queryParameters['kind'],
       ),
     ),
