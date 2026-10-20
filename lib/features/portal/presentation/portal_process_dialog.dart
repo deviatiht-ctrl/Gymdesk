@@ -11,13 +11,10 @@ import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
-import '../../members/data/members_repository.dart';
 import '../../members/domain/member.dart';
 import '../../payments/data/receipt_pdf.dart';
-import '../../payments/domain/payment.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
-import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
 import '../domain/portal_request.dart';
 
@@ -52,7 +49,6 @@ class PortalProcessDialog extends ConsumerStatefulWidget {
 
 class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
   late final BiometricService _biometricService;
-  late final MembersRepository _members;
   late final PlansRepository _plansRepo;
 
   StreamSubscription<BiometricEvent>? _bioEventSub;
@@ -81,7 +77,6 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
     super.initState();
     final runtime = ref.read(appRuntimeProvider);
     _biometricService = ref.read(biometricServiceProvider);
-    _members = MembersRepository(runtime.client, runtime.database!, runtime.session!);
     _plansRepo = PlansRepository(runtime.database!, runtime.session!);
 
     // Kòmanse koute lektè anprent lan otomatikman san bezwen klike bouton
@@ -191,12 +186,23 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
     });
 
     final runtime = ref.read(appRuntimeProvider);
+    final db = runtime.database;
+    final session = runtime.session;
+    if (db == null || session == null) {
+      setState(() {
+        _isProcessing = false;
+        _errorMessage = 'Base de données locale ou session non disponible.';
+      });
+      return;
+    }
+
     final now = DateTime.now();
     final plan = _selectedPlan!;
     final regFee = _isRenewal ? 0.0 : plan.registrationFee;
     final planPrice = plan.price;
     final totalAmount = planPrice + regFee;
     final endDate = subscriptionEnd(now, plan.durationDays);
+    final currency = (plan.currency.trim().toUpperCase() == 'USD') ? 'USD' : 'HTG';
     final paymentId = const Uuid().v4();
 
     try {
@@ -204,7 +210,7 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
         // Traitement pour Renouvellement
         Member? member;
         final digits = widget.request.phone.replaceAll(RegExp(r'\D'), '');
-        final rows = await runtime.database?.watchRecords(SyncEntity.members, limit: 50000).first ?? [];
+        final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
         for (final r in rows) {
           try {
             final m = Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map));
@@ -213,7 +219,11 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
               break;
             }
             final mDigits = (m.phone ?? m.whatsapp ?? '').replaceAll(RegExp(r'\D'), '');
-            if (mDigits.contains(digits) || digits.contains(mDigits)) {
+            if (digits.isNotEmpty && mDigits.isNotEmpty && (mDigits.contains(digits) || digits.contains(mDigits))) {
+              member = m;
+              break;
+            }
+            if (m.fullName.toLowerCase() == widget.request.fullName.toLowerCase()) {
               member = m;
               break;
             }
@@ -221,44 +231,74 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
         }
 
         if (member == null) {
-          throw Exception('Membre introuvable pour ce renouvellement. Vérifiez le numéro de téléphone.');
+          throw Exception('Membre introuvable pour ce renouvellement. Vérifiez le numéro de téléphone ou le compte.');
         }
 
-        await _members.renew(
-          member,
-          plan,
-          start: now,
-          changedAt: now,
-          payment: PaymentCommand(
-            id: paymentId,
-            memberId: member.id,
-            subscriptionId: '',
-            amount: totalAmount,
-            currency: plan.currency.isNotEmpty ? plan.currency : 'HTG',
-            method: _paymentMethod,
-            reference: _referenceController.text.trim(),
-            receivedAmount: totalAmount,
-            registrationFee: 0,
-            planFee: planPrice,
-            paymentReason: 'Renouvellement (${plan.name})',
-          ),
-        );
+        final subscriptionId = const Uuid().v4();
+        final subRow = <String, dynamic>{
+          'id': subscriptionId,
+          'gym_id': session.gymId,
+          'member_id': member.id,
+          'plan_id': plan.id,
+          'start_date': ymd(dateOnly(now)),
+          'end_date': ymd(dateOnly(endDate)),
+          'price': planPrice,
+          'opening_credit': 0.0,
+          'enrollment_kind': 'renewal',
+          'status': 'active',
+          'created_by': session.staffId,
+          'validated_by': session.staffId,
+          'validated_at': now.toUtc().toIso8601String(),
+          'created_at': now.toUtc().toIso8601String(),
+          'updated_at': now.toUtc().toIso8601String(),
+          'deleted_at': null,
+        };
 
-        if (_fingerprintTemplate != null && runtime.database != null) {
-          await runtime.database!.save(SyncEntity.members, {
-            'id': member.id,
-            'gym_id': runtime.session!.gymId,
+        final paymentRow = <String, dynamic>{
+          'id': paymentId,
+          'gym_id': session.gymId,
+          'member_id': member.id,
+          'subscription_id': subscriptionId,
+          'amount': totalAmount,
+          'currency': currency,
+          'method': _paymentMethod,
+          'reference': _referenceController.text.trim().isNotEmpty ? _referenceController.text.trim() : null,
+          'received_amount': totalAmount,
+          'credit_used': 0.0,
+          'credit_amount': 0.0,
+          'registration_fee': 0.0,
+          'plan_fee': planPrice,
+          'payment_reason': 'Renouvellement (${plan.name})',
+          'paid_at': now.toUtc().toIso8601String(),
+          'received_by': session.staffId,
+          'notes': null,
+          'created_at': now.toUtc().toIso8601String(),
+          'updated_at': now.toUtc().toIso8601String(),
+          'deleted_at': null,
+        };
+
+        await db.save(SyncEntity.subscriptions, subRow, changedAt: now);
+        await db.save(SyncEntity.payments, paymentRow, changedAt: now);
+
+        if (_fingerprintTemplate != null) {
+          await db.save(SyncEntity.members, {
+            ...member.row,
             'fingerprint_registered': true,
             'fingerprint_template': _fingerprintTemplate,
             'fingerprint_enrolled_at': now.toUtc().toIso8601String(),
+            'status': 'active',
           }, changedAt: now);
         }
 
-        await runtime.client.from('portal_requests').update({
-          'status': 'completed',
-          'member_id': member.id,
-          'updated_at': now.toUtc().toIso8601String(),
-        }).eq('id', widget.request.id);
+        try {
+          await runtime.client.from('portal_requests').update({
+            'status': 'completed',
+            'member_id': member.id,
+            'updated_at': now.toUtc().toIso8601String(),
+          }).eq('id', widget.request.id);
+        } catch (_) {}
+
+        await runtime.sync?.synchronize();
 
         if (mounted) {
           setState(() {
@@ -269,77 +309,171 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
             _completedTotal = totalAmount;
             _completedEndDate = endDate;
           });
+          widget.onCompleted();
         }
       } else {
         // Traitement pour Nouvelle Inscription
-        final draft = MemberRegistration(
-          firstName: widget.request.firstName.trim(),
-          lastName: widget.request.lastName.trim(),
-          phone: widget.request.phone.trim(),
-          whatsapp: widget.request.phone.trim(),
-          email: widget.request.email?.trim() ?? '',
-          notes: widget.request.notes ?? '',
-        );
+        String fn = widget.request.firstName.trim();
+        String ln = widget.request.lastName.trim();
+        if (ln.length < 2) {
+          final parts = fn.split(RegExp(r'\s+'));
+          if (parts.length > 1) {
+            fn = parts.first;
+            ln = parts.sublist(1).join(' ');
+          } else {
+            ln = ln.isNotEmpty ? '$ln.' : 'Client';
+          }
+        }
+        if (fn.length < 2) {
+          final parts = ln.split(RegExp(r'\s+'));
+          if (parts.length > 1) {
+            fn = parts.first;
+            ln = parts.sublist(1).join(' ');
+          } else {
+            fn = fn.isNotEmpty ? '$fn.' : 'Membre';
+          }
+        }
+
+        final memberId = const Uuid().v4();
+        final subscriptionId = const Uuid().v4();
+        final memberNumber = await db.nextMemberNumber();
+        final qrToken = const Uuid().v4();
+        final rawEmail = (widget.request.email ?? '').trim();
+        final validEmail = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(rawEmail) ? rawEmail : null;
+        final phone = normalizePhone(widget.request.phone);
+
+        final isOneDayPass = plan.durationDays == 1 || plan.name.toLowerCase().contains('1 j') || plan.name.toLowerCase().contains('séance');
+        final todayMidnight = DateTime(now.year, now.month, now.day, 23, 59, 59);
+        final tempPin = isOneDayPass ? '${100000 + (memberId.hashCode.abs() % 900000)}' : null;
+
+        final memberRow = <String, dynamic>{
+          'id': memberId,
+          'gym_id': session.gymId,
+          'member_number': memberNumber,
+          'qr_token': qrToken,
+          'first_name': fn,
+          'last_name': ln,
+          'phone': phone.isNotEmpty ? phone : null,
+          'whatsapp': phone.isNotEmpty ? phone : null,
+          'email': validEmail,
+          'enrollment_origin': 'portal_web',
+          'address': null,
+          'nif': null,
+          'cin': null,
+          'emergency_contact_name': null,
+          'emergency_contact_phone': null,
+          'guardian_name': null,
+          'photo_url': null,
+          'notes': widget.request.notes?.trim().isNotEmpty == true ? widget.request.notes!.trim() : null,
+          'fingerprint_template': _fingerprintTemplate,
+          'fingerprint_registered': _fingerprintTemplate != null && _fingerprintTemplate!.isNotEmpty,
+          'temporary_pin': tempPin,
+          'pin_expires_at': isOneDayPass ? todayMidnight.toIso8601String() : null,
+          'status': 'active',
+          'is_test': false,
+          'created_by': session.staffId,
+          'created_at': now.toUtc().toIso8601String(),
+          'updated_at': now.toUtc().toIso8601String(),
+          'deleted_at': null,
+        };
+
+        final subRow = <String, dynamic>{
+          'id': subscriptionId,
+          'gym_id': session.gymId,
+          'member_id': memberId,
+          'plan_id': plan.id,
+          'start_date': ymd(dateOnly(now)),
+          'end_date': ymd(dateOnly(endDate)),
+          'price': totalAmount,
+          'opening_credit': 0.0,
+          'enrollment_kind': 'new',
+          'status': 'active',
+          'created_by': session.staffId,
+          'validated_by': session.staffId,
+          'validated_at': now.toUtc().toIso8601String(),
+          'created_at': now.toUtc().toIso8601String(),
+          'updated_at': now.toUtc().toIso8601String(),
+          'deleted_at': null,
+        };
 
         final reason = regFee > 0 ? 'Inscription + 1er mois' : 'Inscription (${plan.name})';
 
-        final result = await _members.register(
-          draft,
-          subscription: SubscriptionCommand(
-            planId: plan.id,
-            startDate: now,
-            endDate: endDate,
-            price: planPrice,
-            status: 'active',
-          ),
-          payment: PaymentCommand(
-            id: paymentId,
-            memberId: '',
-            subscriptionId: '',
-            amount: totalAmount,
-            currency: plan.currency.isNotEmpty ? plan.currency : 'HTG',
-            method: _paymentMethod,
-            reference: _referenceController.text.trim(),
-            receivedAmount: totalAmount,
-            registrationFee: regFee,
-            planFee: planPrice,
-            paymentReason: reason,
-          ),
+        final paymentRow = <String, dynamic>{
+          'id': paymentId,
+          'gym_id': session.gymId,
+          'member_id': memberId,
+          'subscription_id': subscriptionId,
+          'amount': totalAmount,
+          'currency': currency,
+          'method': _paymentMethod,
+          'reference': _referenceController.text.trim().isNotEmpty ? _referenceController.text.trim() : null,
+          'received_amount': totalAmount,
+          'credit_used': 0.0,
+          'credit_amount': 0.0,
+          'registration_fee': regFee,
+          'plan_fee': planPrice,
+          'payment_reason': reason,
+          'paid_at': now.toUtc().toIso8601String(),
+          'received_by': session.staffId,
+          'notes': null,
+          'created_at': now.toUtc().toIso8601String(),
+          'updated_at': now.toUtc().toIso8601String(),
+          'deleted_at': null,
+        };
+
+        await db.activateMemberCard(
+          member: memberRow,
+          subscription: subRow,
+          payment: paymentRow,
           changedAt: now,
         );
 
-        if (_fingerprintTemplate != null && runtime.database != null) {
-          await runtime.database!.save(SyncEntity.members, {
-            'id': result.memberId,
-            'gym_id': runtime.session!.gymId,
-            'fingerprint_registered': true,
-            'fingerprint_template': _fingerprintTemplate,
-            'fingerprint_enrolled_at': now.toUtc().toIso8601String(),
-          }, changedAt: now);
-        }
+        try {
+          await runtime.client.from('portal_requests').update({
+            'status': 'completed',
+            'member_id': memberId,
+            'updated_at': now.toUtc().toIso8601String(),
+          }).eq('id', widget.request.id);
+        } catch (_) {}
 
-        await runtime.client.from('portal_requests').update({
-          'status': 'completed',
-          'member_id': result.memberId,
-          'updated_at': now.toUtc().toIso8601String(),
-        }).eq('id', widget.request.id);
+        await runtime.sync?.synchronize();
 
         if (mounted) {
           setState(() {
             _isProcessing = false;
             _isCompleted = true;
-            _completedMemberNumber = result.memberNumber;
+            _completedMemberNumber = memberNumber;
             _completedPaymentId = paymentId;
             _completedTotal = totalAmount;
             _completedEndDate = endDate;
           });
+          widget.onCompleted();
         }
       }
     } catch (e) {
       if (mounted) {
+        String msg = '$e';
+        if (e is MemberFailure) {
+          switch (e.code) {
+            case 'invalid_record':
+              msg = 'Données invalides. Veuillez vérifier le nom et prénom.';
+              break;
+            case 'invalid_email':
+              msg = 'Adresse email invalide.';
+              break;
+            case 'access_denied':
+              msg = 'Accès refusé : permissions insuffisantes.';
+              break;
+            case 'local_storage':
+              msg = 'Erreur d’enregistrement local dans la base SQLite.';
+              break;
+            default:
+              msg = e.code;
+          }
+        }
         setState(() {
           _isProcessing = false;
-          _errorMessage = 'Erreur lors de l’enregistrement : $e';
+          _errorMessage = 'Erreur lors de l’enregistrement : $msg';
         });
       }
     }

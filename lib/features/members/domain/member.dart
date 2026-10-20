@@ -138,4 +138,7 @@ class MemberRegistrationResult {
 class MemberFailure implements Exception {
   const MemberFailure(this.code);
   final String code;
+
+  @override
+  String toString() => 'MemberFailure: $code';
 }

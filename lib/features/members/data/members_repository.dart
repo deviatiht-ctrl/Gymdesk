@@ -315,7 +315,7 @@ class MembersRepository {
     MemberRegistration draft, {
     required DateTime changedAt,
   }) => _local(() async {
-    if (!{'owner', 'supervisor', 'reception'}.contains(session.role)) {
+    if (!{'owner', 'supervisor', 'reception', 'manager'}.contains(session.role)) {
       throw const MemberFailure('access_denied');
     }
     _validateRegistration(draft);
@@ -372,7 +372,7 @@ class MembersRepository {
     required DateTime changedAt,
     PaymentCommand? payment,
   }) => _local(() async {
-    if (!{'owner', 'supervisor', 'reception'}.contains(session.role)) {
+    if (!{'owner', 'supervisor', 'reception', 'manager'}.contains(session.role)) {
       throw const MemberFailure('access_denied');
     }
     _validatePayment(payment);
@@ -497,7 +497,7 @@ class MembersRepository {
     PaymentCommand payment, {
     required DateTime changedAt,
   }) => _local(() async {
-    if (!{'owner', 'supervisor', 'reception'}.contains(session.role)) {
+    if (!{'owner', 'supervisor', 'reception', 'manager'}.contains(session.role)) {
       throw const MemberFailure('access_denied');
     }
     if (subscription.deletedAt != null || subscription.status == 'cancelled') {
