@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/biometrics/biometric_service.dart';
+import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
 import '../../members/data/member_photo_codec.dart';
@@ -160,6 +161,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   bool _consentGiven = false;
   bool _isCapturing = false;
   bool _skipFingerprintForNow = false;
+  StreamSubscription<BiometricEvent>? _bioEventSub;
 
   bool _isSaving = false;
   String? _errorMessage;
@@ -181,6 +183,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       _emailController.text = widget.initialEmail!;
     }
     _biometricService = BiometricService();
+    _bioEventSub = _biometricService.events.listen(_onAutoBiometricEvent);
+    _biometricService.startCapture();
     final runtime = ref.read(appRuntimeProvider);
     _members = MembersRepository(runtime.client, runtime.database!, runtime.session!);
     _plansRepo = PlansRepository(runtime.database!, runtime.session!);
@@ -224,6 +228,74 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photo error: $e')));
       }
+    }
+  }
+
+  void _onAutoBiometricEvent(BiometricEvent event) {
+    if (!mounted || _isCapturing || _isSaving || _skipFingerprintForNow) return;
+    if (_selectedFingerIndex == 1 && _primaryTemplate != null) return;
+    if (_selectedFingerIndex == 2 && _backupTemplate != null) return;
+
+    if (event.type == 'fingerprint_captured' && event.template != null && event.template!.isNotEmpty) {
+      _processAutoSample(event.template!);
+    } else if (event.type == 'low_quality') {
+      if (mounted) {
+        setState(() => _errorMessage = 'Qualité trop basse. Posez le doigt bien à plat sur le lecteur.');
+      }
+    }
+  }
+
+  Future<void> _processAutoSample(String sample) async {
+    final s = AppStrings.of(context);
+    setState(() {
+      _isCapturing = true;
+      _errorMessage = null;
+    });
+
+    final runtime = ref.read(appRuntimeProvider);
+    final db = runtime.database;
+    if (db != null) {
+      final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
+      final enrolled = <Member>[];
+      for (final r in rows) {
+        try {
+          final m = Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map));
+          if (m.fingerprintTemplate?.isNotEmpty ?? false) enrolled.add(m);
+        } catch (_) {}
+      }
+      final dup = await _biometricService.match1toN(candidateTemplate: sample, members: enrolled);
+      if (dup != null && mounted) {
+        final dupName = '${dup.firstName} ${dup.lastName}';
+        showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(LucideIcons.triangleAlert, color: Colors.orange, size: 36),
+            title: Text(s.text('duplicate_fingerprint_alert')),
+            content: Text('${s.text('duplicate_fingerprint_alert')}\n($dupName)'),
+            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.text('ok')))],
+          ),
+        );
+        setState(() => _isCapturing = false);
+        return;
+      }
+    }
+
+    setState(() {
+      if (_selectedFingerIndex == 1) {
+        _primaryTemplate = sample;
+      } else {
+        _backupTemplate = sample;
+      }
+      _isCapturing = false;
+    });
+
+    if (widget.portalRequestId != null && _selectedFingerIndex == 1) {
+      try {
+        ref.read(appRuntimeProvider).client.from('portal_requests').update({
+          'status': 'approved',
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        }).eq('id', widget.portalRequestId!);
+      } catch (_) {}
     }
   }
 
@@ -704,6 +776,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     _referenceController.dispose();
     _registrationFeeController.dispose();
     _pinController.dispose();
+    _bioEventSub?.cancel();
+    _biometricService.stopCapture();
     _biometricService.dispose();
     super.dispose();
   }
@@ -2026,28 +2100,65 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           Center(
             child: Column(
               children: [
-                GestureDetector(
-                  onTap: _isCapturing ? null : () => _captureFingerprint(s),
-                  child: Container(
-                    width: 120,
-                    height: 120,
-                    decoration: BoxDecoration(
-                      color: (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null) ? const Color(0xFF059669) : const Color(0xFF0F766E),
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: const Color(0xFF0F766E).withOpacity(0.3), blurRadius: 16, spreadRadius: 4)],
-                    ),
-                    child: Center(
-                      child: _isCapturing
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : Icon((_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null) ? LucideIcons.checkCheck : LucideIcons.fingerprint, size: 56, color: Colors.white),
-                    ),
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    color: (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
+                        ? const Color(0xFF059669)
+                        : const Color(0xFF0F766E),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF0F766E).withOpacity(0.3),
+                        blurRadius: 16,
+                        spreadRadius: 4,
+                      )
+                    ],
+                  ),
+                  child: Center(
+                    child: _isCapturing
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : Icon(
+                            (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
+                                ? LucideIcons.checkCheck
+                                : LucideIcons.fingerprint,
+                            size: 56,
+                            color: Colors.white,
+                          ),
                   ),
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null) ? s.text('finger_captured_success') : s.text('capture_finger_btn'),
+                  (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
+                      ? s.text('finger_captured_success')
+                      : 'Poze dwèt la sou lektè a (Kapti otomatik)...',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
+                const SizedBox(height: 4),
+                Text(
+                  (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
+                      ? 'Empreinte enregistrée et configurée.'
+                      : 'Lektè a ap koute otomatikman — pa bezwen klike anyen.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                ),
+                if ((_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)) ...[
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: const Color(0xFFDC2626)),
+                    onPressed: () {
+                      setState(() {
+                        if (_selectedFingerIndex == 1) {
+                          _primaryTemplate = null;
+                        } else {
+                          _backupTemplate = null;
+                        }
+                      });
+                    },
+                    icon: const Icon(LucideIcons.refreshCw, size: 14),
+                    label: const Text('Rekaptire / Chanje dwèt'),
+                  ),
+                ],
               ],
             ),
           ),

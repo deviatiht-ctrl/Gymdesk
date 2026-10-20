@@ -14,6 +14,7 @@ import '../../members/domain/member.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
 import '../data/portal_repository.dart';
 import '../domain/portal_request.dart';
+import 'portal_process_dialog.dart';
 
 class PortalRequestsPage extends ConsumerStatefulWidget {
   const PortalRequestsPage({super.key});
@@ -656,6 +657,7 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
     final isCompleted = req.status == 'completed';
 
     return Card(
+      clipBehavior: Clip.antiAlias,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
@@ -669,8 +671,16 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
       color: isPending
           ? (isRenewal ? const Color(0xFFF5F3FF) : const Color(0xFFF0FDFA).withOpacity(0.4))
           : Colors.white,
-      child: Padding(
-        padding: const EdgeInsets.all(18),
+      child: InkWell(
+        onTap: isPending
+            ? () => PortalProcessDialog.show(
+                  context,
+                  request: req,
+                  onCompleted: _loadRequests,
+                )
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -816,7 +826,11 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
-                      onPressed: () => _handleRenewalValidation(req),
+                      onPressed: () => PortalProcessDialog.show(
+                        context,
+                        request: req,
+                        onCompleted: _loadRequests,
+                      ),
                       icon: const Icon(LucideIcons.refreshCw, size: 16),
                       label: Text(s.text('collect_renewal')),
                     ),
@@ -827,7 +841,7 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                         side: const BorderSide(color: Color(0xFFC7D2FE)),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
-                      onPressed: _isScanningFingerprint ? null : () => _identifyByFingerprint(req),
+                      onPressed: () => _handleRenewalValidation(req),
                       icon: _isScanningFingerprint
                           ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(LucideIcons.fingerprint, size: 16),
@@ -841,19 +855,11 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
-                      onPressed: () {
-                        context.go(
-                          '/members/new',
-                          extra: {
-                            'firstName': req.firstName,
-                            'lastName': req.lastName,
-                            'phone': req.phone,
-                            'email': req.email,
-                            'planId': req.planId,
-                            'portalRequestId': req.id,
-                          },
-                        );
-                      },
+                      onPressed: () => PortalProcessDialog.show(
+                        context,
+                        request: req,
+                        onCompleted: _loadRequests,
+                      ),
                       icon: const Icon(LucideIcons.checkCheck, size: 16),
                       label: Text(s.text('validate_and_enroll')),
                     ),
@@ -880,6 +886,7 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
               ],
             ),
           ],
+        ),
         ),
       ),
     );
