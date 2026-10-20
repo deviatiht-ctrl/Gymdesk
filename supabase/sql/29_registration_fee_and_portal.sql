@@ -170,7 +170,6 @@ begin
     'duration_days', p.duration_days,
     'price', p.price,
     'registration_fee', coalesce(p.registration_fee, 0),
-    'registration_price', p.registration_price,
     'currency', p.currency,
     'description', p.description
   ) order by p.price asc), '[]'::jsonb)

@@ -44,9 +44,35 @@ class PortalRepository {
 
   /// Rekipere enfòmasyon piblik gym lan ak fòmil yo pou paj adezyon an.
   Future<Map<String, dynamic>> getPublicGym(String gymCode) async {
-    final res = await _client.rpc('portal_get_gym', params: {'p_gym_code': gymCode});
-    if (res is Map<String, dynamic>) {
-      return res;
+    try {
+      final res = await _client.rpc('portal_get_gym', params: {'p_gym_code': gymCode});
+      if (res is Map<String, dynamic>) {
+        return res;
+      }
+    } catch (_) {
+      // Fallback sekirite: si RPC an gen yon ansyen erè kolòn nan baz done a, li rekipere l an dirèk
+      try {
+        final gymRows = await _client
+            .from('gyms')
+            .select('id, name, currency, logo_url')
+            .or('id.eq.$gymCode,name.ilike.$gymCode')
+            .limit(1);
+        if (gymRows.isNotEmpty) {
+          final gym = gymRows.first as Map<String, dynamic>;
+          final gymId = gym['id'] as String;
+          final planRows = await _client
+              .from('plans')
+              .select('id, name, duration_days, price, currency, description')
+              .eq('gym_id', gymId)
+              .eq('active', true)
+              .order('price', ascending: true);
+          return {
+            'gym': gym,
+            'plans': planRows,
+          };
+        }
+      } catch (_) {}
+      rethrow;
     }
     return <String, dynamic>{};
   }

@@ -4,7 +4,64 @@
 
 begin;
 
--- 1. Recherche de membre anonyme pour le portail de renouvellement
+-- 0. Garantir la présence de la colonne registration_fee sur plans
+alter table public.plans
+  add column if not exists registration_fee numeric(12,2) not null default 0;
+
+-- 1. Correction de portal_get_gym (suppression de p.registration_price inexistant)
+create or replace function public.portal_get_gym(p_gym_code text)
+returns jsonb
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  v_gym public.gyms;
+  v_plans jsonb;
+begin
+  if p_gym_code is null or trim(p_gym_code) = '' then
+    raise exception 'invalid_gym' using errcode = '22023';
+  end if;
+
+  select * into v_gym from public.gyms
+  where (id::text = lower(trim(p_gym_code)) or lower(name) = lower(trim(p_gym_code)))
+    and status in ('active', 'trial')
+  limit 1;
+
+  if not found then
+    raise exception 'gym_not_found' using errcode = '22023';
+  end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', p.id,
+    'name', p.name,
+    'duration_days', p.duration_days,
+    'price', p.price,
+    'registration_fee', coalesce(p.registration_fee, 0),
+    'currency', p.currency,
+    'description', p.description
+  ) order by p.price asc), '[]'::jsonb)
+  into v_plans
+  from public.plans p
+  where p.gym_id = v_gym.id
+    and p.active = true
+    and p.deleted_at is null;
+
+  return jsonb_build_object(
+    'gym', jsonb_build_object(
+      'id', v_gym.id,
+      'name', v_gym.name,
+      'currency', v_gym.currency,
+      'logo_url', v_gym.logo_url
+    ),
+    'plans', v_plans
+  );
+end;
+$$;
+
+revoke all on function public.portal_get_gym(text) from public, anon, authenticated;
+grant execute on function public.portal_get_gym(text) to anon, authenticated;
+
+-- 2. Recherche de membre anonyme pour le portail de renouvellement
 create or replace function public.portal_lookup_member(
   p_gym_code text,
   p_query text
@@ -94,7 +151,7 @@ $$;
 revoke all on function public.portal_lookup_member(text, text) from public, anon, authenticated;
 grant execute on function public.portal_lookup_member(text, text) to anon, authenticated;
 
--- 2. Détection en temps réel du dernier scan à la porte pour le renouvellement
+-- 3. Détection en temps réel du dernier scan à la porte pour le renouvellement
 create or replace function public.portal_latest_door_scan(p_gym_code text)
 returns jsonb
 language plpgsql security definer
@@ -170,7 +227,7 @@ $$;
 revoke all on function public.portal_latest_door_scan(text) from public, anon, authenticated;
 grant execute on function public.portal_latest_door_scan(text) to anon, authenticated;
 
--- 3. Mise à jour de portal_submit pour accepter member_id
+-- 4. Mise à jour de portal_submit pour accepter member_id
 create or replace function public.portal_submit(
   p_gym_code text,
   p_plan_id uuid,
@@ -246,5 +303,16 @@ $$;
 
 revoke all on function public.portal_submit(text, uuid, text, text, text, text, text, text, uuid) from public, anon, authenticated;
 grant execute on function public.portal_submit(text, uuid, text, text, text, text, text, text, uuid) to anon, authenticated;
+
+-- 5. Politiques de lecture publique pour les formules et le gym (Fallback de sécurité)
+drop policy if exists gyms_public_read on public.gyms;
+create policy gyms_public_read on public.gyms
+  for select to anon, authenticated
+  using (status in ('active', 'trial'));
+
+drop policy if exists plans_public_read on public.plans;
+create policy plans_public_read on public.plans
+  for select to anon, authenticated
+  using (active = true and deleted_at is null);
 
 commit;
