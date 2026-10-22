@@ -64,6 +64,7 @@ class SyncEngine {
   }
 
   Future<void> start() async {
+    await db.repairSyncPayloads();
     _initialized = await db.metadata('initialized') == 'true';
     _lastSync = DateTime.tryParse(await db.metadata('last_sync') ?? '');
     final offset =
@@ -74,7 +75,13 @@ class SyncEngine {
           DateTime.now().toUtc(),
     );
     _queue = db.watchQueue().listen((rows) {
-      _pending = rows.where((r) => r.status == 'pending').length;
+      final nextPending = rows.where((r) => r.status == 'pending').length;
+      final shouldTrigger = nextPending > _pending && _connected && _initialized;
+      _pending = nextPending;
+      if (shouldTrigger) {
+        _debounce?.cancel();
+        _debounce = Timer(const Duration(milliseconds: 800), () => unawaited(synchronize()));
+      }
       _failed = rows.where((r) => r.status == 'failed').length;
       _emit(state.value.phase, state.value.errorCode);
     });
@@ -267,7 +274,7 @@ class SyncEngine {
 
         if (op == null) continue;
         if (op.status == 'failed') {
-          return const SyncRejected('queue_blocked');
+          if (op.entity == 'attendance') { failedEntityIds.add(op.entityId); continue; } return const SyncRejected('queue_blocked');
         }
         if (op.status != 'pending') continue;
 

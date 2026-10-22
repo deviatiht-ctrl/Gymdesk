@@ -7,6 +7,8 @@ import 'package:printing/printing.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/access_control/access_monitor.dart';
+import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../core/sync/sync_models.dart';
@@ -298,7 +300,30 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
           }).eq('id', widget.request.id);
         } catch (_) {}
 
-        await runtime.sync?.synchronize();
+        final tplToPush = _fingerprintTemplate ??
+            (member.row['fingerprint_template'] as String?);
+        if (tplToPush != null && tplToPush.isNotEmpty) {
+          unawaited(
+            AccessAgentClient()
+                .syncTerminalMember(
+                  userId: member.id,
+                  name: member.fullName,
+                  startDate: now,
+                  endDate: endDate,
+                  templates: [
+                    tplToPush,
+                    if ((member.row['fingerprint_backup_template'] as String?)
+                            ?.isNotEmpty ==
+                        true)
+                      member.row['fingerprint_backup_template'] as String,
+                  ],
+                )
+                .catchError((_) => false),
+          );
+        }
+        AccessMonitor.instance.notifyDataChanged();
+        unawaited(AccessMonitor.instance.syncNow());
+        unawaited(runtime.sync?.synchronize());
 
         if (mounted) {
           setState(() {
@@ -443,7 +468,22 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
           } catch (_) {}
         }
 
-        await runtime.sync?.synchronize();
+        if (_fingerprintTemplate != null && _fingerprintTemplate!.isNotEmpty) {
+          unawaited(
+            AccessAgentClient()
+                .syncTerminalMember(
+                  userId: memberId,
+                  name: '$fn $ln'.trim(),
+                  startDate: now,
+                  endDate: endDate,
+                  templates: [_fingerprintTemplate!],
+                )
+                .catchError((_) => false),
+          );
+        }
+        AccessMonitor.instance.notifyDataChanged();
+        unawaited(AccessMonitor.instance.syncNow());
+        unawaited(runtime.sync?.synchronize());
 
         if (mounted) {
           setState(() {

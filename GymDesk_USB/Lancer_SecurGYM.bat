@@ -1,46 +1,30 @@
 @echo off
-title SecurGYM - Demarrage Logiciel Portable
-echo ==========================================================
-echo   SecurGYM - Demarrage Logiciel Portable (Cle USB)
-echo ==========================================================
-echo.
-echo [1/2] Lancement du pilote biometrique et serveur local...
+title SecurGYM - Demarrage Instantane (Web + USB + Terminal IP)
 
 cd /d "%~dp0"
 
-taskkill /f /im access_agent.exe >nul 2>&1
-taskkill /f /im suprema_bridge32.exe >nul 2>&1
+rem --- 1. Enregistrement automatique au demarrage de Windows (sans besoin d'informaticien ni d'admin) ---
+reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "SecurGYM_AccessAgent" /t REG_SZ /d "wscript.exe \"%~dp0Demarrer_Agent_Silencieux.vbs\"" /f >nul 2>&1
 
-start "" "%~dp0access_agent.exe"
+rem --- 2. Verifier si l'agent tourne deja en arriere-plan (0 seconde d'attente!) ---
+curl -s -m 1 http://127.0.0.1:47811/health >nul 2>&1 && goto :agent_ready
 
-echo Attente du serveur local (127.0.0.1:47811)...
-set "AGENT_UP="
-for /l %%i in (1,1,20) do (
-    curl -s -m 1 http://127.0.0.1:47811/health >nul 2>&1 && set "AGENT_UP=1" && goto :agent_ready
-    timeout /t 1 /nobreak >nul
+echo Demarrage de l'agent materiel SecurGYM (USB BioMini + Terminal IP W2)...
+if exist "%~dp0Demarrer_Agent_Silencieux.vbs" (
+    wscript.exe "%~dp0Demarrer_Agent_Silencieux.vbs"
+) else (
+    start /min "" "%~dp0access_agent.exe"
 )
 
-echo.
-echo [ERREUR] L'agent local n'a pas demarre.
-echo   - Si Windows affiche "Windows protected your PC", cliquez
-echo     "More info" puis "Run anyway".
-echo   - Verifiez que ce dossier a ete copie EN ENTIER sur la cle USB.
-pause
-exit /b 1
+for /l %%i in (1,1,15) do (
+    curl -s -m 1 http://127.0.0.1:47811/health >nul 2>&1 && goto :agent_ready
+    pathping -n -q 1 -p 150 127.0.0.1 >nul 2>&1
+)
 
 :agent_ready
-echo [2/2] Ouverture de l'application SecurGYM...
-timeout /t 1 /nobreak >nul
-
 set "DATA_DIR=%~dp0data\profile"
 
-rem --- Application native Windows (icone SecurGYM, pas de navigateur) ---
-if exist "%~dp0app\SecurGYM.exe" (
-    start "" "%~dp0app\SecurGYM.exe"
-    goto :launched
-)
-
-rem --- Sinon : navigateur en mode app ---
+rem --- 3. Ouverture instantanee de la version Web SecurGYM (compatible USB + IP) ---
 if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
     start "" "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --app=http://127.0.0.1:47811 --user-data-dir="%DATA_DIR%" --no-first-run --window-size=1280,800
 ) else if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" (
@@ -53,8 +37,4 @@ if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
     start "" http://127.0.0.1:47811
 )
 
-:launched
-echo.
-echo SecurGYM est lance !
-echo Gardez cette fenetre reduite ou fermez-la.
 exit

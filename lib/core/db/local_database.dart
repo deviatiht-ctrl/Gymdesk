@@ -194,6 +194,7 @@ class LocalDatabase extends _$LocalDatabase {
     }
     final timestamp = changedAt.toUtc().toIso8601String();
     final row = {
+      ...(previous == null ? const <String, dynamic>{} : Map<String, dynamic>.from(jsonDecode(previous.payload) as Map)),
       ...data,
       if (entity != SyncEntity.attendance) 'updated_at': timestamp,
       if (deleting) 'deleted_at': timestamp,
@@ -361,7 +362,7 @@ class LocalDatabase extends _$LocalDatabase {
         updates: {outbox},
       );
       await customUpdate(
-        "UPDATE outbox SET status = 'pending', attempts = 0, last_error = null, next_attempt_at = null WHERE status = 'failed' AND (entity = 'members' OR entity = 'subscriptions' OR entity = 'payments')",
+        "UPDATE outbox SET status = 'pending', last_error = null, next_attempt_at = null WHERE status = 'failed' AND ((entity = 'attendance' AND last_error = 'server_error') OR payload LIKE '%portal_web%' OR payload LIKE '%\"enrollment_kind\":\"new\"%')",
         updates: {outbox},
       );
     } catch (_) {}

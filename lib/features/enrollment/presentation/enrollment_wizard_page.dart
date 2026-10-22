@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/access_control/access_monitor.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/sync/sync_models.dart';
@@ -584,6 +585,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         if (_backupTemplate != null) tmpls.add(_backupTemplate!);
         unawaited(agentClient.syncTerminalMember(userId: result.memberId, name: fullName, startDate: _startDate, endDate: endDate, templates: tmpls).catchError((_) => false));
       }
+      AccessMonitor.instance.notifyDataChanged();
+      unawaited(AccessMonitor.instance.syncNow());
 
       final email = draft.email.trim();
 

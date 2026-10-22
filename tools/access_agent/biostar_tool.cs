@@ -492,13 +492,73 @@ static class Program
         }
         order.RemoveAll(u => skipped.Contains(u));
         if (order.Count == 0) { Console.WriteLine("err\tempty\tOkenn itilizatè nan fichye a"); return -1; }
-
         uint id;
         var rc = Connect(ip, port, out id);
         if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var res = EnrollBlobsOnDevice(id, order, users, fingers);
+        Native.BS2_DisconnectDevice(ctx, id);
+        Console.WriteLine(res);
+        return res.StartsWith("ok\t") ? 0 : -1;
+    }
 
+    static string EnrollFileOnDevice(uint id, string file)
+    {
+        if (!System.IO.File.Exists(file)) return "err\tempty\tFichye enroll pa egziste";
+        var users = new Dictionary<string, BS2UserBlob>();
+        var fingers = new Dictionary<string, List<BS2Fingerprint>>();
+        var order = new List<string>();
+        var skipped = new List<string>();
+        foreach (var raw in System.IO.File.ReadAllLines(file))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#")) continue;
+            var f = line.Split('\t');
+            if (f.Length >= 3 && f[0] == "user")
+            {
+                var uid = f[1];
+                if (!users.ContainsKey(uid))
+                {
+                    var blob = NewBlob(uid, f[2]);
+                    uint start, end;
+                    if (f.Length >= 5 && uint.TryParse(f[3], out start) && uint.TryParse(f[4], out end) && end > start)
+                    {
+                        blob.setting.startTime = start;
+                        blob.setting.endTime = end;
+                    }
+                    users[uid] = blob;
+                    fingers[uid] = new List<BS2Fingerprint>();
+                    order.Add(uid);
+                }
+            }
+            else if (f.Length >= 4 && f[0] == "finger" && users.ContainsKey(f[1]))
+            {
+                var fp = new BS2Fingerprint { index = byte.Parse(f[2]), flag = 0, reserved = 0, data = new byte[2 * 384] };
+                var skip = false;
+                for (var t = 0; t < 2 && 3 + t < f.Length && f[3 + t].Length > 0; t++)
+                {
+                    var tpl = Convert.FromBase64String(f[3 + t]);
+                    if (tpl.Length > 384) { skip = true; break; }
+                    Array.Copy(tpl, 0, fp.data, t * 384, tpl.Length);
+                }
+                if (!skip)
+                {
+                    var empty = true;
+                    for (var b = 384; b < 768; b++) if (fp.data[b] != 0) { empty = false; break; }
+                    if (empty) Array.Copy(fp.data, 0, fp.data, 384, 384);
+                }
+                if (skip) skipped.Add(f[1]); else fingers[f[1]].Add(fp);
+            }
+        }
+        order.RemoveAll(u => skipped.Contains(u));
+        if (order.Count == 0) return "err\tempty\tOkenn itilizatè nan fichye a";
+        return EnrollBlobsOnDevice(id, order, users, fingers);
+    }
+
+    static string EnrollBlobsOnDevice(uint id, List<string> order, Dictionary<string, BS2UserBlob> users, Dictionary<string, List<BS2Fingerprint>> fingers)
+    {
         var blobs = order.Select(u => users[u]).ToArray();
         var fingerPtrs = new List<IntPtr>();
+        int rc;
         try
         {
             for (var i = 0; i < order.Count; i++)
@@ -518,10 +578,8 @@ static class Program
         {
             foreach (var p in fingerPtrs) Marshal.FreeHGlobal(p);
         }
-        Native.BS2_DisconnectDevice(ctx, id);
-        if (rc < 0) { Console.WriteLine("err\tenroll_failed\tBS2_EnrollUser: " + rc); return rc; }
-        Console.WriteLine("ok\t" + order.Count);
-        return 0;
+        if (rc < 0) return "err\tenroll_failed\tBS2_EnrollUser: " + rc;
+        return "ok\t" + order.Count;
     }
 
     static BS2UserBlob NewBlob(string uid, string name)
@@ -744,7 +802,7 @@ static class Program
         var exitCode = 0;
         while (seconds <= 0 || (DateTime.UtcNow - started).TotalSeconds < seconds)
         {
-            System.Threading.Thread.Sleep(150);
+            System.Threading.Thread.Sleep(50);
             if (cmdDir != null && System.IO.Directory.Exists(cmdDir))
             {
                 foreach (var file in System.IO.Directory.GetFiles(cmdDir, "*.cmd"))
@@ -755,14 +813,18 @@ static class Program
                     var resFile = System.IO.Path.ChangeExtension(file, ".res");
                     var capturedDoor = doorId;
                     var deviceId = id;
-                    new System.Threading.Thread(() => RunDoorCommand(deviceId, capturedDoor, cmd, resFile)) { IsBackground = true }.Start();
+                    var capturedIp = ip;
+                    var capturedPort = port;
+                    new System.Threading.Thread(() => RunDoorCommand(deviceId, capturedDoor, cmd, resFile, capturedIp, capturedPort)) { IsBackground = true }.Start();
                 }
             }
             if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 20)
             {
                 lastBeat = DateTime.UtcNow;
                 BS2SimpleDeviceInfo info;
-                if (Native.BS2_GetDeviceInfo(ctx, id, out info) <= 0)
+                int pingRc;
+                lock (cmdLock) { pingRc = Native.BS2_GetDeviceInfo(ctx, id, out info); }
+                if (pingRc <= 0)
                 {
                     // Tèminal la dekonekte: kite ajan an relanse siveyan an.
                     Console.WriteLine("err\tdisconnected\tTèminal la pa reponn ankò");
@@ -777,10 +839,40 @@ static class Program
         return exitCode;
     }
 
-    static void RunDoorCommand(uint id, int doorId, string cmd, string resFile)
+    static readonly object cmdLock = new object();
+
+    static void RunDoorCommand(uint id, int doorId, string cmd, string resFile, string ip, ushort port)
     {
         string result;
-        if (doorId == 0) result = "err\tno_door\tOkenn pòt pa konfigire sou tèminal la";
+        if (cmd == "ping")
+        {
+            BS2SimpleDeviceInfo info;
+            int rc;
+            lock (cmdLock) { rc = Native.BS2_GetDeviceInfo(ctx, id, out info); }
+            result = rc > 0
+                ? "ok\t" + id + "\t0x" + info.type.ToString("X4") + "\t" + ip + "\t" + port
+                : "err\tunreachable\tBS2_GetDeviceInfo: " + rc;
+        }
+        else if (cmd.StartsWith("enroll\t"))
+        {
+            var tsvFile = cmd.Substring(7).Trim();
+            lock (cmdLock) { result = EnrollFileOnDevice(id, tsvFile); }
+        }
+        else if (cmd.StartsWith("rmuser\t"))
+        {
+            var uid = cmd.Substring(7).Trim();
+            var uids = Marshal.AllocHGlobal(32);
+            try
+            {
+                var ub = System.Text.Encoding.ASCII.GetBytes(uid);
+                for (var i = 0; i < 32; i++) Marshal.WriteByte(uids, i, i < ub.Length ? ub[i] : (byte)0);
+                int rc;
+                lock (cmdLock) { rc = Native.BS2_RemoveUser(ctx, id, uids, 1); }
+                result = rc >= 0 ? "ok\t" + uid : "err\tremove\t" + uid + ": " + rc;
+            }
+            finally { Marshal.FreeHGlobal(uids); }
+        }
+        else if (doorId == 0) result = "err\tno_door\tOkenn pòt pa konfigire sou tèminal la";
         else
         {
             var parts = cmd.Split(' ');
@@ -794,19 +886,19 @@ static class Program
                     uint seconds = 3;
                     if (parts.Length > 1) uint.TryParse(parts[1], out seconds);
                     seconds = Math.Max(1u, Math.Min(seconds, 20u));
-                    rc = Native.BS2_TimedUnlockDoor(ctx, id, 0x04, doorIds, 1, seconds);
+                    lock (cmdLock) { rc = Native.BS2_TimedUnlockDoor(ctx, id, 0x04, doorIds, 1, seconds); }
                     if (rc >= 0)
                     {
                         // Menm koreksyon ak Pulse(): san kapteur pòt, timed unlock
                         // la pa ekspire — nou retire flag operatè a apre dire a.
                         System.IO.File.WriteAllText(resFile, "ok\t1");
                         System.Threading.Thread.Sleep((int)seconds * 1000);
-                        Native.BS2_ReleaseDoor(ctx, id, 0x04, doorIds, 1);
+                        lock (cmdLock) { Native.BS2_ReleaseDoor(ctx, id, 0x04, doorIds, 1); }
                         return;
                     }
                 }
-                else if (parts[0] == "lock") rc = Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1);
-                else rc = Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+                else if (parts[0] == "lock") { lock (cmdLock) { rc = Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1); } }
+                else { lock (cmdLock) { rc = Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1); } }
                 result = rc >= 0 ? "ok\t1" : "err\tdoor\t" + parts[0] + ": " + rc;
             }
             finally { Marshal.FreeHGlobal(doorIds); }

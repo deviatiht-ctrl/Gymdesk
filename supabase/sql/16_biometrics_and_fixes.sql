@@ -247,7 +247,7 @@ begin
                 if v_duplicate_id is not null then
                     v_data := v_data || jsonb_build_object('result', 'denied_duplicate', 'denial_reason', 'duplicate_scan', 'entry_number_today', null);
                 else
-                    select * into v_validity from public.member_validity(v_gym, v_member_id, v_scanned_at);
+                    select * into v_validity from public.member_validity(v_member_id, v_scanned_at);
                     if v_validity.valid then
                         select count(*) + 1 into v_entry_number from public.attendance a
                         where a.gym_id = v_gym and a.member_id = v_member_id and a.result = 'granted'

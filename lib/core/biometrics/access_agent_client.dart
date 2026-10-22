@@ -43,7 +43,7 @@ class AccessAgentClient {
   void startMonitoring() {
     checkHealth();
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => checkHealth());
+    _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) => checkHealth());
   }
 
   Future<AccessAgentStatus> checkHealth() async {
@@ -194,15 +194,29 @@ class AccessAgentClient {
     String? terminalIp,
   }) async {
     try {
-      final start = startDate.millisecondsSinceEpoch ~/ 1000;
-      final end = endDate.millisecondsSinceEpoch ~/ 1000;
+      const start = 978307200; // 2001-01-01 00:00:00 UTC (defaultStart BioStar 2)
+      final endRaw = DateTime.utc(
+                endDate.year,
+                endDate.month,
+                endDate.day,
+                23,
+                59,
+                59,
+              ).millisecondsSinceEpoch ~/
+              1000 +
+          5 * 3600;
+      final end = endRaw.clamp(978307201, 1924991999);
+      final fingers = [
+        for (final t in templates)
+          if (t.trim().isNotEmpty) [t.trim()],
+      ];
       final res = await syncTerminalMembers([
         {
           'id': userId,
           'name': name.length > 48 ? name.substring(0, 48) : name,
           'start': start,
           'end': end,
-          'fingers': templates.isEmpty ? [] : [templates],
+          'fingers': fingers,
         }
       ], terminalIp: terminalIp);
       return res?['success'] == true;
@@ -216,7 +230,9 @@ class AccessAgentClient {
       final res = await http.post(
         Uri.parse('$baseUrl/api/terminals/ping'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'ip': terminalIp ?? '192.168.1.41'}),
+        body: jsonEncode({
+          if (terminalIp != null && terminalIp.isNotEmpty) 'ip': terminalIp,
+        }),
       ).timeout(const Duration(seconds: 15));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -231,7 +247,11 @@ class AccessAgentClient {
       final res = await http.post(
         Uri.parse('$baseUrl/api/terminals/pulse'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'terminal': 'BioEntry W2', 'ip': terminalIp ?? '192.168.1.41', 'seconds': seconds}),
+        body: jsonEncode({
+          'terminal': 'BioEntry W2',
+          if (terminalIp != null && terminalIp.isNotEmpty) 'ip': terminalIp,
+          'seconds': seconds,
+        }),
       ).timeout(const Duration(seconds: 30));
       if (res.statusCode != 200) return false;
       final data = jsonDecode(res.body);
@@ -273,7 +293,7 @@ class AccessAgentClient {
         body: jsonEncode({
           'members': members,
           'remove': remove,
-          'ip': terminalIp ?? '192.168.1.41',
+          if (terminalIp != null && terminalIp.isNotEmpty) 'ip': terminalIp,
         }),
       ).timeout(const Duration(seconds: 90));
       if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
@@ -338,7 +358,9 @@ class AccessAgentClient {
       final res = await http.post(
         Uri.parse('$baseUrl/api/terminals/release'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'ip': terminalIp ?? '192.168.1.41'}),
+        body: jsonEncode({
+          if (terminalIp != null && terminalIp.isNotEmpty) 'ip': terminalIp,
+        }),
       ).timeout(const Duration(seconds: 5));
       return res.statusCode == 200;
     } catch (_) {
