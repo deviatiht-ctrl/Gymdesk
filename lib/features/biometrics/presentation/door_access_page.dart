@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -72,13 +73,15 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     final runtime = ref.read(appRuntimeProvider);
     try {
       _cfg = await TerminalAccessService.loadConfig(runtime.client, runtime.session!);
-      // Siveyan global la (AccessMonitor) trete evènman W2 yo sou Desktop ak Web (PC resepsyon).
-      final monitor = AccessMonitor.instance;
-      unawaited(monitor.start(runtime));
-      _terminalOnline = monitor.terminalOnline.value;
-      monitor.terminalOnline.addListener(_onMonitorStatus);
-      monitor.agentOnline.addListener(_onMonitorStatus);
-      _terminalSub = monitor.decisions.listen(_onTerminalDecision);
+      if (!kIsWeb) {
+        // Siveyan global la (AccessMonitor) trete evènman W2 yo; paj la jis afiche yo.
+        final monitor = AccessMonitor.instance;
+        unawaited(monitor.start(runtime));
+        _terminalOnline = monitor.terminalOnline.value;
+        monitor.terminalOnline.addListener(_onMonitorStatus);
+        monitor.agentOnline.addListener(_onMonitorStatus);
+        _terminalSub = monitor.decisions.listen(_onTerminalDecision);
+      }
 
       final gymId = runtime.session?.gymId;
       if (gymId != null) {
@@ -268,20 +271,18 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         _processing = false;
       });
 
-      // Si recordToCloud se false (pa egzanp apèl lokal san recordAccessEvent), anrejistre prezans lan
-      if (!recordToCloud) {
-        try {
-          await _attendanceRepo.verifyFingerprintAndGrant(
-            member: member,
-            fingerprintMatched: true,
-            scannedAt: now,
-            offline: false,
-            suspectClock: false,
-          );
-        } catch (_) {}
-      }
+      // 1. Enregistre la présence biométrique
+      try {
+        await _attendanceRepo.verifyFingerprintAndGrant(
+          member: member,
+          fingerprintMatched: true,
+          scannedAt: now,
+          offline: false,
+          suspectClock: false,
+        );
+      } catch (_) {}
 
-      // Envoie l'impulsion relais à la porte
+      // 2. Envoie l'impulsion relais à la porte
       unawaited(_triggerDoorRelay());
 
       _scheduleDismiss(const Duration(seconds: 6));
@@ -535,34 +536,37 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                ValueListenableBuilder<BiometricSensorState>(
-                                  valueListenable: _biometricService.state,
-                                  builder: (context, sensorState, _) {
-                                    final usbReady = sensorState == BiometricSensorState.ready;
-                                    return Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: usbReady ? const Color(0xFF10B981).withAlpha(40) : Colors.white.withAlpha(20),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: usbReady ? const Color(0xFF10B981) : Colors.white24,
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(LucideIcons.usb, size: 12, color: usbReady ? const Color(0xFF34D399) : Colors.white38),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            usbReady ? (isFr ? 'USB : Prêt' : 'USB : Pare') : (isFr ? 'USB : Débranché' : 'USB : Deploge'),
-                                            style: TextStyle(fontSize: 10, color: usbReady ? const Color(0xFF34D399) : Colors.white38, fontWeight: FontWeight.w600),
+                                if (!kIsWeb)
+                                  ValueListenableBuilder<BiometricSensorState>(
+                                    valueListenable: _biometricService.state,
+                                    builder: (context, sensorState, _) {
+                                      final usbReady = sensorState == BiometricSensorState.ready;
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: usbReady ? const Color(0xFF10B981).withAlpha(40) : Colors.white.withAlpha(20),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: usbReady ? const Color(0xFF10B981) : Colors.white24,
+                                            width: 1,
                                           ),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(LucideIcons.usb, size: 12, color: usbReady ? const Color(0xFF34D399) : Colors.white38),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              usbReady ? (isFr ? 'USB : Prêt' : 'USB : Pare') : (isFr ? 'USB : Débranché' : 'USB : Deploge'),
+                                              style: TextStyle(fontSize: 10, color: usbReady ? const Color(0xFF34D399) : Colors.white38, fontWeight: FontWeight.w600),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  )
+                                else
+                                  const SizedBox.shrink(),
                                 Row(
                                   children: [
                                     IconButton(

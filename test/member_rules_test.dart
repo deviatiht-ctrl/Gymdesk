@@ -182,7 +182,9 @@ void main() {
   });
 
   test('subscription end dates are inclusive', () {
-    expect(ymd(subscriptionEnd(DateTime.utc(2026, 1, 1), 30)), '2026-01-30');
+    expect(ymd(subscriptionEnd(DateTime.utc(2026, 1, 1), 30)), '2026-01-31');
+    expect(ymd(subscriptionEnd(DateTime.utc(2026, 10, 17), 30)), '2026-11-16');
+    expect(ymd(subscriptionEnd(DateTime.utc(2026, 1, 1), 1)), '2026-01-01');
     expect(
       memberValidity(
         member(),

@@ -41,6 +41,9 @@ class ReceiptData {
     this.paidAmount,
     this.tenderedAmount,
     this.cashierName,
+    this.registrationFee = 0,
+    this.planFee = 0,
+    this.paymentReason,
   });
 
   /// Reçu reconstruit depuis un paiement enregistré (historique, page Reçus).
@@ -80,6 +83,9 @@ class ReceiptData {
     paidAmount: payment.paidAmount,
     tenderedAmount: payment.tenderedAmount,
     cashierName: cashierName,
+    registrationFee: payment.registrationFee,
+    planFee: payment.planFee,
+    paymentReason: payment.paymentReason,
   );
 
   /// Devise réellement donnée (null = même devise que [currency]).
@@ -88,6 +94,9 @@ class ReceiptData {
   final double? paidAmount;
   final double? tenderedAmount;
   final String? cashierName;
+  final double registrationFee;
+  final double planFee;
+  final String? paymentReason;
   bool get foreignPayment => paidCurrency != null && paidCurrency != currency;
 
   ReceiptData withLogo(Uint8List? logo) => ReceiptData(
@@ -120,6 +129,9 @@ class ReceiptData {
     paidAmount: paidAmount,
     tenderedAmount: tenderedAmount,
     cashierName: cashierName,
+    registrationFee: registrationFee,
+    planFee: planFee,
+    paymentReason: paymentReason,
   );
 
   final String paymentId;
@@ -167,7 +179,7 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, Map<String, String> labels) 
   String pm(double v) => '${money.format(v)} ${data.paidCurrency}';
   final paidKept = data.paidAmount ?? 0;
   final tendered = data.tenderedAmount ?? paidKept;
-  String l(String key) => labels[key] ?? key;
+  String l(String key, [String? fallback]) => labels[key] ?? fallback ?? key;
 
   Uint8List? promoQr = data.qrPromoBytes;
   if (promoQr == null) {
@@ -313,6 +325,10 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, Map<String, String> labels) 
 
           // Detay peman
           _line(l('receipt_plan'), data.planName),
+          if (data.paymentReason != null &&
+              data.paymentReason!.isNotEmpty &&
+              data.paymentReason != 'Abonnement')
+            _line(l('payment_reason', 'Motif'), data.paymentReason!),
           if (data.periodStart != null && data.periodEnd != null)
             _line(
               l('receipt_period'),
@@ -327,6 +343,36 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, Map<String, String> labels) 
           pw.SizedBox(height: 6),
           pw.Divider(color: PdfColors.grey300),
           pw.SizedBox(height: 6),
+          if (data.registrationFee > 0) ...[
+            _line(
+              l('registration_fee', "Frais d'inscription"),
+              m(data.registrationFee),
+            ),
+            _line(
+              l('receipt_plan_fee', 'Tarif formule'),
+              m(
+                data.planFee > 0
+                    ? data.planFee
+                    : (data.amount - data.registrationFee)
+                        .clamp(0, double.infinity)
+                        .toDouble(),
+              ),
+            ),
+          ] else if (data.paymentReason != null &&
+              data.paymentReason!.toLowerCase().contains('inclus')) ...[
+            _line(
+              l('registration_fee', "Frais d'inscription"),
+              l('reg_fee_included', 'Inclus (1er mois)'),
+            ),
+          ] else if (data.paymentReason != null &&
+              (data.paymentReason!.toLowerCase().contains('offert') ||
+                  data.paymentReason!.toLowerCase().contains('waived') ||
+                  data.paymentReason!.toLowerCase().contains('gratis'))) ...[
+            _line(
+              l('registration_fee', "Frais d'inscription"),
+              '0.00 ${data.currency} (${l('reg_fee_waived', 'Offerts')})',
+            ),
+          ],
           _line(l('receipt_amount'), m(data.amount), bold: true),
           if (data.creditUsed > 0)
             _line(l('receipt_paid_by_balance'), '- ${m(data.creditUsed)}'),

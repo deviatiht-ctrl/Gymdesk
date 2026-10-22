@@ -14,13 +14,14 @@ import 'suprema_ffi.dart';
 ///   signale honnêtement (`reader_connected: false`) : aucune capture simulée.
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
-const String agentVersion = '3.5.0';
+const String agentVersion = '3.4.0';
 bool _doorConnected = true;
 
 ReaderBackend? _sdk;
 DateTime _lastRefresh = DateTime.fromMillisecondsSinceEpoch(0);
 DateTime _lastLoadAttempt = DateTime.fromMillisecondsSinceEpoch(0);
 bool _captureBusy = false;
+Completer<Map<String, dynamic>>? _activeCapture;
 
 Map<String, dynamic>? _terminalConfig;
 DateTime _terminalSearchAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -104,11 +105,10 @@ void _ensureWatchLoop() {
 }
 
 Future<void> _watchLoop() async {
-  var backoff = 2;
-  var failCount = 0;
+  var backoff = 3;
   while (true) {
     if (_watchPaused || _biostarTool() == null) {
-      await Future<void>.delayed(const Duration(seconds: 1));
+      await Future<void>.delayed(const Duration(seconds: 2));
       continue;
     }
     final cfg = _biostarTool()!;
@@ -131,8 +131,7 @@ Future<void> _watchLoop() async {
         if (f.first == 'watching') {
           _watchReady = true;
           _watchError = null;
-          backoff = 2;
-          failCount = 0;
+          backoff = 3;
           print('[W2] Siveyan aktif sou ${term['ip']} (${f.length > 1 ? f[1] : '?'})');
           broadcastEvent({'type': 'terminal_watch', 'online': true, 'ip': term['ip']});
         } else if (f.first == 'evt' && f.length >= 7) {
@@ -168,65 +167,10 @@ Future<void> _watchLoop() async {
     _watchReady = false;
     if (wasReady) broadcastEvent({'type': 'terminal_watch', 'online': false});
     if (!_watchPaused) {
-      failCount++;
-      if (failCount >= 2) {
-        await _autoDiscoverOrConfigureTerminal();
-      }
       await Future<void>.delayed(Duration(seconds: backoff));
-      backoff = (backoff * 2).clamp(2, 12);
+      backoff = (backoff * 2).clamp(3, 30);
     }
   }
-}
-
-DateTime _lastAutoNetCheck = DateTime.fromMillisecondsSinceEpoch(0);
-
-/// Auto-dekouvri tèminal BioEntry W2 sou kab rezo a epi mete terminal.json ajou otomatikman.
-Future<void> _autoDiscoverOrConfigureTerminal() async {
-  final now = DateTime.now();
-  if (now.difference(_lastAutoNetCheck).inSeconds < 20) return;
-  _lastAutoNetCheck = now;
-  try {
-    // 0. Si adaptatè Ethernet la konekte dirèk ak W2 a san routeur DHCP (APIPA 169.254.x.x),
-    // eseye mete 192.168.1.50/24 otomatikman sou li.
-    final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
-    final has192 = interfaces.any(
-      (iface) => iface.addresses.any((a) => a.address.startsWith('192.168.1.')),
-    );
-    if (!has192) {
-      for (final iface in interfaces) {
-        final nameLower = iface.name.toLowerCase();
-        final isEth = nameLower.contains('ethernet') || nameLower.contains('eth') || nameLower.contains('lan');
-        final hasApipa = iface.addresses.any((a) => a.address.startsWith('169.254.'));
-        if (isEth || hasApipa) {
-          await Process.run('netsh', [
-            'interface', 'ip', 'set', 'address',
-            'name=${iface.name}', 'static', '192.168.1.50', '255.255.255.0',
-          ]);
-        }
-      }
-    }
-
-    // 1. Chèche si gen yon tèminal BioEntry W2 sou rezo lokal la via UDP broadcast
-    final lines = await _biostarRun(['search'], timeout: const Duration(seconds: 8));
-    for (final l in lines) {
-      if (l.first == 'device' && l.length >= 5) {
-        final foundIp = l[3].trim();
-        final foundPort = int.tryParse(l[4].trim()) ?? 51211;
-        final current = terminalConfig();
-        if (foundIp.isNotEmpty && (foundIp != current['ip'] || foundPort != current['port'])) {
-          _terminalConfig = {'ip': foundIp, 'port': foundPort};
-          try {
-            final exeDir = File(Platform.resolvedExecutable).parent.path;
-            File('$exeDir${Platform.pathSeparator}terminal.json').writeAsStringSync(
-              jsonEncode({'ip': foundIp, 'port': foundPort}),
-            );
-          } catch (_) {}
-          print('[W2] Tèminal BioEntry W2 detekte otomatikman sou $foundIp:$foundPort!');
-        }
-        return;
-      }
-    }
-  } catch (_) {}
 }
 
 Future<void> _pauseWatch() async {
@@ -242,19 +186,18 @@ Future<void> _pauseWatch() async {
 
 void _resumeWatch() => _watchPaused = false;
 
-/// Kòmand pòt/enroll/ping via siveyan an (pa gen 2yèm koneksyon). Retounen null si
+/// Kòmand pòt via siveyan an (pa gen 2yèm koneksyon). Retounen null si
 /// siveyan an pa disponib — moun ki rele a fè yon apèl biostar_tool nòmal.
-Future<List<String>?> _watchDoorCommand(String cmd, {int timeoutMs = 6000}) async {
+Future<List<String>?> _watchDoorCommand(String cmd) async {
   if (!_watchReady || _watchProc == null) return null;
   final name = 'c${DateTime.now().microsecondsSinceEpoch}';
   final sep = Platform.pathSeparator;
   final res = File('${_watchCmdDir.path}$sep$name.res');
-  final steps = (timeoutMs ~/ 40).clamp(10, 1000);
   try {
     await File('${_watchCmdDir.path}$sep$name.tmp').writeAsString(cmd, flush: true);
     await File('${_watchCmdDir.path}$sep$name.tmp').rename('${_watchCmdDir.path}$sep$name.cmd');
-    for (var i = 0; i < steps; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 40));
+    for (var i = 0; i < 40; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 150));
       if (res.existsSync()) {
         final out = (await res.readAsString()).trim().split('\t');
         try { await res.delete(); } catch (_) {}
@@ -346,46 +289,23 @@ List<String> _sdkCandidateDirs() {
   ];
 }
 
-bool _sdkRefreshing = false;
-bool _lastReaderConnected = false;
-
 /// Chaje SDK a (FFI dirèk si DLL yo gen menm achitekti, sinon pon 32-bit la),
-/// re-eseye chak 5 s, epi rafrechi lis lektè yo chak 2 s (USB plug-and-play).
-Future<void> _ensureSdk({bool force = false}) async {
-  if (_sdkRefreshing) return;
-  _sdkRefreshing = true;
-  try {
-    final now = DateTime.now();
-    final sdk = _sdk;
-    if (sdk is SupremaBridge && !sdk.alive) _sdk = null;
-    if (_sdk == null) {
-      if (!force && now.difference(_lastLoadAttempt).inSeconds < 5) return;
-      _lastLoadAttempt = now;
-      _lastRefresh = now;
-      _sdk = SupremaSdk.load(_sdkCandidateDirs()) ?? await _startBridge();
-    } else if (!_captureBusy && (force || now.difference(_lastRefresh).inSeconds >= 2)) {
-      _lastRefresh = now;
-      await _sdk!.refresh();
-    }
-    final connected = _sdk?.readerConnected ?? false;
-    if (connected != _lastReaderConnected) {
-      _lastReaderConnected = connected;
-      broadcastEvent({
-        'type': 'usb_reader',
-        'connected': connected,
-        'serial': _sdk?.scannerId,
-        'timestamp': DateTime.now().toIso8601String(),
-      });
-    }
-  } finally {
-    _sdkRefreshing = false;
+/// re-eseye chak 15 s, epi rafrechi lis lektè yo chak 3 s (USB plug-and-play).
+Future<void> _ensureSdk() async {
+  final now = DateTime.now();
+  final sdk = _sdk;
+  if (sdk is SupremaBridge && !sdk.alive) _sdk = null;
+  if (_sdk == null) {
+    if (now.difference(_lastLoadAttempt).inSeconds < 15) return;
+    _lastLoadAttempt = now;
+    _lastRefresh = now;
+    _sdk = SupremaSdk.load(_sdkCandidateDirs()) ?? await _startBridge();
+    return;
   }
-}
-
-void _startUsbHotplugLoop() {
-  Timer.periodic(const Duration(seconds: 2), (_) {
-    if (!_captureBusy) unawaited(_ensureSdk());
-  });
+  if (!_captureBusy && now.difference(_lastRefresh).inSeconds >= 3) {
+    _lastRefresh = now;
+    await _sdk!.refresh();
+  }
 }
 
 Future<ReaderBackend?> _startBridge() async {
@@ -406,12 +326,18 @@ Future<ReaderBackend?> _startBridge() async {
 Future<void> main(List<String> args) async {
   final port = args.isNotEmpty ? int.tryParse(args[0]) ?? 47811 : 47811;
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+  await _ensureSdk();
   print('========================================================');
   print(' GymDesk Portable Access Agent $agentVersion sou port $port');
   print(' URL Local : http://127.0.0.1:$port');
+  if (_sdk == null) {
+    print(' [!] SDK Suprema pa chaje: ${SupremaSdk.lastLoadError}');
+  } else if (!_sdk!.readerConnected) {
+    print(' [!] SDK chaje, men okenn lektè Suprema pa konekte.');
+  } else {
+    print(' Lektè Suprema konekte (${_sdk!.mode}): ${_sdk!.scannerId}');
+  }
   print('========================================================');
-  unawaited(_ensureSdk(force: true));
-  _startUsbHotplugLoop();
   _ensureWatchLoop();
 
   await for (final request in server) {
@@ -422,11 +348,9 @@ Future<void> main(List<String> args) async {
 void _setCorsHeaders(HttpResponse res) {
   res.headers.set('Access-Control-Allow-Origin', '*');
   res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
-  // Private Network Access + CORP: pèmèt paj HTTPS (securgym.com / Vercel) rele agent lokal la san blokaj.
+  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  // Private Network Access: pèmèt paj HTTPS (Vercel) rele agent lokal la.
   res.headers.set('Access-Control-Allow-Private-Network', 'true');
-  res.headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.headers.set('Access-Control-Max-Age', '86400');
 }
 
 Future<Map<String, dynamic>> _readJson(HttpRequest request) async {
@@ -473,27 +397,38 @@ Future<void> _handleCapture(HttpRequest request, HttpResponse res) async {
     await _json(res, _readerUnavailable(), status: HttpStatus.serviceUnavailable);
     return;
   }
-  if (_captureBusy) {
-    await _json(res, {'success': false, 'error': 'busy', 'message': 'Une capture est déjà en cours.'},
-        status: HttpStatus.conflict);
+  if (_captureBusy && _activeCapture != null) {
+    final shared = await _activeCapture!.future;
+    await _json(res, shared);
     return;
   }
 
+  final completer = Completer<Map<String, dynamic>>();
+  _activeCapture = completer;
   _captureBusy = true;
   broadcastEvent({'type': 'waiting_finger'});
   try {
     final cap = await sdk.capture(timeoutMs: timeoutMs, minQuality: minQuality, tplType: tplType);
     broadcastEvent({'type': 'fingerprint_captured', 'quality': cap.quality});
-    await _json(res, {
+    final payload = <String, dynamic>{
       'success': true,
       'template': cap.templateB64,
       'quality': cap.quality,
       'format': tplType == templateTypeSuprema ? 'suprema_native' : 'iso_19794_2',
-    });
+    };
+    if (!completer.isCompleted) completer.complete(payload);
+    await _json(res, payload);
   } on SupremaException catch (e) {
-    await _json(res, {'success': false, 'error': e.code, 'message': e.message});
+    final errPayload = <String, dynamic>{'success': false, 'error': e.code, 'message': e.message};
+    if (!completer.isCompleted) completer.complete(errPayload);
+    await _json(res, errPayload);
+  } catch (e) {
+    final errPayload = <String, dynamic>{'success': false, 'error': 'capture_failed', 'message': '$e'};
+    if (!completer.isCompleted) completer.complete(errPayload);
+    await _json(res, errPayload);
   } finally {
     _captureBusy = false;
+    _activeCapture = null;
   }
 }
 
@@ -510,13 +445,9 @@ Future<void> _handleRequest(HttpRequest request) async {
   final path = request.uri.path;
 
   try {
-    // 1. Diagnostics & Statut (valè reyèl SDK a, san bloke repons HTTP a)
+    // 1. Diagnostics & Statut (valè reyèl SDK a)
     if (path == '/health' || path == '/status') {
-      if (_sdk == null) {
-        await _ensureSdk();
-      } else {
-        unawaited(_ensureSdk());
-      }
+      await _ensureSdk();
       final sdk = _sdk;
       await _json(res, {
         'status': 'ok',
@@ -529,7 +460,6 @@ Future<void> _handleRequest(HttpRequest request) async {
         'reader_serial': sdk?.scannerId,
         'door_connected': _doorConnected,
         'terminal_watch': _watchReady,
-        'terminal_ip': terminalConfig()['ip'],
       });
       return;
     }
@@ -618,14 +548,7 @@ Future<void> _handleRequest(HttpRequest request) async {
       final ip = body['ip']?.toString() ?? cfg['ip'] as String;
       final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
       try {
-        if (ip == cfg['ip'] && _watchReady) {
-          final viaWatch = await _watchDoorCommand('ping', timeoutMs: 3000);
-          if (viaWatch != null && viaWatch.first == 'ok') {
-            await _json(res, {'success': true, 'online': true, 'ip': ip, 'port': port});
-            return;
-          }
-        }
-        final lines = await _biostarCall(['ping', ip, '$port'], timeout: const Duration(seconds: 15));
+        final lines = await _biostarCall(['ping', ip, '$port'], timeout: const Duration(seconds: 20));
         final ok = lines.any((l) => l.first == 'ok');
         await _json(res, {'success': true, 'online': ok, 'ip': ip, 'port': port});
       } on SupremaException catch (e) {
@@ -726,23 +649,16 @@ Future<void> _handleRequest(HttpRequest request) async {
       var members = (body['members'] as List?) ?? const [];
       if (members.isEmpty && body['user'] is Map) {
         final u = body['user'] as Map;
-        final parsedEnd = DateTime.tryParse(u['end_date']?.toString() ?? '');
-        var endSec = (parsedEnd?.millisecondsSinceEpoch ?? 0) ~/ 1000;
-        if (parsedEnd != null && parsedEnd.hour == 0 && parsedEnd.minute == 0 && parsedEnd.second == 0) {
-          endSec += 86399;
-        }
-        final tpls = (u['templates'] as List?)
-                ?.map((t) => t.toString())
-                .where((t) => t.isNotEmpty)
-                .toList() ??
-            [];
+        final startSec = (DateTime.tryParse(u['start_date']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0) ~/ 1000;
+        final endSec = (DateTime.tryParse(u['end_date']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0) ~/ 1000;
+        final tpls = (u['templates'] as List?)?.map((t) => t.toString()).toList() ?? [];
         members = [
           {
             'id': u['user_id'] ?? u['id'],
             'name': u['name'] ?? '',
-            'start': 978307200,
-            'end': endSec > 978307200 ? endSec.clamp(978307201, 1924991999) : 1924991999,
-            'fingers': [for (final t in tpls) [t]],
+            'start': startSec > 0 ? startSec : 978307200,
+            'end': endSec > 0 ? endSec : 1924991999,
+            'fingers': tpls.isEmpty ? [] : [tpls],
           }
         ];
       }
@@ -758,12 +674,7 @@ Future<void> _handleRequest(HttpRequest request) async {
         var removed = 0;
         final removeErrors = <String>[];
         for (final uid in remove) {
-          final viaWatch = ip == cfg['ip']
-              ? await _watchDoorCommand('rmuser\t$uid', timeoutMs: 8000)
-              : null;
-          final out = viaWatch != null
-              ? [viaWatch]
-              : await _biostarCall(['rmuser', ip, uid, '$port'], timeout: const Duration(seconds: 20));
+          final out = await _biostarCall(['rmuser', ip, uid, '$port'], timeout: const Duration(seconds: 20));
           if (out.any((l) => l.first == 'ok')) {
             removed++;
           } else {
@@ -793,12 +704,7 @@ Future<void> _handleRequest(HttpRequest request) async {
         final tmp = File('$exeDir${Platform.pathSeparator}enroll_${DateTime.now().millisecondsSinceEpoch}.tsv');
         try {
           await tmp.writeAsString(lines.join('\n'), flush: true);
-          final viaWatch = ip == cfg['ip']
-              ? await _watchDoorCommand('enroll\t${tmp.path}', timeoutMs: 30000)
-              : null;
-          final out = viaWatch != null
-              ? [viaWatch]
-              : await _biostarCall(['enroll', ip, tmp.path, '$port'], timeout: const Duration(seconds: 60));
+          final out = await _biostarCall(['enroll', ip, tmp.path, '$port'], timeout: const Duration(seconds: 60));
           final ok = out.any((l) => l.first == 'ok');
           await _json(res, {
             'success': ok,
@@ -955,12 +861,9 @@ Future<bool> _serveStaticFile(HttpRequest request, HttpResponse res, String reqP
   final exeDir = File(Platform.resolvedExecutable).parent.path;
   final candidateDirs = [
     Directory('$exeDir/web'),
-    Directory('$exeDir/../web'),
     Directory('$exeDir/../build/web'),
-    Directory('$exeDir/../web_deploy'),
     Directory('${Directory.current.path}/web'),
     Directory('${Directory.current.path}/build/web'),
-    Directory('${Directory.current.path}/web_deploy'),
   ];
 
   Directory? webDir;

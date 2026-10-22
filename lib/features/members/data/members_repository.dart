@@ -369,6 +369,8 @@ class MembersRepository {
     Member member,
     GymPlan plan, {
     required DateTime start,
+    DateTime? end,
+    bool customDates = false,
     required DateTime changedAt,
     PaymentCommand? payment,
   }) => _local(() async {
@@ -398,9 +400,14 @@ class MembersRepository {
             .where((s) => s.status != 'cancelled' && !s.endDate.isBefore(today))
             .toList()
           ..sort((a, b) => b.endDate.compareTo(a.endDate));
-    final startDate = current.isEmpty
+    final startDate = customDates
         ? dateOnly(start)
-        : current.first.endDate.add(const Duration(days: 1));
+        : (current.isEmpty
+            ? dateOnly(start)
+            : current.first.endDate.add(const Duration(days: 1)));
+    final endDate = end != null && !dateOnly(end).isBefore(startDate)
+        ? dateOnly(end)
+        : subscriptionEnd(startDate, plan.durationDays);
     final subscriptionId = _uuid.v4();
     final amount = payment?.amount ?? 0;
     final subscription = GymSubscription({
@@ -409,7 +416,7 @@ class MembersRepository {
       'member_id': member.id,
       'plan_id': plan.id,
       'start_date': ymd(startDate),
-      'end_date': ymd(subscriptionEnd(startDate, plan.durationDays)),
+      'end_date': ymd(endDate),
       'price': plan.price,
       'enrollment_kind': 'renewal',
       // La réception ne peut pas valider un renouvellement : il reste

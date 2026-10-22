@@ -194,7 +194,6 @@ class LocalDatabase extends _$LocalDatabase {
     }
     final timestamp = changedAt.toUtc().toIso8601String();
     final row = {
-      ...(previous == null ? const <String, dynamic>{} : Map<String, dynamic>.from(jsonDecode(previous.payload) as Map)),
       ...data,
       if (entity != SyncEntity.attendance) 'updated_at': timestamp,
       if (deleting) 'deleted_at': timestamp,
@@ -350,7 +349,7 @@ class LocalDatabase extends _$LocalDatabase {
         updates: {records},
       );
       await customUpdate(
-        "UPDATE outbox SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"') WHERE entity = 'members' AND payload LIKE '%portal_web%'",
+        "UPDATE outbox SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"'), status = 'pending', last_error = null, next_attempt_at = null WHERE entity = 'members' AND payload LIKE '%portal_web%'",
         updates: {outbox},
       );
       await customUpdate(
@@ -358,11 +357,7 @@ class LocalDatabase extends _$LocalDatabase {
         updates: {records},
       );
       await customUpdate(
-        "UPDATE outbox SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"') WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
-        updates: {outbox},
-      );
-      await customUpdate(
-        "UPDATE outbox SET status = 'pending', last_error = null, next_attempt_at = null WHERE status = 'failed' AND ((entity = 'attendance' AND last_error = 'server_error') OR payload LIKE '%portal_web%' OR payload LIKE '%\"enrollment_kind\":\"new\"%')",
+        "UPDATE outbox SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"'), status = 'pending', last_error = null, next_attempt_at = null WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
         updates: {outbox},
       );
     } catch (_) {}

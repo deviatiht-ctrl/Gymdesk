@@ -148,18 +148,19 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
   * Phase 7.2 : Page de gestion `/portal-requests` (`portal_requests_page.dart`) dans la barre latérale pour la réception, filtres en attente / complétées, bouton WhatsApp direct, et action « Valider & Encaisser » pré-remplissant l'inscription (`/members/new`).
   * Prochaine étape : Phase 7.3 & 7.4 (Renouvellement membre via lien/QR et espace membre).
 
-- 2026-10-21 — Correctifs Présences · Création, Synchronisation Empreintes W2 Instantanée, Support Web Complet (USB + IP) & Auto-Démarrage (analyze 0 issues, tests OK).
-  * SQL 33 (`supabase/sql/33_fix_attendance_sync.sql`) + `16_biometrics_and_fixes.sql` & `23_employees_access.sql` :
-    - Surcharge 3-arguments `public.member_validity(p_gym, p_member, p_at)` appelée par `sync_push` lors de l'insertion de présences (`attendance`).
-    - Fallback direct dans `SupabaseSyncRemote.push` (`lib/core/sync/sync_remote.dart`) pour insérer dans `public.attendance` même avant l'exécution de SQL 33 sur Supabase.
-    - `LocalDatabase.save` fusionne désormais l'enregistrement précédent (`previousMap`) pour éviter d'écraser les champs d'un membre lors d'une mise à jour partielle d'empreinte (`lib/core/db/local_database.dart`).
-    - `LocalDatabase.repairSyncPayloads` débloque automatiquement les éléments `attendance` en statut `failed`, et `SyncEngine._push` isole les éléments en échec sans bloquer le reste de la file (`queue_blocked`) + déclenche `synchronize()` en 800ms dès qu'un élément entre dans `outbox` (`lib/core/sync/sync_engine.dart`).
-  * Synchronisation instantanée (< 500ms) des empreintes vers le terminal BioEntry W2 (`tools/access_agent/biostar_tool.cs`, `tools/access_agent/agent.dart`, `lib/core/access_control/terminal_access_service.dart`, `lib/core/access_control/access_monitor.dart`) :
-    - `biostar_tool.exe watch` exécute désormais `ping`, `enroll` et `rmuser` directement sur la connexion ouverte (boucle 50ms) sans jamais couper la surveillance de la porte.
-    - Synchronisation incrémentale (delta sync via `terminal_sigs:<ip>`) : seuls les membres/employés modifiés sont envoyés automatiquement lors d'un changement local (`watchRecords` sur `members`, `subscriptions`, `payments`, `employees`).
-    - Correction de `AccessAgentClient.syncTerminalMember` (`start=defaultStart`, `end=23:59:59 UTC-5`, slots `fingers` séparés, IP auto).
-    - Poussée immédiate ajoutée dans `FingerprintEnrollmentDialog`, `PortalProcessDialog` et `EnrollmentWizardPage`.
-  * Support Web complet (USB + IP) & Auto-montage sans informaticien :
-    - `AccessMonitor`, `DoorAccessPage` et `AccessDisplayPage` actifs sur Web comme sur Desktop dès que `access_agent.exe` tourne sur `127.0.0.1:47811`.
-    - Détection hot-plug USB toutes les 2s + auto-découverte UDP du terminal BioEntry W2 dans `access_agent.exe` (v3.5.0).
-    - `GymDesk_USB/Lancer_SecurGYM.bat` + `Demarrer_Agent_Silencieux.vbs` : enregistrement automatique dans le démarrage Windows (`HKCU\...\Run`), lancement instantané sans tuer l'agent déjà actif.
+- 2026-10-21 — Demandes en ligne (Frais d'inscription & Reçu complet), Capture d'empreinte instantanée, Calcul 30 jours exact + Dates début/fin modifiables, Responsive design global :
+  * `lib/features/portal/presentation/portal_process_dialog.dart` :
+    - Ajout de la section complète « Frais d'inscription » pour les nouvelles inscriptions en ligne (bascule Ancien membre sans frais, modes `+ Frais`, `Inclus 1er mois`, `Offerts (0)` et saisie personnalisée du montant des frais).
+    - Ajout des deux sélecteurs de dates : **Date de début** (recalcule automatiquement la date de fin) et **Date de fin** (modifiable manuellement par la secrétaire pour vérification ou ajustement).
+    - Préchargement asynchrone des empreintes membres (`_preloadMembersWithFingerprints`) pour éliminer toute latence 1:N au moment du scan + bouton « Scanner » direct + synchronisation immédiate (`< 500ms`) vers le terminal IP `BioEntry W2`.
+    - Envoi automatique du reçu officiel (`ReceiptService.autoEnqueue`) et impression avec ventilation complète (Frais d'inscription + Tarif formule + Période exacte).
+  * `lib/features/payments/data/receipt_pdf.dart` & `lib/features/payments/presentation/receipt_sheet.dart` :
+    - Ajout de `registrationFee`, `planFee` et `paymentReason` dans `ReceiptData` (`fromPayment`, `withLogo`) et affichage détaillé sur le reçu PDF, l'aperçu écran et le message WhatsApp.
+  * `lib/features/subscriptions/domain/subscription_rules.dart`, `lib/features/enrollment/presentation/enrollment_wizard_page.dart`, `lib/features/members/presentation/member_detail_page.dart`, `lib/features/members/data/members_repository.dart` :
+    - Correction de `subscriptionEnd(start, durationDays)` pour garantir 30 pleins jours (ex: 17 oct → 16 nov au lieu de 15 nov).
+    - Ajout du double sélecteur **Date de début** + **Date de fin** dans l'assistant d'inscription (mode rapide & mode étapes) ainsi que dans la fenêtre de renouvellement d'abonnement (`_renew`).
+  * `tools/access_agent/agent.dart` & `lib/core/biometrics/biometric_service.dart` :
+    - Mutualisation (`Completer` partagé `_activeCapture`) des requêtes `/capture` concurrentes dans l'agent local afin qu'une ouverture de dialogue ou un clic manuel ne reçoive jamais `409 Conflict (busy)` et capte le doigt instantanément.
+  * `lib/features/members/presentation/members_page.dart` & `lib/features/portal/presentation/portal_requests_page.dart` :
+    - Refonte de `MembersPage` en `CustomScrollView` (`SliverList`) : lorsque le panneau de statistiques (`MembersStatsPanel`) est ouvert, toute la page défile de façon fluide sur toutes les tailles d'écran sans jamais masquer ni écraser la liste des membres.
+    - Adaptation responsive des cartes de demandes en ligne (`LayoutBuilder` + `Wrap`).

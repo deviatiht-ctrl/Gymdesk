@@ -681,40 +681,21 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
             : null,
         child: Padding(
           padding: const EdgeInsets.all(18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isPending
-                    ? (isRenewal ? const Color(0xFFEDE9FE) : const Color(0xFF0F766E).withOpacity(0.1))
-                    : Colors.grey.shade100,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                isCompleted
-                    ? LucideIcons.checkCheck
-                    : (isRenewal ? LucideIcons.refreshCw : (isPending ? LucideIcons.userPlus : LucideIcons.user)),
-                color: isRenewal
-                    ? const Color(0xFF6D28D9)
-                    : (isPending ? const Color(0xFF0F766E) : Colors.grey.shade600),
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxWidth < 680;
+              final infoSection = Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         req.fullName,
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       ),
-                      const SizedBox(width: 8),
                       // Badge Type
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -742,7 +723,6 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
                       // Badge Statut
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -763,7 +743,6 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                           ),
                         ),
                       ),
-                      const Spacer(),
                       Text(
                         ymd(req.createdAt),
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
@@ -771,17 +750,28 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Row(
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Icon(LucideIcons.phone, size: 14, color: Colors.grey.shade600),
-                      const SizedBox(width: 4),
-                      Text(req.phone, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                      if (req.email != null && req.email!.isNotEmpty) ...[
-                        const SizedBox(width: 14),
-                        Icon(LucideIcons.mail, size: 14, color: Colors.grey.shade600),
-                        const SizedBox(width: 4),
-                        Text(req.email!, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
-                      ],
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.phone, size: 14, color: Colors.grey.shade600),
+                          const SizedBox(width: 4),
+                          Text(req.phone, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                        ],
+                      ),
+                      if (req.email != null && req.email!.isNotEmpty)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(LucideIcons.mail, size: 14, color: Colors.grey.shade600),
+                            const SizedBox(width: 4),
+                            Text(req.email!, style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+                          ],
+                        ),
                     ],
                   ),
                   if (req.planName != null) ...[
@@ -810,83 +800,126 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                     ),
                   ],
                 ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            // Actions
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (isPending) ...[
-                  if (isRenewal) ...[
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF6D28D9),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              );
+
+              final actionsSection = Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: isCompact ? WrapAlignment.start : WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (isPending) ...[
+                    if (isRenewal) ...[
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF6D28D9),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => PortalProcessDialog.show(
+                          context,
+                          request: req,
+                          onCompleted: _loadRequests,
+                        ),
+                        icon: const Icon(LucideIcons.refreshCw, size: 16),
+                        label: Text(s.text('collect_renewal')),
                       ),
-                      onPressed: () => PortalProcessDialog.show(
-                        context,
-                        request: req,
-                        onCompleted: _loadRequests,
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF6D28D9),
+                          side: const BorderSide(color: Color(0xFFC7D2FE)),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                        onPressed: () => _handleRenewalValidation(req),
+                        icon: _isScanningFingerprint
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(LucideIcons.fingerprint, size: 16),
+                        label: Text(s.text('identify_member_fingerprint')),
                       ),
-                      icon: const Icon(LucideIcons.refreshCw, size: 16),
-                      label: Text(s.text('collect_renewal')),
-                    ),
-                    const SizedBox(height: 6),
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF6D28D9),
-                        side: const BorderSide(color: Color(0xFFC7D2FE)),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ] else ...[
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F766E),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => PortalProcessDialog.show(
+                          context,
+                          request: req,
+                          onCompleted: _loadRequests,
+                        ),
+                        icon: const Icon(LucideIcons.checkCheck, size: 16),
+                        label: Text(s.text('validate_and_enroll')),
                       ),
-                      onPressed: () => _handleRenewalValidation(req),
-                      icon: _isScanningFingerprint
-                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(LucideIcons.fingerprint, size: 16),
-                      label: Text(s.text('identify_member_fingerprint')),
-                    ),
-                  ] else ...[
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F766E),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () => PortalProcessDialog.show(
-                        context,
-                        request: req,
-                        onCompleted: _loadRequests,
-                      ),
-                      icon: const Icon(LucideIcons.checkCheck, size: 16),
-                      label: Text(s.text('validate_and_enroll')),
-                    ),
+                    ],
                   ],
-                  const SizedBox(height: 6),
+                  if (digits.length >= 8)
+                    IconButton(
+                      tooltip: 'Écrire sur WhatsApp',
+                      icon: const Icon(LucideIcons.messageCircle, color: Color(0xFF25D366), size: 20),
+                      onPressed: () => launchUrl(Uri.parse(waUrl), mode: LaunchMode.externalApplication),
+                    ),
+                  if (isPending)
+                    IconButton(
+                      tooltip: 'Rejeter la demande',
+                      icon: const Icon(LucideIcons.xCircle, color: Colors.red, size: 20),
+                      onPressed: () => _confirmReject(req),
+                    ),
                 ],
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (digits.length >= 8)
-                      IconButton(
-                        tooltip: 'Écrire sur WhatsApp',
-                        icon: const Icon(LucideIcons.messageCircle, color: Color(0xFF25D366), size: 20),
-                        onPressed: () => launchUrl(Uri.parse(waUrl), mode: LaunchMode.externalApplication),
-                      ),
-                    if (isPending)
-                      IconButton(
-                        tooltip: 'Rejeter la demande',
-                        icon: const Icon(LucideIcons.xCircle, color: Colors.red, size: 20),
-                        onPressed: () => _confirmReject(req),
-                      ),
-                  ],
+              );
+
+              final avatar = Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isPending
+                      ? (isRenewal ? const Color(0xFFEDE9FE) : const Color(0xFF0F766E).withOpacity(0.1))
+                      : Colors.grey.shade100,
+                  shape: BoxShape.circle,
                 ),
-              ],
-            ),
-          ],
-        ),
+                child: Icon(
+                  isCompleted
+                      ? LucideIcons.checkCheck
+                      : (isRenewal ? LucideIcons.refreshCw : (isPending ? LucideIcons.userPlus : LucideIcons.user)),
+                  color: isRenewal
+                      ? const Color(0xFF6D28D9)
+                      : (isPending ? const Color(0xFF0F766E) : Colors.grey.shade600),
+                  size: 20,
+                ),
+              );
+
+              if (isCompact) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        avatar,
+                        const SizedBox(width: 12),
+                        Expanded(child: infoSection),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    actionsSection,
+                  ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  avatar,
+                  const SizedBox(width: 16),
+                  Expanded(child: infoSection),
+                  const SizedBox(width: 16),
+                  actionsSection,
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

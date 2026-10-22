@@ -293,15 +293,10 @@ class TerminalAccessService {
 
   /// Pouse manm + anplwaye ki gen anprent sou W2 a, ak dat aksè yo selon
   /// mòd la. Retire sou tèminal la moun ki pa la ankò (achive, anprent efase).
-  /// [forceFull]: si false, voye sèlman moun ki chanje (delta sync < 100ms).
-  Future<TerminalSyncResult> syncToTerminal(
-    TerminalAccessConfig cfg, {
-    bool forceFull = false,
-  }) async {
+  Future<TerminalSyncResult> syncToTerminal(TerminalAccessConfig cfg) async {
     final people = await _loadPeople(force: true);
     final grace = ((session.settings['grace_days'] as num?)?.toInt() ?? 0).clamp(0, 365);
     final payload = <Map<String, dynamic>>[];
-    final currentSigs = <String, String>{};
     var withoutFingerprint = 0;
     // Kach la gen plizyè kle pa moun (id, uid, nimewo, telefòn): yon sèl fwa pa moun.
     final seen = <String>{};
@@ -331,12 +326,9 @@ class TerminalAccessService {
         final endDate = person.endDate;
         end = endDate == null ? expiredEnd : _endOfDayEpoch(endDate, grace).clamp(defaultStart + 1, defaultEnd);
       }
-      final name = person.name.length > 48 ? person.name.substring(0, 48) : person.name;
-      final uid = terminalUid(person.id);
-      currentSigs[uid] = '$name|$defaultStart|$end|${jsonEncode(fingers)}';
       payload.add({
         'id': person.id,
-        'name': name,
+        'name': person.name.length > 48 ? person.name.substring(0, 48) : person.name,
         'start': defaultStart,
         'end': end,
         'fingers': fingers,
@@ -344,44 +336,20 @@ class TerminalAccessService {
     }
 
     final metaKey = 'terminal_uids:${cfg.terminalIp}';
-    final sigsKey = 'terminal_sigs:${cfg.terminalIp}';
     final previous = <String>{
       for (final v in (jsonDecode(await db.metadata(metaKey) ?? '[]') as List)) v.toString(),
     };
-    Map<String, dynamic> previousSigs = const {};
-    if (!forceFull) {
-      try {
-        final rawSigs = await db.metadata(sigsKey);
-        if (rawSigs != null && rawSigs.isNotEmpty) {
-          previousSigs = Map<String, dynamic>.from(jsonDecode(rawSigs) as Map);
-        }
-      } catch (_) {}
-    }
     final current = {for (final p in payload) terminalUid(p['id'] as String)};
     final remove = previous.difference(current).toList();
-    final toSend = forceFull || previousSigs.isEmpty
-        ? payload
-        : [
-            for (final p in payload)
-              if (previousSigs[terminalUid(p['id'] as String)] !=
-                  currentSigs[terminalUid(p['id'] as String)])
-                p,
-          ];
-    if (toSend.isEmpty && remove.isEmpty) {
+    if (payload.isEmpty && remove.isEmpty) {
       return TerminalSyncResult(ok: true, withoutFingerprint: withoutFingerprint);
     }
 
-    final result = await agent.syncTerminalMembers(toSend, terminalIp: cfg.terminalIp, remove: remove);
+    final result = await agent.syncTerminalMembers(payload, terminalIp: cfg.terminalIp, remove: remove);
     final ok = result?['success'] == true;
     final skipped = [for (final s in (result?['skipped'] as List? ?? const [])) s.toString()];
     if (ok) {
-      final skippedSet = skipped.toSet();
-      await db.setMetadata(metaKey, jsonEncode(current.difference(skippedSet).toList()..sort()));
-      final nextSigs = <String, String>{
-        for (final entry in currentSigs.entries)
-          if (!skippedSet.contains(entry.key)) entry.key: entry.value,
-      };
-      await db.setMetadata(sigsKey, jsonEncode(nextSigs));
+      await db.setMetadata(metaKey, jsonEncode(current.difference(skipped.toSet()).toList()..sort()));
     }
     return TerminalSyncResult(
       ok: ok,

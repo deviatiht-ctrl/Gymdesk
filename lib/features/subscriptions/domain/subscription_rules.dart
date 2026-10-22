@@ -17,7 +17,7 @@ String ymd(DateTime date) =>
     '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
 DateTime subscriptionEnd(DateTime start, int durationDays) =>
-    dateOnly(start).add(Duration(days: durationDays - 1));
+    dateOnly(start).add(Duration(days: durationDays <= 1 ? 0 : durationDays));
 
 class MemberValidity {
   const MemberValidity({

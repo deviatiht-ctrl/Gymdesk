@@ -267,116 +267,154 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     final received = TextEditingController();
     String method = 'cash';
     var keepCredit = false;
-    DateTime start = DateTime.now();
+    DateTime start = dateOnly(DateTime.now());
+    DateTime end = subscriptionEnd(start, plan?.durationDays ?? 30);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) => AlertDialog(
           title: Text(s.text('renew_subscription')),
           content: SizedBox(
-            width: 460,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (activePlans.isEmpty)
-                  Text(s.text('plans_empty'))
-                else ...[
-                  DropdownButtonFormField<GymPlan>(
-                    initialValue: plan,
-                    decoration: InputDecoration(labelText: s.text('plan')),
-                    items: activePlans
-                        .map(
-                          (p) => DropdownMenuItem(
-                            value: p,
-                            child: Text(
-                              '${p.name} · ${p.price.toStringAsFixed(2)} ${p.currency}',
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (activePlans.isEmpty)
+                    Text(s.text('plans_empty'))
+                  else ...[
+                    DropdownButtonFormField<GymPlan>(
+                      initialValue: plan,
+                      decoration: InputDecoration(labelText: s.text('plan')),
+                      items: activePlans
+                          .map(
+                            (p) => DropdownMenuItem(
+                              value: p,
+                              child: Text(
+                                '${p.name} · ${p.price.toStringAsFixed(2)} ${p.currency}',
+                              ),
                             ),
+                          )
+                          .toList(),
+                      onChanged: (p) => setDialog(() {
+                        plan = p;
+                        paid.text = p?.price.toStringAsFixed(2) ?? '';
+                        if (p != null) {
+                          end = subscriptionEnd(start, p.durationDays);
+                        }
+                      }),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              final date = await showDatePicker(
+                                context: context,
+                                initialDate: start,
+                                firstDate: DateTime.now().subtract(
+                                  const Duration(days: 730),
+                                ),
+                                lastDate: DateTime.now().add(const Duration(days: 730)),
+                              );
+                              if (date != null) {
+                                setDialog(() {
+                                  start = dateOnly(date);
+                                  end = subscriptionEnd(start, plan?.durationDays ?? 30);
+                                });
+                              }
+                            },
+                            icon: const Icon(LucideIcons.calendar, size: 16),
+                            label: Text('${s.text('start_date')}: ${ymd(start)}'),
                           ),
-                        )
-                        .toList(),
-                    onChanged: (p) => setDialog(() {
-                      plan = p;
-                      paid.text = p?.price.toStringAsFixed(2) ?? '';
-                    }),
-                  ),
-                  const SizedBox(height: 14),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      final date = await showDatePicker(
-                        context: context,
-                        initialDate: start,
-                        firstDate: DateTime.now().subtract(
-                          const Duration(days: 730),
                         ),
-                        lastDate: DateTime.now().add(const Duration(days: 730)),
-                      );
-                      if (date != null) setDialog(() => start = date);
-                    },
-                    icon: const Icon(LucideIcons.calendar),
-                    label: Text(
-                      '${s.text('start_date')}: ${DateFormat.yMd(Localizations.localeOf(context).toString()).format(start)}',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: paid,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: s.text('paid_amount'),
-                    ),
-                    onChanged: (_) => setDialog(() {}),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: received,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: s.text('amount_received'),
-                      hintText: paid.text,
-                    ),
-                    onChanged: (_) => setDialog(() {}),
-                  ),
-                  Builder(
-                    builder: (context) {
-                      final due =
-                          double.tryParse(paid.text.replaceAll(',', '.')) ?? 0;
-                      final got = double.tryParse(
-                        received.text.replaceAll(',', '.'),
-                      );
-                      final rest = (got ?? due) - due;
-                      if (rest <= 0.004) return const SizedBox.shrink();
-                      return CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(s.text('keep_change_as_credit')),
-                        subtitle: Text('+${rest.toStringAsFixed(2)}'),
-                        value: keepCredit,
-                        onChanged: (v) =>
-                            setDialog(() => keepCredit = v == true),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: method,
-                    decoration: InputDecoration(
-                      labelText: s.text('payment_method'),
-                    ),
-                    items: ['cash', 'moncash', 'natcash', 'bank', 'other']
-                        .map(
-                          (m) => DropdownMenuItem(
-                            value: m,
-                            child: Text(s.text('method_$m')),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () async {
+                              final date = await showDatePicker(
+                                context: context,
+                                initialDate: end.isBefore(start) ? start : end,
+                                firstDate: start,
+                                lastDate: DateTime.now().add(const Duration(days: 1095)),
+                              );
+                              if (date != null) {
+                                setDialog(() => end = dateOnly(date));
+                              }
+                            },
+                            icon: const Icon(LucideIcons.calendarCheck, size: 16),
+                            label: Text('${s.text('end_date')}: ${ymd(end)}'),
                           ),
-                        )
-                        .toList(),
-                    onChanged: (v) => method = v ?? 'cash',
-                  ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${s.text('subscription_period')}: ${ymd(start)} → ${ymd(end)} (${dateOnly(end).difference(dateOnly(start)).inDays} ${s.text('days')})',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F766E)),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: paid,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: s.text('paid_amount'),
+                      ),
+                      onChanged: (_) => setDialog(() {}),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: received,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: s.text('amount_received'),
+                        hintText: paid.text,
+                      ),
+                      onChanged: (_) => setDialog(() {}),
+                    ),
+                    Builder(
+                      builder: (context) {
+                        final due =
+                            double.tryParse(paid.text.replaceAll(',', '.')) ?? 0;
+                        final got = double.tryParse(
+                          received.text.replaceAll(',', '.'),
+                        );
+                        final rest = (got ?? due) - due;
+                        if (rest <= 0.004) return const SizedBox.shrink();
+                        return CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(s.text('keep_change_as_credit')),
+                          subtitle: Text('+${rest.toStringAsFixed(2)}'),
+                          value: keepCredit,
+                          onChanged: (v) =>
+                              setDialog(() => keepCredit = v == true),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      initialValue: method,
+                      decoration: InputDecoration(
+                        labelText: s.text('payment_method'),
+                      ),
+                      items: ['cash', 'moncash', 'natcash', 'bank', 'other']
+                          .map(
+                            (m) => DropdownMenuItem(
+                              value: m,
+                              child: Text(s.text('method_$m')),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => method = v ?? 'cash',
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
           actions: [
@@ -417,6 +455,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
             method: method,
             receivedAmount: got,
             keepChangeAsCredit: keepCredit,
+            planFee: selected.price,
+            paymentReason: 'Renouvellement (${selected.name})',
           )
         : null;
     GymSubscription? created;
@@ -425,6 +465,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
         member,
         selected,
         start: start,
+        end: end,
+        customDates: true,
         changedAt: _now,
         payment: command,
       );

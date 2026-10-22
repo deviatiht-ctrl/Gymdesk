@@ -191,6 +191,24 @@ class AppRuntime extends ChangeNotifier {
     final remote = SupabaseSyncRemote(client);
     StaffSession? resolved;
     try {
+      final context = await remote.context();
+      resolved = StaffSession(
+        staff: Map<String, dynamic>.from(context['staff'] as Map),
+        gym: context['gym'] == null
+            ? null
+            : Map<String, dynamic>.from(context['gym'] as Map),
+        verifiedAt: DateTime.parse(context['server_time'] as String),
+      );
+      if (resolved.userId != user.id) throw const SyncRejected('access_denied');
+      await _cache(resolved);
+    } on SyncRejected catch (e) {
+      if (e.code != 'network') {
+        await _secure.delete(key: _cacheKey(user.id));
+        phase = SessionPhase.blocked;
+        errorCode = e.code;
+        _notify();
+        return;
+      }
       final cached = await _secure.read(key: _cacheKey(user.id));
       if (cached != null) {
         final candidate = StaffSession.fromJson(jsonDecode(cached) as Json);
@@ -200,33 +218,11 @@ class AppRuntime extends ChangeNotifier {
           resolved = candidate;
         }
       }
-    } catch (_) {}
-    if (resolved == null) {
-      try {
-        final context = await remote.context();
-        resolved = StaffSession(
-          staff: Map<String, dynamic>.from(context['staff'] as Map),
-          gym: context['gym'] == null
-              ? null
-              : Map<String, dynamic>.from(context['gym'] as Map),
-          verifiedAt: DateTime.parse(context['server_time'] as String),
-        );
-        if (resolved.userId != user.id) throw const SyncRejected('access_denied');
-        await _cache(resolved);
-      } on SyncRejected catch (e) {
-        if (e.code != 'network') {
-          await _secure.delete(key: _cacheKey(user.id));
-          phase = SessionPhase.blocked;
-          errorCode = e.code;
-          _notify();
-          return;
-        }
-        if (resolved == null) {
-          phase = SessionPhase.error;
-          errorCode = 'first_sync_required';
-          _notify();
-          return;
-        }
+      if (resolved == null) {
+        phase = SessionPhase.error;
+        errorCode = 'first_sync_required';
+        _notify();
+        return;
       }
     }
     session = resolved;

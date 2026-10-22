@@ -335,7 +335,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
         appControls: _appControls,
         terminalIp: _terminalIpController.text.trim().isEmpty ? '192.168.1.41' : _terminalIpController.text.trim(),
         pulseSeconds: _pulseDurationSeconds.round(),
-      ), forceFull: true);
+      ));
       if (!mounted) return;
       setState(() => _testingTerminal = false);
       final nothing = result.ok && result.enrolled == 0 && result.removed == 0 && result.errors.isEmpty;

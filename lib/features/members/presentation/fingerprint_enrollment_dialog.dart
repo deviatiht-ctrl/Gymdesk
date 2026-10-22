@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../app/providers.dart';
-import '../../../core/access_control/access_monitor.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
@@ -195,9 +194,7 @@ class _FingerprintEnrollmentDialogState
         );
       }
 
-      // 3. Pouse sou tèminal W2 a imedyatman (< 500ms) epi senkronize sou nwaj la
-      AccessMonitor.instance.notifyDataChanged();
-      unawaited(AccessMonitor.instance.syncNow());
+      // 3. Senkronize imedyatman
       unawaited(runtime.sync?.synchronize());
 
       widget.onSaved();

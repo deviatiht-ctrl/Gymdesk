@@ -10,7 +10,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
-import '../../../core/access_control/access_monitor.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/sync/sync_models.dart';
@@ -74,7 +73,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
 
   // Step 2: Abònman
   bool _isExistingMember = false;
-  DateTime _startDate = DateTime.now();
+  DateTime _startDate = dateOnly(DateTime.now());
+  DateTime _endDate = subscriptionEnd(DateTime.now(), 30);
   GymPlan? _selectedPlan;
   List<GymPlan> _plans = [];
   bool _loadingPlans = true;
@@ -108,6 +108,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   void _onSelectPlan(GymPlan plan) {
     setState(() {
       _selectedPlan = plan;
+      _endDate = subscriptionEnd(_startDate, plan.durationDays);
       _customRegistrationFee = plan.registrationFee;
       _registrationFeeController.text = plan.registrationFee > 0
           ? plan.registrationFee.toStringAsFixed(0)
@@ -150,6 +151,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   double _lastAmount = 0;
   double _lastReceived = 0;
   double _lastCreditAdded = 0;
+  double _lastRegFee = 0;
+  double _lastPlanFee = 0;
+  String? _lastPaymentReason;
 
   // Step 4: Anprent (2 Doigts + Konsantman)
   late final BiometricService _biometricService;
@@ -477,7 +481,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     try {
       final now = DateTime.now();
       final plan = _selectedPlan!;
-      final endDate = subscriptionEnd(_startDate, plan.durationDays);
+      final startOnly = dateOnly(_startDate);
+      final endDate = dateOnly(_endDate.isBefore(startOnly) ? subscriptionEnd(startOnly, plan.durationDays) : _endDate);
       final amt = double.tryParse(_paymentAmountController.text) ?? plan.price;
       final cashier = _cashier;
       final received = cashier.receivedInBase;
@@ -556,6 +561,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       _lastReceived = received;
       _lastCreditAdded = creditAdded;
       _lastMemberNumber = result.memberNumber;
+      _lastRegFee = effectiveFee;
+      _lastPlanFee = planFee;
+      _lastPaymentReason = reason;
 
       if (_primaryTemplate != null && runtime.database != null) {
         await runtime.database!.save(SyncEntity.members, {
@@ -585,8 +593,6 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         if (_backupTemplate != null) tmpls.add(_backupTemplate!);
         unawaited(agentClient.syncTerminalMember(userId: result.memberId, name: fullName, startDate: _startDate, endDate: endDate, templates: tmpls).catchError((_) => false));
       }
-      AccessMonitor.instance.notifyDataChanged();
-      unawaited(AccessMonitor.instance.syncNow());
 
       final email = draft.email.trim();
 
@@ -640,6 +646,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     gymPhone: gym['phone'] as String?,
     gymEmail: gym['email'] as String?,
     reference: _referenceController.text.trim(),
+    registrationFee: _lastRegFee,
+    planFee: _lastPlanFee,
+    paymentReason: _lastPaymentReason,
   );
 
   void _showSuccessDialog(AppStrings s, String memberId, String fullName, String planName, DateTime endDate, String email) {
@@ -981,10 +990,14 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               const Icon(LucideIcons.calendarDays, color: Color(0xFF0F766E), size: 20),
                               const SizedBox(width: 8),
@@ -994,18 +1007,44 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                               ),
                             ],
                           ),
-                          TextButton.icon(
-                            icon: const Icon(LucideIcons.calendar, size: 16),
-                            label: Text('${s.text('start_date')}: ${ymd(_startDate)}'),
-                            onPressed: () async {
-                              final picked = await showDatePicker(
-                                context: context,
-                                initialDate: _startDate,
-                                firstDate: DateTime(2020),
-                                lastDate: DateTime(2035),
-                              );
-                              if (picked != null) setState(() => _startDate = picked);
-                            },
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              OutlinedButton.icon(
+                                icon: const Icon(LucideIcons.calendar, size: 15),
+                                label: Text('${isFr ? 'Début' : 'Kòmansman'}: ${ymd(_startDate)}'),
+                                onPressed: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: _startDate,
+                                    firstDate: DateTime(2020),
+                                    lastDate: DateTime(2035),
+                                  );
+                                  if (picked != null) {
+                                    setState(() {
+                                      _startDate = dateOnly(picked);
+                                      _endDate = subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30);
+                                    });
+                                  }
+                                },
+                              ),
+                              OutlinedButton.icon(
+                                icon: const Icon(LucideIcons.calendarCheck, size: 15),
+                                label: Text('${isFr ? 'Fin' : 'Fen'}: ${ymd(_endDate)}'),
+                                onPressed: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: _endDate.isBefore(_startDate) ? _startDate : _endDate,
+                                    firstDate: _startDate,
+                                    lastDate: DateTime(2035),
+                                  );
+                                  if (picked != null) {
+                                    setState(() => _endDate = dateOnly(picked));
+                                  }
+                                },
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -1742,27 +1781,56 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                     side: BorderSide(color: Colors.grey.shade300),
                   ),
                   leading: const Icon(LucideIcons.calendar, color: Color(0xFF0F766E)),
-                  title: Text(ymd(_startDate), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  title: Text('${ymd(_startDate)} → ${ymd(_endDate)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   subtitle: Text(
-                    _selectedPlan != null ? '${s.text('subscription_period')}: ${ymd(_startDate)} → ${ymd(subscriptionEnd(_startDate, _selectedPlan!.durationDays))}' : ymd(_startDate),
+                    '${s.text('subscription_period')} (${dateOnly(_endDate).difference(dateOnly(_startDate)).inDays} ${s.text('days')})',
                     style: const TextStyle(color: Color(0xFF0F766E), fontSize: 13, fontWeight: FontWeight.w500),
                   ),
-                  trailing: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF0F766E),
-                      side: const BorderSide(color: Color(0xFF0F766E)),
-                    ),
-                    onPressed: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: _startDate,
-                        firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                        lastDate: DateTime.now().add(const Duration(days: 365)),
-                      );
-                      if (picked != null) setState(() => _startDate = picked);
-                    },
-                    icon: const Icon(LucideIcons.calendar, size: 16),
-                    label: Text(s.text('change_date')),
+                  trailing: Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0F766E),
+                          side: const BorderSide(color: Color(0xFF0F766E)),
+                        ),
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: _startDate,
+                            firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                            lastDate: DateTime.now().add(const Duration(days: 365)),
+                          );
+                          if (picked != null) {
+                            setState(() {
+                              _startDate = dateOnly(picked);
+                              _endDate = subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30);
+                            });
+                          }
+                        },
+                        icon: const Icon(LucideIcons.calendar, size: 16),
+                        label: Text(s.text('start_date')),
+                      ),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0F766E),
+                          side: const BorderSide(color: Color(0xFF0F766E)),
+                        ),
+                        onPressed: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: _endDate.isBefore(_startDate) ? _startDate : _endDate,
+                            firstDate: _startDate,
+                            lastDate: DateTime.now().add(const Duration(days: 730)),
+                          );
+                          if (picked != null) {
+                            setState(() => _endDate = dateOnly(picked));
+                          }
+                        },
+                        icon: const Icon(LucideIcons.calendarCheck, size: 16),
+                        label: Text(s.text('end_date')),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1855,7 +1923,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                     const Icon(LucideIcons.calendarClock, size: 16, color: Color(0xFF0F766E)),
                     const SizedBox(width: 6),
                     Text(
-                      '${s.text('subscription_period')}: ${ymd(_startDate)} → ${ymd(subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30))}',
+                      '${s.text('subscription_period')}: ${ymd(_startDate)} → ${ymd(_endDate)}',
                       style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.w600, fontSize: 13),
                     ),
                   ],

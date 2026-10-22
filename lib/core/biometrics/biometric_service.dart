@@ -190,13 +190,13 @@ class BiometricService {
       if (!readerAvailable) {
         await agent.checkHealth();
         if (!readerAvailable) {
-          await Future<void>.delayed(const Duration(seconds: 3));
+          await Future<void>.delayed(const Duration(milliseconds: 1200));
           continue;
         }
       }
 
       state.value = BiometricSensorState.waitingFinger;
-      final res = await agent.capture(timeout: const Duration(seconds: 10), tpl: 'suprema');
+      final res = await agent.capture(timeout: const Duration(seconds: 6), tpl: 'suprema');
       if (!_captureLoopActive || _disposed) break;
 
       if (res['success'] == true && res['template'] is String) {
@@ -208,13 +208,17 @@ class BiometricService {
           raw: res,
         ));
         // Ti poz pou moun nan retire dwèt li anvan pwochen kapti a.
-        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        await Future<void>.delayed(const Duration(milliseconds: 900));
         continue;
       }
 
       final error = res['error']?.toString() ?? '';
       if (error == 'capture_failed' || error == 'timeout') {
-        // Pa gen dwèt pandan delè a: kontinye tann.
+        // Pa gen dwèt pandan delè a: kontinye tann imedyatman.
+        continue;
+      }
+      if (error == 'busy') {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
         continue;
       }
       if (error == 'low_quality') {
@@ -223,14 +227,14 @@ class BiometricService {
           message: res['message']?.toString(),
           raw: res,
         ));
-        await Future<void>.delayed(const Duration(milliseconds: 800));
+        await Future<void>.delayed(const Duration(milliseconds: 400));
         continue;
       }
       if (error == 'no_reader' || error == 'sdk_missing' || error == 'agent_offline') {
         state.value = BiometricSensorState.disconnected;
         await agent.checkHealth();
       }
-      await Future<void>.delayed(const Duration(seconds: 2));
+      await Future<void>.delayed(const Duration(milliseconds: 1000));
     }
   }
 

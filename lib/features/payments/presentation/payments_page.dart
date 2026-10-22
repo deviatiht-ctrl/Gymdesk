@@ -253,6 +253,9 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
       gymAddress: gym['address'] as String?,
       gymPhone: gym['phone'] as String?,
       gymEmail: gym['email'] as String?,
+      registrationFee: command.registrationFee,
+      planFee: command.planFee ?? command.amount,
+      paymentReason: command.paymentReason,
     );
     // Voye resi a otomatik pa email (silansye si offline / san email).
     final gymId = runtime.session?.gymId;
@@ -322,8 +325,8 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
                     ),
                     onPressed: _pickRange,
                   ),
-                  SizedBox(
-                    width: 320,
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 320),
                     child: TextField(
                       controller: _search,
                       decoration: InputDecoration(

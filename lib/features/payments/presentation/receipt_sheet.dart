@@ -92,6 +92,9 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
       'method_cheque': s.text('method_cheque'),
       'method_other': s.text('method_other'),
       'method_credit': s.text('method_credit'),
+      'registration_fee': s.text('registration_fee'),
+      'reg_fee_included': s.text('reg_fee_included'),
+      'reg_fee_waived': s.text('reg_fee_waived'),
     };
   }
 
@@ -165,6 +168,8 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
         '${s.text('receipt_plan')}: *${d.planName}*',
         if (d.periodStart != null && d.periodEnd != null)
           '${s.text('receipt_period')}: ${day.format(d.periodStart!)} -> ${day.format(d.periodEnd!)}',
+        if (d.registrationFee > 0)
+          '${s.text('registration_fee')}: ${d.registrationFee.toStringAsFixed(2)} ${d.currency} + ${d.planName}: ${(d.planFee > 0 ? d.planFee : d.amount - d.registrationFee).toStringAsFixed(2)} ${d.currency}',
         '${s.text('receipt_amount')}: *${d.amount.toStringAsFixed(2)} ${d.currency}*',
         if (d.foreignPayment && d.paidAmount != null)
           '${s.text('receipt_paid_in')}: ${d.paidAmount!.toStringAsFixed(2)} ${d.paidCurrency}',
@@ -212,6 +217,13 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
               '${d.planName} · ${money.format(d.amount)} ${d.currency}',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
+            if (d.registrationFee > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                '${s.text('registration_fee')}: ${money.format(d.registrationFee)} ${d.currency}  +  ${d.planName}: ${money.format(d.planFee > 0 ? d.planFee : (d.amount - d.registrationFee).clamp(0, double.infinity))} ${d.currency}',
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFF0F766E), fontWeight: FontWeight.w600),
+              ),
+            ],
             if (d.creditAdded > 0 || d.creditUsed > 0 || d.creditBalance > 0) ...[
               const SizedBox(height: 8),
               if (d.creditUsed > 0)
