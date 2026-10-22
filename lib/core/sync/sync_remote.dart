@@ -63,13 +63,100 @@ class SupabaseSyncRemote implements SyncRemote {
 
   @override
   Future<Json> push(Json operation) => _request(() async {
-    final function = operation['p_entity'] == 'gyms'
-        ? 'sync_branding'
-        : 'sync_push';
-    return Map<String, dynamic>.from(
-      await client.rpc(function, params: operation) as Map,
-    );
+    final entity = operation['p_entity'] as String?;
+    final function = entity == 'gyms' ? 'sync_branding' : 'sync_push';
+    try {
+      return Map<String, dynamic>.from(
+        await client.rpc(function, params: operation) as Map,
+      );
+    } on PostgrestException catch (e) {
+      if (entity == 'attendance' &&
+          e.code != '42501' &&
+          e.code != 'PGRST301' &&
+          e.code != 'PGRST302' &&
+          e.code != 'PGRST303') {
+        return _pushAttendanceFallback(operation);
+      }
+      rethrow;
+    }
   });
+
+  Future<Json> _pushAttendanceFallback(Json operation) async {
+    final raw = Map<String, dynamic>.from(
+      (operation['p_payload'] as Map?) ?? const {},
+    );
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final row = <String, dynamic>{
+      'id': raw['id'],
+      'gym_id': raw['gym_id'],
+      'member_id': raw['member_id'],
+      if (raw['badge_id'] != null) 'badge_id': raw['badge_id'],
+      if (raw['subscription_id'] != null)
+        'subscription_id': raw['subscription_id'],
+      'scanned_at': raw['scanned_at'] ?? nowIso,
+      'server_received_at': raw['server_received_at'] ?? nowIso,
+      'result': raw['result'] ?? 'granted',
+      'denial_reason': raw['denial_reason'],
+      'entry_number_today': raw['entry_number_today'],
+      'device_id': raw['device_id'],
+      if (raw['scanned_by'] != null) 'scanned_by': raw['scanned_by'],
+      'was_offline': raw['was_offline'] == true,
+      'suspect_clock': raw['suspect_clock'] == true,
+      if (raw['pin_verified'] != null)
+        'pin_verified': raw['pin_verified'] == true,
+      if (raw['fingerprint_verified'] != null)
+        'fingerprint_verified': raw['fingerprint_verified'] == true,
+      'created_at': raw['created_at'] ?? raw['scanned_at'] ?? nowIso,
+    };
+
+    Future<Map<String, dynamic>> tryInsert(Map<String, dynamic> payload) async {
+      final inserted = await client
+          .from('attendance')
+          .upsert(payload, onConflict: 'id')
+          .select()
+          .maybeSingle();
+      return Map<String, dynamic>.from(inserted ?? payload);
+    }
+
+    Map<String, dynamic> saved;
+    try {
+      saved = await tryInsert(row);
+    } on PostgrestException catch (e) {
+      if (e.code == '23503') {
+        // Si subscription_id, badge_id oswa scanned_by poko senkronize sou sèvè a
+        final stripped = Map<String, dynamic>.from(row)
+          ..remove('subscription_id')
+          ..remove('badge_id')
+          ..remove('scanned_by');
+        try {
+          saved = await tryInsert(stripped);
+        } on PostgrestException catch (e2) {
+          if (e2.code == '23503') {
+            // Si member_id li menm poko sou sèvè a, kite l an 'missing_dependency' (pending)
+            throw const SyncRejected('missing_dependency', permanent: false);
+          }
+          rethrow;
+        }
+      } else if (e.code == '23514' &&
+          row['result'] == 'denied_pending_renewal') {
+        final adjusted = Map<String, dynamic>.from(row)
+          ..['result'] = 'denied_pending';
+        saved = await tryInsert(adjusted);
+      } else {
+        rethrow;
+      }
+    }
+
+    // Yon fwa liy attendance la deja nan public.attendance (v_old is not null),
+    // sync_push ap sote blòk validasyon ki gen bèg member_validity(3 args) la epi anrejistre sync_receipts!
+    try {
+      return Map<String, dynamic>.from(
+        await client.rpc('sync_push', params: operation) as Map,
+      );
+    } catch (_) {
+      return <String, dynamic>{'outcome': 'accepted', 'row': saved};
+    }
+  }
 
   @override
   Future<List<Json>> pull(

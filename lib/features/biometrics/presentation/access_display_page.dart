@@ -45,16 +45,13 @@ class AccessDisplayPage extends ConsumerStatefulWidget {
 class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with TickerProviderStateMixin {
   final _agent = AccessAgentClient();
   late final BiometricService _biometricService;
-  late final TerminalAccessService _service;
   late final MembersRepository _members;
-  TerminalAccessConfig _cfg = const TerminalAccessConfig();
   late bool _isTabletWifiMode = widget.isTabletMode;
 
   StreamSubscription<AccessDecision>? _events;
   RealtimeChannel? _realtimeSub;
   Timer? _clock;
   Timer? _dismiss;
-  Timer? _syncTimer;
   Timer? _quoteTimer;
   late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(seconds: 2))
     ..repeat(reverse: true);
@@ -67,7 +64,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   Uint8List? _photo;
   String? _logoUrl;
   int _todayCount = 0;
-  bool _syncing = false;
 
   // Mòd Kiosk Fèmen & Verifikasyon
   bool _kioskLocked = true;
@@ -83,7 +79,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     super.initState();
     _biometricService = BiometricService(agentClient: _agent);
     final runtime = ref.read(appRuntimeProvider);
-    _service = TerminalAccessService(runtime.client, runtime.database!, runtime.session!, agent: _agent);
     _members = MembersRepository(runtime.client, runtime.database!, runtime.session!);
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
@@ -96,23 +91,20 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
 
   Future<void> _start() async {
     final runtime = ref.read(appRuntimeProvider);
-    _cfg = await TerminalAccessService.loadConfig(runtime.client, runtime.session!);
     try {
       _logoUrl = await GymSettingsRepository(runtime.client, runtime.database!, runtime.session!)
           .signedLogoUrl(runtime.session!.gym?['logo_url'] as String?);
     } catch (_) {}
     if (mounted) setState(() {});
 
-    // 1. PC: siveyan global la (AccessMonitor) trete evènman W2 yo.
-    if (!kIsWeb) {
-      final monitor = AccessMonitor.instance;
-      unawaited(monitor.start(runtime));
-      _terminalOnline = monitor.terminalOnline.value;
-      _agentOnline = monitor.agentOnline.value;
-      monitor.terminalOnline.addListener(_onMonitorStatus);
-      monitor.agentOnline.addListener(_onMonitorStatus);
-      _events = monitor.decisions.listen(_onDecision);
-    }
+    // 1. Siveyan global la (AccessMonitor) trete evènman W2 yo sou Desktop ak Web (PC resepsyon).
+    final monitor = AccessMonitor.instance;
+    unawaited(monitor.start(runtime));
+    _terminalOnline = monitor.terminalOnline.value;
+    _agentOnline = monitor.agentOnline.value;
+    monitor.terminalOnline.addListener(_onMonitorStatus);
+    monitor.agentOnline.addListener(_onMonitorStatus);
+    _events = monitor.decisions.listen(_onDecision);
 
     // 2. Koute Supabase Realtime (Pou tablèt Wi-Fi resevwa evènman yo menm san agent lokal)
     final gymId = runtime.session?.gymId;
@@ -139,11 +131,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
             .subscribe();
       } catch (_) {}
     }
-
-    if (kIsWeb) {
-      unawaited(_syncTerminal());
-      _syncTimer = Timer.periodic(const Duration(minutes: 10), (_) => unawaited(_syncTerminal()));
-    }
   }
 
   void _onMonitorStatus() {
@@ -152,25 +139,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       _agentOnline = AccessMonitor.instance.agentOnline.value;
       _terminalOnline = AccessMonitor.instance.terminalOnline.value;
     });
-  }
-
-  /// Senkronizasyon otomatik: dat abònman yo (renouvèlman, ekspirasyon)
-  /// ak nouvo anprent yo rive sou W2 a san pèsonn pa peze anyen.
-  Future<void> _syncTerminal() async {
-    if (_syncing) return;
-    _syncing = true;
-    try {
-      final runtime = ref.read(appRuntimeProvider);
-      _cfg = await TerminalAccessService.loadConfig(runtime.client, runtime.session!);
-      if (kIsWeb) {
-        await _service.syncToTerminal(_cfg);
-      } else {
-        await AccessMonitor.instance.syncNow();
-      }
-    } catch (_) {
-    } finally {
-      _syncing = false;
-    }
   }
 
   /// Desizyon AccessMonitor la (PC): pòt, prezans ak evènman deja trete.
@@ -293,7 +261,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     _realtimeSub?.unsubscribe();
     _clock?.cancel();
     _dismiss?.cancel();
-    _syncTimer?.cancel();
     _quoteTimer?.cancel();
     _pulse.dispose();
     _biometricService.dispose();
