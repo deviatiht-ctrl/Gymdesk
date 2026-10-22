@@ -86,6 +86,10 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
     final today = DateTime(now.year, now.month, now.day);
     return switch (_period) {
       'today' => (today, today.add(const Duration(days: 1))),
+      'yesterday' => (
+        today.subtract(const Duration(days: 1)),
+        today,
+      ),
       'week' => (today.subtract(Duration(days: today.weekday - 1)), today.add(const Duration(days: 1))),
       'month' => (DateTime(now.year, now.month), DateTime(now.year, now.month + 1)),
       'year' => (DateTime(now.year), DateTime(now.year + 1)),
@@ -105,6 +109,72 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
     if (picked != null) {
       setState(() {
         _range = picked;
+        _period = 'custom';
+      });
+    }
+  }
+
+  Future<void> _pickSingleDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _range?.start ?? now,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 1),
+      helpText: 'Filtrer les paiements pour une date précise',
+    );
+    if (picked != null && mounted) {
+      final d = DateTime(picked.year, picked.month, picked.day);
+      setState(() {
+        _range = DateTimeRange(start: d, end: d);
+        _period = 'custom';
+      });
+    }
+  }
+
+  Future<void> _pickStartDate() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final currentStart = _range?.start ?? _bounds.$1 ?? today;
+    final currentEnd = _range?.end ?? today;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: currentStart,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 1),
+      helpText: 'Date de début (Du)',
+    );
+    if (picked != null && mounted) {
+      final d = DateTime(picked.year, picked.month, picked.day);
+      setState(() {
+        _range = DateTimeRange(
+          start: d,
+          end: currentEnd.isBefore(d) ? d : currentEnd,
+        );
+        _period = 'custom';
+      });
+    }
+  }
+
+  Future<void> _pickEndDate() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final currentStart = _range?.start ?? _bounds.$1 ?? today;
+    final currentEnd = _range?.end ?? today;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: currentEnd,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 1),
+      helpText: 'Date de fin (Au)',
+    );
+    if (picked != null && mounted) {
+      final d = DateTime(picked.year, picked.month, picked.day);
+      setState(() {
+        _range = DateTimeRange(
+          start: currentStart.isAfter(d) ? d : currentStart,
+          end: d,
+        );
         _period = 'custom';
       });
     }
@@ -310,12 +380,37 @@ class _PaymentsPageState extends ConsumerState<PaymentsPage> {
                 runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  for (final period in ['today', 'week', 'month', 'year', 'all'])
+                  for (final period in ['today', 'yesterday', 'week', 'month', 'year', 'all'])
                     ChoiceChip(
-                      label: Text(s.text('period_$period')),
+                      label: Text(
+                        period == 'yesterday' ? 'Hier' : s.text('period_$period'),
+                      ),
                       selected: _period == period,
                       onSelected: (_) => setState(() => _period = period),
                     ),
+                  OutlinedButton.icon(
+                    onPressed: _pickSingleDate,
+                    icon: const Icon(LucideIcons.calendar, size: 15),
+                    label: const Text('Date précise'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _pickStartDate,
+                    icon: const Icon(LucideIcons.calendarRange, size: 15),
+                    label: Text(
+                      _range != null && _period == 'custom'
+                          ? 'Du : ${DateFormat('dd/MM/yyyy').format(_range!.start)}'
+                          : 'Du...',
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _pickEndDate,
+                    icon: const Icon(LucideIcons.calendarCheck, size: 15),
+                    label: Text(
+                      _range != null && _period == 'custom'
+                          ? 'Au : ${DateFormat('dd/MM/yyyy').format(_range!.end)}'
+                          : 'Au...',
+                    ),
+                  ),
                   ActionChip(
                     avatar: const Icon(LucideIcons.calendarRange, size: 16),
                     label: Text(

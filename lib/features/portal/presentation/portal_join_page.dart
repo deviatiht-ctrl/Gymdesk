@@ -49,6 +49,8 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   late final String _sessionCode;
   Timer? _doorScanTimer;
   Timer? _liveTrackingTimer;
+  bool _pollingLiveStatus = false;
+  bool _pollingDoorScan = false;
   Map<String, dynamic>? _liveRequestData;
   bool _isGeneratingPdf = false;
   Map<String, dynamic>? _identifiedMember;
@@ -259,9 +261,22 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
       );
 
       final reqId = res['request_id'] as String? ?? _sessionCode;
+      final savedPayload = {
+        'request_id': reqId,
+        'first_name': fn,
+        'last_name': ln,
+        'phone': phone,
+        'email': email,
+        'notes': notes,
+        'kind': _kind,
+        'plan_id': _selectedPlanId,
+        'submitted_at': DateTime.now().toIso8601String(),
+      };
       try {
-        await _storage.delete(key: _draftStorageKey);
-        await _storage.write(key: _activeReqStorageKey, value: reqId);
+        await _storage.write(
+          key: _activeReqStorageKey,
+          value: jsonEncode(savedPayload),
+        );
       } catch (_) {}
 
       if (mounted) {
@@ -285,24 +300,84 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
 
   Future<void> _loadActiveRequest() async {
     try {
-      final savedId = await _storage.read(key: _activeReqStorageKey);
-      if (savedId != null && savedId.isNotEmpty) {
-        final res = await _portalRepo.getRequestStatus(savedId);
-        if (res['found'] == true && mounted) {
-          final createdAt = DateTime.tryParse(res['created_at']?.toString() ?? '');
-          // Si la demande date de moins de 24h, on reste sur le live tracker
-          if (createdAt != null && DateTime.now().difference(createdAt).inHours < 24) {
-            setState(() {
-              _submittedSuccess = true;
-              _lastSubmittedRequestId = savedId;
-              _liveRequestData = res;
-              _selectedPlanId = res['plan_id']?.toString() ?? _selectedPlanId;
-              if (res['first_name'] != null) _firstNameController.text = res['first_name'];
-              if (res['last_name'] != null) _lastNameController.text = res['last_name'];
-              if (res['phone'] != null) _phoneController.text = res['phone'];
-            });
-            _startLiveTracking(savedId);
-          }
+      final rawSaved = await _storage.read(key: _activeReqStorageKey);
+      if (rawSaved == null || rawSaved.isEmpty) return;
+
+      String savedId = rawSaved;
+      Map<String, dynamic>? localSavedMap;
+      if (rawSaved.trim().startsWith('{')) {
+        try {
+          localSavedMap = jsonDecode(rawSaved) as Map<String, dynamic>;
+          savedId = localSavedMap['request_id']?.toString() ?? '';
+        } catch (_) {}
+      }
+      if (savedId.isEmpty) return;
+
+      // Restaurer immédiatement l'état local pour que le Refresh ne perde jamais l'écran de suivi
+      if (localSavedMap != null && mounted) {
+        final submittedAt = DateTime.tryParse(
+          localSavedMap['submitted_at']?.toString() ?? '',
+        );
+        if (submittedAt == null ||
+            DateTime.now().difference(submittedAt).inHours < 24) {
+          setState(() {
+            _submittedSuccess = true;
+            _lastSubmittedRequestId = savedId;
+            if (localSavedMap!['first_name'] != null) {
+              _firstNameController.text = localSavedMap['first_name'].toString();
+            }
+            if (localSavedMap['last_name'] != null) {
+              _lastNameController.text = localSavedMap['last_name'].toString();
+            }
+            if (localSavedMap['phone'] != null) {
+              _phoneController.text = localSavedMap['phone'].toString();
+            }
+            if (localSavedMap['email'] != null) {
+              _emailController.text = localSavedMap['email'].toString();
+            }
+            if (localSavedMap['kind'] != null) {
+              _kind = localSavedMap['kind'].toString();
+            }
+            if (localSavedMap['plan_id'] != null) {
+              _selectedPlanId = localSavedMap['plan_id'].toString();
+              _savedDraftPlanId = _selectedPlanId;
+            }
+            if (localSavedMap['live_data'] is Map) {
+              _liveRequestData = Map<String, dynamic>.from(
+                localSavedMap['live_data'] as Map,
+              );
+            }
+          });
+          _startLiveTracking(savedId);
+        }
+      }
+
+      final res = await _portalRepo.getRequestStatus(
+        savedId,
+        fallbackPhone: _phoneController.text.trim(),
+        fallbackGymId: _gym?['id']?.toString(),
+      );
+      if (res['found'] == true && mounted) {
+        final createdAt = DateTime.tryParse(res['created_at']?.toString() ?? '');
+        if (createdAt == null ||
+            DateTime.now().difference(createdAt).inHours < 24) {
+          final actualId = res['request_id']?.toString() ?? savedId;
+          setState(() {
+            _submittedSuccess = true;
+            _lastSubmittedRequestId = actualId;
+            _liveRequestData = res;
+            _selectedPlanId = res['plan_id']?.toString() ?? _selectedPlanId;
+            if (res['first_name'] != null) {
+              _firstNameController.text = res['first_name'].toString();
+            }
+            if (res['last_name'] != null) {
+              _lastNameController.text = res['last_name'].toString();
+            }
+            if (res['phone'] != null) {
+              _phoneController.text = res['phone'].toString();
+            }
+          });
+          _startLiveTracking(actualId);
         }
       }
     } catch (_) {}
@@ -311,21 +386,49 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   void _startLiveTracking(String requestId) {
     _liveTrackingTimer?.cancel();
     _fetchLiveRequestStatus(requestId);
-    _liveTrackingTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) {
+    // Synchronisation temps réel toutes les 1 seconde
+    _liveTrackingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _fetchLiveRequestStatus(requestId);
     });
   }
 
   Future<void> _fetchLiveRequestStatus(String requestId) async {
+    if (_pollingLiveStatus) return;
+    _pollingLiveStatus = true;
     try {
-      final res = await _portalRepo.getRequestStatus(requestId);
+      final res = await _portalRepo.getRequestStatus(
+        requestId,
+        fallbackPhone: _phoneController.text.trim(),
+        fallbackGymId: _gym?['id']?.toString(),
+      );
       if (res['found'] == true && mounted) {
         setState(() {
           _liveRequestData = res;
         });
+        try {
+          final savedPayload = {
+            'request_id': res['request_id']?.toString() ?? requestId,
+            'first_name': _firstNameController.text.trim(),
+            'last_name': _lastNameController.text.trim(),
+            'phone': _phoneController.text.trim(),
+            'email': _emailController.text.trim(),
+            'kind': _kind,
+            'plan_id': _selectedPlanId,
+            'submitted_at': res['created_at']?.toString() ??
+                DateTime.now().toIso8601String(),
+            'live_data': res,
+          };
+          await _storage.write(
+            key: _activeReqStorageKey,
+            value: jsonEncode(savedPayload),
+          );
+        } catch (_) {}
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _pollingLiveStatus = false;
+    }
   }
 
   Future<void> _resetAndStartNew() async {
@@ -452,11 +555,18 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
 
   void _startDoorScanPolling() {
     _doorScanTimer?.cancel();
-    _doorScanTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+    _doorScanTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (!mounted || _kind != 'renewal' || _identifiedMember != null) return;
-      final scan = await _portalRepo.getLatestDoorScan(_cleanGymCode);
-      if (scan['found'] == true && mounted) {
-        _onMemberIdentified(scan);
+      if (_pollingDoorScan) return;
+      _pollingDoorScan = true;
+      try {
+        final scan = await _portalRepo.getLatestDoorScan(_cleanGymCode);
+        if (scan['found'] == true && mounted) {
+          _onMemberIdentified(scan);
+        }
+      } catch (_) {
+      } finally {
+        _pollingDoorScan = false;
       }
     });
   }
@@ -699,7 +809,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          isDone ? 'Compte Activé' : 'Synchronisé en direct',
+                          isDone ? 'Compte Activé' : 'Synchronisation auto (1s)',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
@@ -714,7 +824,51 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
             ],
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 18),
+
+        // Avertissement important : ne pas quitter la page avant confirmation
+        if (!isDone) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFFBEB),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFF59E0B), width: 1.5),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(LucideIcons.triangleAlert, color: Color(0xFFD97706), size: 22),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'IMPORTANT : Ne quittez pas cette page avant la confirmation !',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13.5,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'Cette page se synchronise automatiquement toutes les 1 seconde. Restez sur cet écran jusqu\'à recevoir votre confirmation finale et votre reçu afin de ne pas avoir à recommencer.\n(Pa soti sou paj sa a anvan ou jwenn konfimasyon final la pou w pa oblije rekòmanse.)',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          height: 1.35,
+                          color: Color(0xFFB45309),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+        ],
 
         // Timeline des 3 étapes en direct
         Container(
@@ -1112,6 +1266,35 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
               });
               _saveDraft();
             },
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Bannière d'instruction : rester sur la page jusqu'à la confirmation finale
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBEB),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFFCD34D)),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(LucideIcons.info, color: Color(0xFFD97706), size: 19),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Important : Après avoir envoyé votre demande, ne quittez pas la page avant d\'avoir reçu votre confirmation finale à l\'écran pour ne pas avoir à recommencer (Synchronisation automatique chaque 1 seconde).',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                    color: Color(0xFF92400E),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 16),

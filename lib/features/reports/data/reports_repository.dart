@@ -49,29 +49,17 @@ class ReportsRepository {
         subscriptions[payload['id'] as String] = GymSubscription(payload);
       } else if (entity == 'payments') {
         final payment = GymPayment(payload);
-        if (!_outside(
-          gymDate(payment.paidAt, session.timezone),
-          startDate,
-          endDate,
-        )) {
+        if (_inRange(payment.paidAt, startDate, endDate)) {
           payments.add(payment);
         }
       } else if (entity == 'attendance') {
         final entry = AttendanceEntry(payload);
-        if (!_outside(
-          gymDate(entry.scannedAt, session.timezone),
-          startDate,
-          endDate,
-        )) {
+        if (_inRange(entry.scannedAt, startDate, endDate)) {
           attendance.add(entry);
         }
       } else if (entity == 'audit_log') {
         final entry = AuditEntry(payload);
-        if (!_outside(
-          gymDate(entry.createdAt, session.timezone),
-          startDate,
-          endDate,
-        )) {
+        if (_inRange(entry.createdAt, startDate, endDate)) {
           audit.add(entry);
         }
       }
@@ -104,9 +92,12 @@ class ReportsRepository {
     );
   }
 
-  bool _outside(DateTime value, DateTime start, DateTime end) {
-    final v = dateOnly(value);
-    return v.isBefore(start) || v.isAfter(end);
+  bool _inRange(DateTime rawTimestamp, DateTime start, DateTime end) {
+    final gDate = dateOnly(gymDate(rawTimestamp, session.timezone));
+    final lDate = dateOnly(rawTimestamp.toLocal());
+    final gMatch = !gDate.isBefore(start) && !gDate.isAfter(end);
+    final lMatch = !lDate.isBefore(start) && !lDate.isAfter(end);
+    return gMatch || lMatch;
   }
 
   Future<String> sendDailyReportEmail({

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../domain/portal_request.dart';
@@ -138,46 +140,96 @@ class PortalRepository {
     return <String, dynamic>{'success': true};
   }
   /// Rekipere eta demann lan an dirèk (pou swiv anprent ak resi a sou telefòn lan).
-  Future<Map<String, dynamic>> getRequestStatus(String requestId) async {
-    try {
-      final res = await _client.rpc('portal_get_request_status', params: {
-        'p_request_id': requestId,
-      });
-      if (res is Map<String, dynamic>) {
-        return res;
+  Future<Map<String, dynamic>> getRequestStatus(
+    String requestId, {
+    String? fallbackPhone,
+    String? fallbackGymId,
+  }) async {
+    Map<String, dynamic>? parseRow(Map<String, dynamic> r) {
+      final gym = r['gyms'] as Map<String, dynamic>?;
+      final plan = r['plans'] as Map<String, dynamic>?;
+      final rawNotes = r['notes']?.toString() ?? '';
+      Map<String, dynamic>? embeddedReceipt;
+      if (rawNotes.contains('__RECEIPT__:')) {
+        final jsonPart = rawNotes.split('__RECEIPT__:').last.trim();
+        try {
+          embeddedReceipt = Map<String, dynamic>.from(jsonDecode(jsonPart) as Map);
+        } catch (_) {}
       }
-    } catch (_) {
+      final regFee = (embeddedReceipt?['registration_fee'] as num?)?.toDouble() ??
+          (plan?['registration_fee'] as num?)?.toDouble() ??
+          0.0;
+      return {
+        'found': true,
+        'id': r['id'],
+        'status': r['status'],
+        'kind': r['kind'],
+        'plan_id': r['plan_id'],
+        'first_name': r['first_name'],
+        'last_name': r['last_name'],
+        'phone': r['phone'],
+        'email': r['email'],
+        'created_at': r['created_at'],
+        'updated_at': r['updated_at'],
+        'gym_name': gym?['name'] ?? '',
+        'gym_currency': gym?['currency'] ?? 'HTG',
+        'gym_logo_url': gym?['logo_url'],
+        'plan_name': embeddedReceipt?['plan_name'] ?? plan?['name'] ?? '',
+        'plan_price': (embeddedReceipt?['plan_fee'] as num?)?.toDouble() ?? plan?['price'],
+        'registration_fee': regFee,
+        'has_biometric': r['status'] == 'approved' || r['status'] == 'completed',
+        'member_id': r['member_id'],
+        'member_number': embeddedReceipt?['member_number'],
+        'receipt': embeddedReceipt,
+      };
+    }
+
+    // 1. Chèche dirèkteman nan portal_requests (pi rapid + gen __RECEIPT__ nan notes)
+    final isUuid = RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(requestId.trim());
+    if (isUuid) {
       try {
         final rows = await _client
             .from('portal_requests')
-            .select('*, gyms(name, currency, logo_url), plans(name, price, registration_fee)')
-            .eq('id', requestId)
+            .select('*, gyms(name, currency, logo_url), plans(name, price)')
+            .eq('id', requestId.trim())
             .limit(1);
         if (rows.isNotEmpty) {
-          final r = rows.first;
-          final gym = r['gyms'] as Map<String, dynamic>?;
-          final plan = r['plans'] as Map<String, dynamic>?;
-          return {
-            'found': true,
-            'id': r['id'],
-            'status': r['status'],
-            'kind': r['kind'],
-            'first_name': r['first_name'],
-            'last_name': r['last_name'],
-            'phone': r['phone'],
-            'email': r['email'],
-            'gym_name': gym?['name'] ?? '',
-            'gym_currency': gym?['currency'] ?? 'HTG',
-            'gym_logo_url': gym?['logo_url'],
-            'plan_name': plan?['name'] ?? '',
-            'plan_price': plan?['price'],
-            'registration_fee': plan?['registration_fee'] ?? 0,
-            'has_biometric': r['status'] == 'approved' || r['status'] == 'completed',
-            'member_id': r['member_id'],
-          };
+          final parsed = parseRow(Map<String, dynamic>.from(rows.first as Map));
+          if (parsed != null) return parsed;
         }
       } catch (_) {}
     }
+
+    // 2. Fallback RPC portal_get_request_status si disponib
+    if (isUuid) {
+      try {
+        final res = await _client.rpc('portal_get_request_status', params: {
+          'p_request_id': requestId.trim(),
+        });
+        if (res is Map<String, dynamic> && res['found'] == true) {
+          return res;
+        }
+      } catch (_) {}
+    }
+
+    // 3. Fallback pa nimewo telefòn si requestId te yon kòd sesyon lokal (SEC-...)
+    if (fallbackPhone != null && fallbackPhone.trim().isNotEmpty) {
+      try {
+        var q = _client
+            .from('portal_requests')
+            .select('*, gyms(name, currency, logo_url), plans(name, price)')
+            .eq('phone', fallbackPhone.trim());
+        if (fallbackGymId != null && fallbackGymId.isNotEmpty) {
+          q = q.eq('gym_id', fallbackGymId);
+        }
+        final rows = await q.order('created_at', ascending: false).limit(1);
+        if (rows.isNotEmpty) {
+          final parsed = parseRow(Map<String, dynamic>.from(rows.first as Map));
+          if (parsed != null) return parsed;
+        }
+      } catch (_) {}
+    }
+
     return {'found': false};
   }
 }

@@ -29,6 +29,7 @@ import '../data/member_pin_service.dart';
 import '../data/members_repository.dart';
 import '../domain/member.dart';
 import 'fingerprint_enrollment_dialog.dart';
+import '../../../core/access_control/access_monitor.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 
@@ -253,29 +254,64 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     );
   }
 
-  Future<void> _renew(Member member) async {
+  void _pushMemberToW2(Member member, {DateTime? startDate, DateTime? endDate}) {
+    AccessMonitor.instance.invalidate();
+    if (member.fingerprintRegistered && startDate != null && endDate != null) {
+      final tmpls = <String>[];
+      if (member.fingerprintTemplate != null && member.fingerprintTemplate!.isNotEmpty) {
+        tmpls.add(member.fingerprintTemplate!);
+      }
+      if (member.row['fingerprint_backup_template'] is String &&
+          (member.row['fingerprint_backup_template'] as String).isNotEmpty) {
+        tmpls.add(member.row['fingerprint_backup_template'] as String);
+      }
+      if (tmpls.isNotEmpty) {
+        unawaited(
+          AccessAgentClient()
+              .syncTerminalMember(
+                userId: member.id,
+                name: member.fullName,
+                startDate: startDate,
+                endDate: endDate,
+                templates: tmpls,
+                terminalIp: AccessMonitor.instance.config.terminalIp,
+              )
+              .catchError((_) => false),
+        );
+      }
+    }
+    unawaited(AccessMonitor.instance.syncNow());
+  }
+
+  Future<void> _renew(Member member, {GymSubscription? replaceTarget}) async {
     final s = AppStrings.of(context);
     final plans = await _plans.watch().first;
+    final existingSubs = await _members.watchSubscriptions(member.id).first;
     final activePlans = plans
         .where((p) => p.active && p.deletedAt == null)
         .toList();
     if (!mounted) return;
-    GymPlan? plan = activePlans.isEmpty ? null : activePlans.first;
+    final latestSub = replaceTarget ?? (existingSubs.isNotEmpty ? existingSubs.first : null);
+    GymPlan? plan = activePlans.isEmpty
+        ? null
+        : (activePlans.where((p) => p.id == latestSub?.planId).firstOrNull ?? activePlans.first);
     final paid = TextEditingController(
-      text: plan?.price.toStringAsFixed(2) ?? '',
+      text: replaceTarget != null ? '0' : (plan?.price.toStringAsFixed(2) ?? ''),
     );
     final received = TextEditingController();
     String method = 'cash';
     var keepCredit = false;
-    DateTime start = dateOnly(DateTime.now());
+    var markValid = true;
+    var replacePrevious = replaceTarget != null;
+    DateTime start = replaceTarget != null ? dateOnly(replaceTarget.startDate) : dateOnly(DateTime.now());
     DateTime end = subscriptionEnd(start, plan?.durationDays ?? 30);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) => AlertDialog(
-          title: Text(s.text('renew_subscription')),
+          title: Text(replaceTarget != null ? 'Refaire l\'abonnement' : s.text('renew_subscription')),
           content: SizedBox(
-            width: 480,
+            width: 500,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -283,6 +319,36 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                   if (activePlans.isEmpty)
                     Text(s.text('plans_empty'))
                   else ...[
+                    if (latestSub != null) ...[
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: replacePrevious ? const Color(0xFFFEF2F2) : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: replacePrevious ? const Color(0xFFFECACA) : Colors.grey.shade300,
+                          ),
+                        ),
+                        child: CheckboxListTile(
+                          dense: true,
+                          title: const Text(
+                            'Remplacer / supprimer l\'abonnement précédent',
+                            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            'Actuel : ${ymd(latestSub.startDate)} → ${ymd(latestSub.endDate)} (${latestSub.price.toStringAsFixed(0)})',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          value: replacePrevious,
+                          onChanged: (v) => setDialog(() {
+                            replacePrevious = v == true;
+                            if (replacePrevious && paid.text == (plan?.price.toStringAsFixed(2) ?? '')) {
+                              // Laisse le choix du montant encaissé (0 si déjà payé)
+                            }
+                          }),
+                        ),
+                      ),
+                    ],
                     DropdownButtonFormField<GymPlan>(
                       initialValue: plan,
                       decoration: InputDecoration(labelText: s.text('plan')),
@@ -298,7 +364,9 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                           .toList(),
                       onChanged: (p) => setDialog(() {
                         plan = p;
-                        paid.text = p?.price.toStringAsFixed(2) ?? '';
+                        if (replaceTarget == null) {
+                          paid.text = p?.price.toStringAsFixed(2) ?? '';
+                        }
                         if (p != null) {
                           end = subscriptionEnd(start, p.durationDays);
                         }
@@ -354,6 +422,33 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                       '${s.text('subscription_period')}: ${ymd(start)} → ${ymd(end)} (${dateOnly(end).difference(dateOnly(start)).inDays} ${s.text('days')})',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F766E)),
                     ),
+                    const SizedBox(height: 10),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: markValid ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: markValid ? const Color(0xFF6EE7B7) : const Color(0xFFFDE68A),
+                        ),
+                      ),
+                      child: SwitchListTile(
+                        dense: true,
+                        title: Text(
+                          markValid ? 'Statut : Valide (Actif) immédiatement ✓' : 'Statut : En attente de validation',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: markValid ? const Color(0xFF065F46) : const Color(0xFF92400E),
+                          ),
+                        ),
+                        subtitle: const Text(
+                          'Active directement l\'abonnement et l\'accès porte W2',
+                          style: TextStyle(fontSize: 11),
+                        ),
+                        value: markValid,
+                        onChanged: (v) => setDialog(() => markValid = v),
+                      ),
+                    ),
                     const SizedBox(height: 14),
                     TextFormField(
                       controller: paid,
@@ -361,7 +456,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                         decimal: true,
                       ),
                       decoration: InputDecoration(
-                        labelText: s.text('paid_amount'),
+                        labelText: '${s.text('paid_amount')} (mettre 0 si déjà encaissé)',
                       ),
                       onChanged: (_) => setDialog(() {}),
                     ),
@@ -467,26 +562,14 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
         start: start,
         end: end,
         customDates: true,
+        forceActive: markValid,
+        replaceSubscriptionId: replacePrevious ? latestSub?.id : null,
         changedAt: _now,
         payment: command,
       );
     });
-    if (created != null && member.fingerprintRegistered) {
-      final tmpls = <String>[];
-      if (member.fingerprintTemplate != null && member.fingerprintTemplate!.isNotEmpty) {
-        tmpls.add(member.fingerprintTemplate!);
-      }
-      if (member.row['fingerprint_backup_template'] is String &&
-          (member.row['fingerprint_backup_template'] as String).isNotEmpty) {
-        tmpls.add(member.row['fingerprint_backup_template'] as String);
-      }
-      unawaited(AccessAgentClient().syncTerminalMember(
-        userId: member.id,
-        name: member.fullName,
-        startDate: created!.startDate,
-        endDate: created!.endDate,
-        templates: tmpls,
-      ).catchError((_) => false));
+    if (created != null) {
+      _pushMemberToW2(member, startDate: created!.startDate, endDate: created!.endDate);
     }
     if (mounted && command != null) {
       await _openReceipt(member, created, command);
@@ -623,27 +706,226 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     );
   }
 
-  Future<void> _cancelSubscription(GymSubscription subscription) async {
+  Future<void> _validateSubscriptionNow(Member member, GymSubscription subscription) async {
+    await _run(() => _subscriptions.validateRenewal(subscription, changedAt: _now));
+    _pushMemberToW2(member, startDate: subscription.startDate, endDate: subscription.endDate);
+  }
+
+  Future<void> _editSubscription(Member member, GymSubscription subscription) async {
     final s = AppStrings.of(context);
+    final plans = await _plans.watch().first;
+    final activePlans = plans.where((p) => p.active && p.deletedAt == null).toList();
+    if (!mounted) return;
+    GymPlan? selectedPlan = activePlans.where((p) => p.id == subscription.planId).firstOrNull ??
+        (activePlans.isNotEmpty ? activePlans.first : null);
+    DateTime start = dateOnly(subscription.startDate);
+    DateTime end = dateOnly(subscription.endDate);
+    String status = subscription.status == 'cancelled' ? 'active' : subscription.status;
+    final priceCtrl = TextEditingController(text: subscription.price.toStringAsFixed(2));
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(s.text('cancel_subscription')),
-        content: Text(s.text('cancel_subscription_confirmation')),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(LucideIcons.pencil, size: 20, color: Color(0xFF0F766E)),
+              SizedBox(width: 8),
+              Text('Modifier l\'abonnement'),
+            ],
+          ),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (activePlans.isNotEmpty) ...[
+                    DropdownButtonFormField<GymPlan>(
+                      initialValue: selectedPlan,
+                      decoration: InputDecoration(labelText: s.text('plan')),
+                      items: activePlans
+                          .map(
+                            (p) => DropdownMenuItem(
+                              value: p,
+                              child: Text('${p.name} · ${p.price.toStringAsFixed(0)} ${p.currency} (${p.durationDays}j)'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (p) => setDialog(() {
+                        selectedPlan = p;
+                        if (p != null) {
+                          priceCtrl.text = p.price.toStringAsFixed(2);
+                          end = subscriptionEnd(start, p.durationDays);
+                        }
+                      }),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final date = await showDatePicker(
+                              context: ctx,
+                              initialDate: start,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime.now().add(const Duration(days: 1095)),
+                            );
+                            if (date != null) {
+                              setDialog(() {
+                                start = dateOnly(date);
+                                end = subscriptionEnd(start, selectedPlan?.durationDays ?? 30);
+                              });
+                            }
+                          },
+                          icon: const Icon(LucideIcons.calendar, size: 16),
+                          label: Text('${s.text('start_date')}: ${ymd(start)}'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final date = await showDatePicker(
+                              context: ctx,
+                              initialDate: end.isBefore(start) ? start : end,
+                              firstDate: start,
+                              lastDate: DateTime.now().add(const Duration(days: 1095)),
+                            );
+                            if (date != null) {
+                              setDialog(() => end = dateOnly(date));
+                            }
+                          },
+                          icon: const Icon(LucideIcons.calendarCheck, size: 16),
+                          label: Text('${s.text('end_date')}: ${ymd(end)}'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${s.text('subscription_period')}: ${ymd(start)} → ${ymd(end)} (${dateOnly(end).difference(dateOnly(start)).inDays} ${s.text('days')})',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F766E)),
+                      ),
+                      TextButton(
+                        onPressed: () => setDialog(() {
+                          end = subscriptionEnd(start, selectedPlan?.durationDays ?? 30);
+                        }),
+                        child: const Text('Recalculer 30j', style: TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: priceCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(labelText: s.text('price')),
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: status,
+                    decoration: const InputDecoration(labelText: 'Statut de l\'abonnement'),
+                    items: const [
+                      DropdownMenuItem(value: 'active', child: Text('Valide (Actif ✓)')),
+                      DropdownMenuItem(value: 'pending', child: Text('En attente de paiement')),
+                      DropdownMenuItem(value: 'cancelled', child: Text('Annulé')),
+                    ],
+                    onChanged: (v) => setDialog(() => status = v ?? 'active'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(s.text('cancel')),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(LucideIcons.check, size: 16),
+              label: Text(s.text('save')),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final newPrice = double.tryParse(priceCtrl.text.replaceAll(',', '.')) ?? subscription.price;
+    priceCtrl.dispose();
+    if (confirmed != true) return;
+
+    GymSubscription? updated;
+    await _run(() async {
+      updated = await _subscriptions.updateSubscription(
+        subscription,
+        planId: selectedPlan?.id ?? subscription.planId,
+        startDate: start,
+        endDate: end,
+        price: newPrice,
+        status: status,
+        changedAt: _now,
+      );
+    });
+    if (updated != null) {
+      _pushMemberToW2(member, startDate: updated!.startDate, endDate: updated!.endDate);
+    }
+  }
+
+  Future<void> _deleteSubscription(Member member, GymSubscription subscription) async {
+    final s = AppStrings.of(context);
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(LucideIcons.trash2, color: Colors.red, size: 22),
+            SizedBox(width: 8),
+            Text('Supprimer cet abonnement ?'),
+          ],
+        ),
+        content: Text(
+          'Période : ${ymd(subscription.startDate)} → ${ymd(subscription.endDate)} (${subscription.price.toStringAsFixed(0)})\n\n'
+          'Vous pouvez supprimer cet abonnement uniquement, ou le supprimer et le refaire immédiatement avec les bonnes dates (marqué Valide).',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
             child: Text(s.text('cancel')),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(s.text('cancel_subscription')),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, 'delete_only'),
+            icon: const Icon(LucideIcons.trash2, size: 16),
+            label: const Text('Supprimer'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => Navigator.pop(ctx, 'delete_and_redo'),
+            icon: const Icon(LucideIcons.refreshCw, size: 16),
+            label: const Text('Supprimer et Refaire (Valide)'),
           ),
         ],
       ),
     );
-    if (confirmed == true) {
-      await _run(() => _subscriptions.cancel(subscription, changedAt: _now));
+    if (action != 'delete_only' && action != 'delete_and_redo') return;
+    final runtime = ref.read(appRuntimeProvider);
+    await _run(
+      () => _subscriptions.deleteSubscription(
+        subscription,
+        changedAt: _now,
+        client: runtime.client,
+      ),
+    );
+    AccessMonitor.instance.invalidate();
+    if (action == 'delete_and_redo' && mounted) {
+      await _renew(member);
     }
   }
 
@@ -937,47 +1219,133 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              s.text('subscriptions'),
-                              style: Theme.of(context).textTheme.titleLarge,
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  s.text('subscriptions'),
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: _busy ? null : () => _renew(member),
+                                  icon: const Icon(LucideIcons.plus, size: 16),
+                                  label: const Text('Nouvel abonnement'),
+                                ),
+                              ],
                             ),
                             const SizedBox(height: 12),
                             if (subscriptions.isEmpty)
                               Text(s.text('subscriptions_empty')),
                             for (final subscription in subscriptions.take(8))
-                              ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  '${DateFormat.yMd(locale).format(subscription.startDate)} → ${DateFormat.yMd(locale).format(subscription.endDate)} · ${subscription.price.toStringAsFixed(2)}',
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: subscription.status == 'active'
+                                      ? const Color(0xFFF0FDF4)
+                                      : (subscription.status == 'pending'
+                                          ? const Color(0xFFFFFBEB)
+                                          : const Color(0xFFFEF2F2)),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: subscription.status == 'active'
+                                        ? const Color(0xFFBBF7D0)
+                                        : (subscription.status == 'pending'
+                                            ? const Color(0xFFFDE68A)
+                                            : const Color(0xFFFECACA)),
+                                  ),
                                 ),
-                                subtitle: Text(
-                                  '${s.text(subscription.status)}${subscription.imported ? ' · ${s.text('imported_period')}' : ''}',
-                                ),
-                                trailing: Wrap(
-                                  spacing: 4,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    if (subscription.status == 'pending')
-                                      TextButton(
-                                        onPressed: _busy
-                                            ? null
-                                            : () => _collect(
-                                                member,
-                                                subscription,
-                                              ),
-                                        child: Text(s.text('collect_payment')),
-                                      ),
-                                    if (canManage &&
-                                        subscription.status != 'cancelled')
-                                      TextButton(
-                                        onPressed: _busy
-                                            ? null
-                                            : () => _cancelSubscription(
-                                                subscription,
-                                              ),
-                                        child: Text(
-                                          s.text('cancel_subscription'),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            '${DateFormat.yMd(locale).format(subscription.startDate)} → ${DateFormat.yMd(locale).format(subscription.endDate)} · ${subscription.price.toStringAsFixed(2)}',
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                          ),
                                         ),
-                                      ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: subscription.status == 'active'
+                                                ? const Color(0xFFDCFCE7)
+                                                : (subscription.status == 'pending'
+                                                    ? const Color(0xFFFEF3C7)
+                                                    : const Color(0xFFFEE2E2)),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            subscription.status == 'active'
+                                                ? 'Valide ✓'
+                                                : '${s.text(subscription.status)}${subscription.imported ? ' · ${s.text('imported_period')}' : ''}',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                              color: subscription.status == 'active'
+                                                  ? const Color(0xFF15803D)
+                                                  : (subscription.status == 'pending'
+                                                      ? const Color(0xFFB45309)
+                                                      : const Color(0xFFB91C1C)),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 6,
+                                      children: [
+                                        if (subscription.status != 'active')
+                                          FilledButton.tonalIcon(
+                                            style: FilledButton.styleFrom(
+                                              visualDensity: VisualDensity.compact,
+                                              backgroundColor: const Color(0xFFDCFCE7),
+                                              foregroundColor: const Color(0xFF15803D),
+                                            ),
+                                            onPressed: _busy
+                                                ? null
+                                                : () => _validateSubscriptionNow(member, subscription),
+                                            icon: const Icon(LucideIcons.circleCheck, size: 14),
+                                            label: const Text('Valider', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                          ),
+                                        if (subscription.status == 'pending')
+                                          OutlinedButton.icon(
+                                            style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                                            onPressed: _busy ? null : () => _collect(member, subscription),
+                                            icon: const Icon(LucideIcons.wallet, size: 14),
+                                            label: Text(s.text('collect_payment'), style: const TextStyle(fontSize: 12)),
+                                          ),
+                                        OutlinedButton.icon(
+                                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                                          onPressed: _busy ? null : () => _editSubscription(member, subscription),
+                                          icon: const Icon(LucideIcons.pencil, size: 14),
+                                          label: const Text('Modifier', style: TextStyle(fontSize: 12)),
+                                        ),
+                                        OutlinedButton.icon(
+                                          style: OutlinedButton.styleFrom(
+                                            visualDensity: VisualDensity.compact,
+                                            foregroundColor: const Color(0xFF0F766E),
+                                          ),
+                                          onPressed: _busy
+                                              ? null
+                                              : () => _renew(member, replaceTarget: subscription),
+                                          icon: const Icon(LucideIcons.refreshCw, size: 14),
+                                          label: const Text('Refaire', style: TextStyle(fontSize: 12)),
+                                        ),
+                                        OutlinedButton.icon(
+                                          style: OutlinedButton.styleFrom(
+                                            visualDensity: VisualDensity.compact,
+                                            foregroundColor: Colors.red.shade700,
+                                          ),
+                                          onPressed: _busy ? null : () => _deleteSubscription(member, subscription),
+                                          icon: const Icon(LucideIcons.trash2, size: 14),
+                                          label: const Text('Supprimer', style: TextStyle(fontSize: 12)),
+                                        ),
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ),

@@ -371,6 +371,8 @@ class MembersRepository {
     required DateTime start,
     DateTime? end,
     bool customDates = false,
+    bool forceActive = false,
+    String? replaceSubscriptionId,
     required DateTime changedAt,
     PaymentCommand? payment,
   }) => _local(() async {
@@ -397,7 +399,10 @@ class MembersRepository {
     final today = gymDate(changedAt, session.timezone);
     final current =
         subscriptions
-            .where((s) => s.status != 'cancelled' && !s.endDate.isBefore(today))
+            .where((s) =>
+                s.id != replaceSubscriptionId &&
+                s.status != 'cancelled' &&
+                !s.endDate.isBefore(today))
             .toList()
           ..sort((a, b) => b.endDate.compareTo(a.endDate));
     final startDate = customDates
@@ -410,6 +415,7 @@ class MembersRepository {
         : subscriptionEnd(startDate, plan.durationDays);
     final subscriptionId = _uuid.v4();
     final amount = payment?.amount ?? 0;
+    final isValidActive = forceActive || (amount >= plan.price && session.canManageGym);
     final subscription = GymSubscription({
       'id': subscriptionId,
       'gym_id': session.gymId,
@@ -419,24 +425,27 @@ class MembersRepository {
       'end_date': ymd(endDate),
       'price': plan.price,
       'enrollment_kind': 'renewal',
-      // La réception ne peut pas valider un renouvellement : il reste
-      // 'pending' jusqu'à l'approbation d'un owner/supervisor.
-      'status': amount >= plan.price && session.canManageGym
-          ? 'active'
-          : 'pending',
+      'status': isValidActive ? 'active' : 'pending',
       'renewed_from': current.isEmpty ? null : current.first.id,
-      'validated_by': amount >= plan.price && session.canManageGym
-          ? session.staffId
-          : null,
-      'validated_at': amount >= plan.price && session.canManageGym
-          ? changedAt.toUtc().toIso8601String()
-          : null,
+      'validated_by': isValidActive ? session.staffId : null,
+      'validated_at': isValidActive ? changedAt.toUtc().toIso8601String() : null,
       'created_by': session.staffId,
       'created_at': changedAt.toUtc().toIso8601String(),
       'updated_at': changedAt.toUtc().toIso8601String(),
       'deleted_at': null,
     });
     await db.transaction(() async {
+      if (replaceSubscriptionId != null && replaceSubscriptionId.isNotEmpty) {
+        final toDelete = subscriptions.where((s) => s.id == replaceSubscriptionId).firstOrNull;
+        if (toDelete != null) {
+          await db.save(
+            SyncEntity.subscriptions,
+            toDelete.row,
+            changedAt: changedAt,
+            deleting: true,
+          );
+        }
+      }
       await db.save(
         SyncEntity.subscriptions,
         subscription.row,

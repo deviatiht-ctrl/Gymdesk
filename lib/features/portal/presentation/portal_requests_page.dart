@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +33,8 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
   String? _errorMessage;
   List<PortalRequest> _allRequests = [];
   bool _isScanningFingerprint = false;
+  Timer? _autoSyncTimer;
+  bool _isSilentPolling = false;
 
   @override
   void initState() {
@@ -40,12 +43,51 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
     _portalRepo = PortalRepository(runtime.client);
     _biometricService = BiometricService();
     _loadRequests();
+    // Synchronisation automatique temps réel chaque 1 seconde
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        _silentPollRequests();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _autoSyncTimer?.cancel();
     _biometricService.dispose();
     super.dispose();
+  }
+
+  Future<void> _silentPollRequests() async {
+    if (_isSilentPolling || _isLoading) return;
+    _isSilentPolling = true;
+    try {
+      final gymId = ref.read(appRuntimeProvider).session?.gymId;
+      if (gymId == null) return;
+      final list = await _portalRepo.fetchRequests(
+        gymId,
+        status: _statusFilter == 'all' ? null : _statusFilter,
+      );
+      if (!mounted) return;
+      final changed = list.length != _allRequests.length ||
+          list.asMap().entries.any((entry) {
+            final prev = _allRequests[entry.key];
+            final curr = entry.value;
+            return prev.id != curr.id ||
+                prev.status != curr.status ||
+                prev.updatedAt != curr.updatedAt ||
+                prev.notes != curr.notes;
+          });
+      if (changed) {
+        setState(() {
+          _allRequests = list;
+          _errorMessage = null;
+        });
+      }
+    } catch (_) {
+    } finally {
+      _isSilentPolling = false;
+    }
   }
 
   Future<void> _loadRequests() async {
@@ -574,6 +616,30 @@ class _PortalRequestsPageState extends ConsumerState<PortalRequestsPage> {
                   ],
                   selected: {_kindFilter},
                   onSelectionChanged: (set) => setState(() => _kindFilter = set.first),
+                ),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCFCE7),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFF86EFAC)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.radio, size: 14, color: Color(0xFF15803D)),
+                      SizedBox(width: 6),
+                      Text(
+                        'Temps réel (Sync 1s)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF15803D),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

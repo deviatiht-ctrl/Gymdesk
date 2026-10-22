@@ -22,12 +22,14 @@ class PaymentsRepository {
           ),
         )
         .where(
-          (p) =>
-              p.deletedAt == null &&
-              (memberId == null || p.memberId == memberId) &&
-              (method == 'all' || p.method == method) &&
-              (from == null || !p.paidAt.isBefore(from)) &&
-              (to == null || p.paidAt.isBefore(to)),
+          (p) {
+            final paidLocal = p.paidAt.toLocal();
+            return p.deletedAt == null &&
+                (memberId == null || p.memberId == memberId) &&
+                (method == 'all' || p.method == method) &&
+                (from == null || !paidLocal.isBefore(from)) &&
+                (to == null || paidLocal.isBefore(to));
+          },
         )
         .toList();
     payments.sort(

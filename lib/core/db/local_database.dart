@@ -193,7 +193,11 @@ class LocalDatabase extends _$LocalDatabase {
       throw const SyncRejected('append_only');
     }
     final timestamp = changedAt.toUtc().toIso8601String();
+    final previousMap = previous != null
+        ? Map<String, dynamic>.from(jsonDecode(previous.payload) as Map)
+        : const <String, dynamic>{};
     final row = {
+      ...previousMap,
       ...data,
       if (entity != SyncEntity.attendance) 'updated_at': timestamp,
       if (deleting) 'deleted_at': timestamp,

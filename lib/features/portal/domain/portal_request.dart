@@ -39,6 +39,10 @@ class PortalRequest {
 
   factory PortalRequest.fromJson(Map<String, dynamic> json) {
     final plans = json['plans'] as Map<String, dynamic>?;
+    final rawNotes = json['notes'] as String?;
+    final cleanNotes = rawNotes != null && rawNotes.contains('__RECEIPT__:')
+        ? rawNotes.split('__RECEIPT__:').first.trim()
+        : rawNotes;
     return PortalRequest(
       id: json['id'] as String,
       gymId: json['gym_id'] as String,
@@ -53,7 +57,7 @@ class PortalRequest {
       kind: json['kind'] as String? ?? 'new_membership',
       status: json['status'] as String? ?? 'pending',
       memberId: json['member_id'] as String?,
-      notes: json['notes'] as String?,
+      notes: (cleanNotes != null && cleanNotes.isEmpty) ? null : cleanNotes,
       createdAt: DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ?? DateTime.now(),
       updatedAt: DateTime.tryParse(json['updated_at'] as String? ?? '')?.toLocal() ?? DateTime.now(),
     );

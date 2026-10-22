@@ -524,23 +524,43 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
                 startDate: startDate,
                 endDate: endDate,
                 templates: [_fingerprintTemplate!],
+                terminalIp: AccessMonitor.instance.config.terminalIp,
               )
               .catchError((_) => false),
         );
-      } else {
-        unawaited(AccessMonitor.instance.syncNow());
       }
+      unawaited(AccessMonitor.instance.syncNow());
+
+      final receiptSummaryJson = jsonEncode({
+        'receipt_number': paymentId.substring(0, 8).toUpperCase(),
+        'member_number': targetMemberNumber,
+        'amount': totalAmount,
+        'registration_fee': regFee,
+        'plan_fee': planPrice,
+        'payment_reason': reason,
+        'payment_method': _paymentMethod,
+        'payment_date': now.toUtc().toIso8601String(),
+        'sub_start_date': ymd(startDate),
+        'sub_end_date': ymd(endDate),
+        'plan_name': plan.name,
+      });
+      final existingNotes = (widget.request.notes ?? '').split('__RECEIPT__:').first.trim();
+      final updatedNotes = existingNotes.isEmpty
+          ? '__RECEIPT__:$receiptSummaryJson'
+          : '$existingNotes\n__RECEIPT__:$receiptSummaryJson';
 
       try {
         await runtime.client.from('portal_requests').update({
           'status': 'completed',
           'member_id': targetMemberId,
+          'notes': updatedNotes,
           'updated_at': now.toUtc().toIso8601String(),
         }).eq('id', widget.request.id);
       } catch (_) {
         try {
           await runtime.client.from('portal_requests').update({
             'status': 'completed',
+            'notes': updatedNotes,
             'updated_at': now.toUtc().toIso8601String(),
           }).eq('id', widget.request.id);
         } catch (_) {}

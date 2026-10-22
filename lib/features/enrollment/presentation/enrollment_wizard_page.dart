@@ -27,6 +27,7 @@ import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
+import '../../../core/access_control/access_monitor.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../members/data/member_pin_service.dart';
 
@@ -587,12 +588,25 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       final fullName = '${draft.firstName} ${draft.lastName}'.trim();
 
       // Synchronisation immédiate du membre sur le terminal IP mural Suprema (BioEntry W2)
+      AccessMonitor.instance.invalidate();
       if (_primaryTemplate != null) {
         final agentClient = AccessAgentClient();
         final tmpls = [_primaryTemplate!];
         if (_backupTemplate != null) tmpls.add(_backupTemplate!);
-        unawaited(agentClient.syncTerminalMember(userId: result.memberId, name: fullName, startDate: _startDate, endDate: endDate, templates: tmpls).catchError((_) => false));
+        unawaited(
+          agentClient
+              .syncTerminalMember(
+                userId: result.memberId,
+                name: fullName,
+                startDate: _startDate,
+                endDate: endDate,
+                templates: tmpls,
+                terminalIp: AccessMonitor.instance.config.terminalIp,
+              )
+              .catchError((_) => false),
+        );
       }
+      unawaited(AccessMonitor.instance.syncNow());
 
       final email = draft.email.trim();
 

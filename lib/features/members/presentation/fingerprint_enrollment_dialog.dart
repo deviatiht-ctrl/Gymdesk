@@ -4,9 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/access_control/access_monitor.dart';
+import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
+import '../../subscriptions/data/subscriptions_repository.dart';
+import '../../subscriptions/domain/subscription_rules.dart';
 import '../domain/member.dart';
 
 class FingerprintEnrollmentDialog extends ConsumerStatefulWidget {
@@ -192,9 +196,41 @@ class _FingerprintEnrollmentDialogState
           updatedRow,
           changedAt: now,
         );
+
+        // Pouse anprent lan imedyatman (< 300ms) sou tèminal IP BioEntry W2 a
+        if (runtime.database != null && runtime.session != null) {
+          try {
+            final subs = await SubscriptionsRepository(runtime.database!, runtime.session!).forMember(member.id);
+            final activeSubs = subs.where((s) => s.deletedAt == null && s.status != 'cancelled').toList()
+              ..sort((a, b) => b.endDate.compareTo(a.endDate));
+            final startDate = activeSubs.isNotEmpty ? activeSubs.first.startDate : dateOnly(DateTime.now());
+            final endDate = activeSubs.isNotEmpty
+                ? activeSubs.first.endDate
+                : subscriptionEnd(dateOnly(DateTime.now()), 30);
+            final tmpls = <String>[template];
+            if (member.row['fingerprint_backup_template'] is String &&
+                (member.row['fingerprint_backup_template'] as String).isNotEmpty) {
+              tmpls.add(member.row['fingerprint_backup_template'] as String);
+            }
+            unawaited(
+              AccessAgentClient()
+                  .syncTerminalMember(
+                    userId: member.id,
+                    name: member.fullName,
+                    startDate: startDate,
+                    endDate: endDate,
+                    templates: tmpls,
+                    terminalIp: AccessMonitor.instance.config.terminalIp,
+                  )
+                  .catchError((_) => false),
+            );
+          } catch (_) {}
+        }
       }
 
-      // 3. Senkronize imedyatman
+      // 3. Senkronize imedyatman sou W2 ak Cloud
+      AccessMonitor.instance.invalidate();
+      unawaited(AccessMonitor.instance.syncNow());
       unawaited(runtime.sync?.synchronize());
 
       widget.onSaved();

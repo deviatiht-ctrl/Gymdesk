@@ -77,16 +77,32 @@ MemberValidity memberValidity(
       );
     }
   }
+  for (final subscription in usable.where(
+    (s) => s.status != 'pending' || allowPending,
+  )) {
+    if (!subscription.endDate.add(Duration(days: grace)).isBefore(date)) {
+      return MemberValidity(
+        valid: true,
+        reason: 'ok',
+        subscriptionId: subscription.id,
+        endDate: subscription.endDate,
+        daysLeft: subscription.endDate
+            .difference(subscription.startDate.isAfter(date) ? subscription.startDate : date)
+            .inDays
+            .clamp(0, 36500)
+            .toInt(),
+      );
+    }
+  }
   for (final subscription in pending) {
-    if (!subscription.startDate.isAfter(date) &&
-        !subscription.endDate.add(Duration(days: grace)).isBefore(date)) {
+    if (!subscription.endDate.add(Duration(days: grace)).isBefore(date)) {
       return MemberValidity(
         valid: false,
         reason: 'pending_payment',
         subscriptionId: subscription.id,
         endDate: subscription.endDate,
         daysLeft: subscription.endDate
-            .difference(date)
+            .difference(subscription.startDate.isAfter(date) ? subscription.startDate : date)
             .inDays
             .clamp(0, 36500)
             .toInt(),

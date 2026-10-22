@@ -20,7 +20,9 @@ class ReportsPage extends ConsumerStatefulWidget {
 
 class _ReportsPageState extends ConsumerState<ReportsPage> {
   late final ReportsRepository _repository;
-  int _days = 0;
+  String _periodPreset = 'today'; // 'today', 'yesterday', '7d', '30d', 'month', 'all', 'custom'
+  DateTime? _customStart;
+  DateTime? _customEnd;
   bool _busy = false;
 
   @override
@@ -30,8 +32,100 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     _repository = ReportsRepository(runtime.database!, runtime.session!);
   }
 
-  DateTime get _end => DateTime.now().toUtc();
-  DateTime get _start => _end.subtract(Duration(days: _days));
+  DateTime get _todayLocal {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  DateTime get _end {
+    final today = _todayLocal;
+    switch (_periodPreset) {
+      case 'yesterday':
+        return today.subtract(const Duration(days: 1));
+      case 'custom':
+        return _customEnd ?? _customStart ?? today;
+      default:
+        return today;
+    }
+  }
+
+  DateTime get _start {
+    final today = _todayLocal;
+    switch (_periodPreset) {
+      case 'today':
+        return today;
+      case 'yesterday':
+        return today.subtract(const Duration(days: 1));
+      case '7d':
+        return today.subtract(const Duration(days: 6));
+      case '30d':
+        return today.subtract(const Duration(days: 29));
+      case 'month':
+        return DateTime(today.year, today.month, 1);
+      case 'all':
+        return DateTime(2020, 1, 1);
+      case 'custom':
+        return _customStart ?? today;
+      default:
+        return today;
+    }
+  }
+
+  Future<void> _pickSingleDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _start,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      helpText: 'Choisir une date précise pour le rapport',
+    );
+    if (picked != null && mounted) {
+      final d = DateTime(picked.year, picked.month, picked.day);
+      setState(() {
+        _periodPreset = 'custom';
+        _customStart = d;
+        _customEnd = d;
+      });
+    }
+  }
+
+  Future<void> _pickStartDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _start,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      helpText: 'Date de début du rapport (Du)',
+    );
+    if (picked != null && mounted) {
+      final d = DateTime(picked.year, picked.month, picked.day);
+      setState(() {
+        final currentEnd = _end;
+        _periodPreset = 'custom';
+        _customStart = d;
+        _customEnd = currentEnd.isBefore(d) ? d : currentEnd;
+      });
+    }
+  }
+
+  Future<void> _pickEndDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _end,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      helpText: 'Date de fin du rapport (Au)',
+    );
+    if (picked != null && mounted) {
+      final d = DateTime(picked.year, picked.month, picked.day);
+      setState(() {
+        final currentStart = _start;
+        _periodPreset = 'custom';
+        _customEnd = d;
+        _customStart = currentStart.isAfter(d) ? d : currentStart;
+      });
+    }
+  }
 
   Future<void> _export(ReportSnapshot snapshot) async {
     if (_busy) return;
@@ -162,22 +256,53 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                 ),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    SegmentedButton<int>(
-                      segments: [
-                        ButtonSegment(value: 0, label: Text(s.text('today'))),
-                        ButtonSegment(
-                          value: 6,
-                          label: Text(s.text('last_7_days')),
-                        ),
-                        ButtonSegment(
-                          value: 29,
-                          label: Text(s.text('last_30_days')),
-                        ),
-                      ],
-                      selected: {_days},
-                      onSelectionChanged: (values) =>
-                          setState(() => _days = values.first),
+                    ChoiceChip(
+                      label: Text(s.text('today')),
+                      selected: _periodPreset == 'today',
+                      onSelected: (_) => setState(() => _periodPreset = 'today'),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Hier'),
+                      selected: _periodPreset == 'yesterday',
+                      onSelected: (_) => setState(() => _periodPreset = 'yesterday'),
+                    ),
+                    ChoiceChip(
+                      label: Text(s.text('last_7_days')),
+                      selected: _periodPreset == '7d',
+                      onSelected: (_) => setState(() => _periodPreset = '7d'),
+                    ),
+                    ChoiceChip(
+                      label: Text(s.text('last_30_days')),
+                      selected: _periodPreset == '30d',
+                      onSelected: (_) => setState(() => _periodPreset = '30d'),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Ce mois'),
+                      selected: _periodPreset == 'month',
+                      onSelected: (_) => setState(() => _periodPreset = 'month'),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Tout'),
+                      selected: _periodPreset == 'all',
+                      onSelected: (_) => setState(() => _periodPreset = 'all'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _pickSingleDate,
+                      icon: const Icon(LucideIcons.calendar, size: 15),
+                      label: const Text('Date précise'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _pickStartDate,
+                      icon: const Icon(LucideIcons.calendarRange, size: 15),
+                      label: Text('Du : ${DateFormat('dd/MM/yyyy').format(_start)}'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _pickEndDate,
+                      icon: const Icon(LucideIcons.calendarCheck, size: 15),
+                      label: Text('Au : ${DateFormat('dd/MM/yyyy').format(_end)}'),
                     ),
                   ],
                 ),
