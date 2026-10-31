@@ -211,3 +211,11 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
   * `authorizedHandler` autorise désormais les origines `localhost`/`127.0.0.1` (tous ports) pour le dev, en plus de
     `GYMDESK_ALLOWED_ORIGINS`. ⚠️ Pour la production : définir le secret `GYMDESK_ALLOWED_ORIGINS=https://securgym.com,https://www.securgym.com`
     dans Edge Functions → Secrets (sans lui, tout appel navigateur → `origin_denied`). Redéployer la fonction après ce commit.
+
+- 2026-10-30 — Correctif « Ces données sont refusées » sur la page Paramètres/branding (JL FITNESS).
+  * Trois causes trouvées en prod : `gyms.settings.biometric_config` (écrit par biometric_settings_page via update direct)
+    absent de la whitelist `sync_branding` → toute sauvegarde rejetée ; `phone` 35 > limite 32 ; `logo_url` exigeait le
+    préfixe `gym-assets/<uuid>/` alors que le client stocke `<gym_id>/logos/<uuid>.png`.
+  * `supabase/sql/35_branding_fix.sql` (appliqué via Management API + vérifié) : whitelist + `biometric_config`
+    (objet ≤ 16 Ko), phone 32→64 (client `_validate` + branding_page alignés), logo accepte `<gym_id>/logos/...`
+    restreint au dossier de la salle. Assertion ajoutée à `member_portal_tests.sql` + chaîne PGlite étendue (test OK).

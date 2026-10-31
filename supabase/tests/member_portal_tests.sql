@@ -194,6 +194,33 @@ begin
   if jsonb_array_length(public.member_portal_my_gyms()) <> 0 then raise exception 'FAIL intruder my gyms'; end if;
   execute 'reset role';
 
+  -- sync_branding (migration 35) : biometric_config dans settings, téléphone
+  -- long (35+) et logo dans le dossier de la salle acceptés ; logo d'un autre
+  -- gym refusé.
+  perform set_config('request.jwt.claim.sub', owner_user::text, true);
+  execute 'set local role authenticated';
+  v := public.sync_branding(gen_random_uuid(), 'gyms',
+    jsonb_build_object(
+      'id', gym, 'name', 'Portal Gym', 'accent_color', '#112233', 'currency', 'HTG',
+      'timezone', 'America/Port-au-Prince',
+      'phone', '+509 3711-2233 / +509 4400-5566 (WhatsApp)',
+      'logo_url', gym::text || '/logos/' || gen_random_uuid()::text || '.png',
+      'settings', jsonb_build_object(
+        'biometric_config', jsonb_build_object('mode', 'app_controls_door'),
+        'scan_sound', true)),
+    clock_timestamp(), (select updated_at from public.gyms where id = gym));
+  if v->>'outcome' <> 'accepted' then raise exception 'FAIL branding fix %', v; end if;
+  begin
+    perform public.sync_branding(gen_random_uuid(), 'gyms',
+      jsonb_build_object(
+        'id', gym, 'name', 'Portal Gym', 'accent_color', '#112233', 'currency', 'HTG',
+        'timezone', 'America/Port-au-Prince', 'phone', '37112233',
+        'logo_url', other_gym::text || '/logos/x.png', 'settings', '{}'::jsonb),
+      clock_timestamp(), (select updated_at from public.gyms where id = gym));
+    raise exception 'FAIL foreign logo accepted';
+  exception when invalid_parameter_value then null; end;
+  execute 'reset role';
+
   raise notice 'member portal tests passed';
 end;
 $$;

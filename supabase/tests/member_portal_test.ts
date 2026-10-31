@@ -26,7 +26,7 @@ Deno.test('migration 34: member portal accounts, gym isolation, online applicant
       '17_update_platform_offers', '18_fstw_access_control', '19_one_time_payment_offers', '20_v3_fingerprint_only', '21_messaging',
       '22_email_delivery_fix', '23_employees_access', '24_payment_receipts', '27_currency_exchange', '28_staff_permissions',
       '29_registration_fee_and_portal', '30_portal_kiosk_and_door_scan', '31_portal_live_tracking', '33_fix_attendance_sync',
-      '34_member_portal', '34_member_portal'];
+      '34_member_portal', '34_member_portal', '35_branding_fix'];
     for (const name of files) {
       const sql = await Deno.readTextFile(new URL(`../sql/${name}.sql`, import.meta.url));
       try {

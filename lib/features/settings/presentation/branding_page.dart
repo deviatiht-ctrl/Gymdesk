@@ -190,7 +190,7 @@ class _BrandingPageState extends ConsumerState<BrandingPage> {
     if ({'address', 'doc_footer'}.contains(key) && text.length > 500) {
       return s.text('invalid_record');
     }
-    if (key == 'phone' && text.length > 32) return s.text('invalid_record');
+    if (key == 'phone' && text.length > 64) return s.text('invalid_record');
     if (key == 'exchange_rate_htg') {
       final rate = double.tryParse(text.replaceAll(',', '.'));
       return rate == null || rate < 0 || rate > 100000 ? s.text('invalid_record') : null;

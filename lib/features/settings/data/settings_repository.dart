@@ -138,7 +138,7 @@ class GymSettingsRepository {
         !RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(gym.accentColor) ||
         !{'HTG', 'USD'}.contains(gym.currency) ||
         gym.address.length > 500 ||
-        gym.phone.length > 32 ||
+        gym.phone.length > 64 ||
         email.length > 254 ||
         (email.isNotEmpty &&
             !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email))) {
