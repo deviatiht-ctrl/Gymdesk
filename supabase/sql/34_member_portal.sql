@@ -491,6 +491,11 @@ begin
     'member', jsonb_build_object(
       'id', v_member.id, 'first_name', v_member.first_name, 'last_name', v_member.last_name,
       'member_number', v_member.member_number, 'phone', v_member.phone, 'email', v_member.email,
+      'whatsapp', v_member.whatsapp, 'birth_date', v_member.birth_date, 'sex', v_member.sex,
+      'address', v_member.address, 'nif', v_member.nif, 'cin', v_member.cin,
+      'emergency_contact_name', v_member.emergency_contact_name,
+      'emergency_contact_phone', v_member.emergency_contact_phone,
+      'guardian_name', v_member.guardian_name,
       'status', v_member.status, 'photo_url', v_member.photo_url, 'created_at', v_member.created_at,
       'fingerprint_registered', coalesce(v_member.fingerprint_registered, false)),
     'subscription', case when v_sub.id is null then null else jsonb_build_object(
@@ -647,6 +652,254 @@ $$;
 
 revoke all on function public.member_portal_my_gyms() from public, anon;
 grant execute on function public.member_portal_my_gyms() to authenticated;
+
+-- 5. Messagerie membre ↔ gym ------------------------------------------------
+-- Le personnel lit/répond dans « Espace membre » ; le membre lit sa propre
+-- conversation (policy) et écrit via member_portal_send_message (quota).
+create table if not exists public.member_messages (
+  id uuid primary key default gen_random_uuid(),
+  gym_id uuid not null references public.gyms(id) on delete cascade,
+  member_id uuid not null references public.members(id) on delete cascade,
+  account_id uuid references public.member_accounts(id) on delete set null,
+  sender text not null check (sender in ('member', 'gym')),
+  body text not null check (char_length(trim(body)) between 1 and 2000),
+  created_at timestamptz not null default clock_timestamp(),
+  read_by_gym_at timestamptz,
+  read_by_member_at timestamptz
+);
+
+create index if not exists idx_member_messages_conv on public.member_messages(gym_id, member_id, created_at);
+create index if not exists idx_member_messages_unread on public.member_messages(gym_id, created_at desc)
+  where sender = 'member' and read_by_gym_at is null;
+
+alter table public.member_messages enable row level security;
+
+drop policy if exists member_messages_staff_select on public.member_messages;
+create policy member_messages_staff_select on public.member_messages
+  for select to authenticated
+  using (gym_id = public.current_gym_id());
+
+drop policy if exists member_messages_staff_insert on public.member_messages;
+create policy member_messages_staff_insert on public.member_messages
+  for insert to authenticated
+  with check (
+    gym_id = public.current_gym_id()
+    and sender = 'gym'
+    and exists (select 1 from public.members m
+                where m.id = member_id and m.gym_id = member_messages.gym_id)
+  );
+
+drop policy if exists member_messages_staff_update on public.member_messages;
+create policy member_messages_staff_update on public.member_messages
+  for update to authenticated
+  using (gym_id = public.current_gym_id())
+  with check (gym_id = public.current_gym_id());
+
+-- Le membre lit (et suit en temps réel) uniquement SA conversation.
+-- Le contôle passe par une fonction security definer car le membre n'a pas
+-- accès en lecture à member_accounts.
+create or replace function public.mp_is_portal_member(p_gym uuid, p_member uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.member_accounts ma
+    where ma.user_id = auth.uid() and ma.gym_id = p_gym and ma.member_id = p_member)
+$$;
+
+revoke all on function public.mp_is_portal_member(uuid, uuid) from public;
+grant execute on function public.mp_is_portal_member(uuid, uuid) to authenticated;
+
+drop policy if exists member_messages_member_select on public.member_messages;
+create policy member_messages_member_select on public.member_messages
+  for select to authenticated
+  using (public.mp_is_portal_member(gym_id, member_id));
+
+grant select, insert, update on public.member_messages to authenticated;
+
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
+     and not exists (select 1 from pg_publication_tables
+                     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'member_messages') then
+    alter publication supabase_realtime add table public.member_messages;
+  end if;
+end;
+$$;
+
+-- Le membre écrit au gym (40 messages / 24 h par compte).
+create or replace function public.member_portal_send_message(p_gym uuid, p_body text)
+returns jsonb language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_acc public.member_accounts;
+  v_body text := trim(coalesce(p_body, ''));
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated' using errcode = '42501';
+  end if;
+  select * into v_acc from public.member_accounts ma where ma.user_id = v_uid and ma.gym_id = p_gym;
+  if not found then
+    return jsonb_build_object('status', 'forbidden');
+  end if;
+  if v_body = '' then
+    return jsonb_build_object('status', 'invalid');
+  end if;
+  if (select count(*) from public.member_messages mm
+      where mm.account_id = v_acc.id and mm.sender = 'member'
+        and mm.created_at > clock_timestamp() - interval '1 day') >= 40 then
+    return jsonb_build_object('status', 'rate_limited');
+  end if;
+  insert into public.member_messages(gym_id, member_id, account_id, sender, body, read_by_member_at)
+  values (p_gym, v_acc.member_id, v_acc.id, 'member', v_body, clock_timestamp());
+  return jsonb_build_object('status', 'ok');
+end;
+$$;
+
+revoke all on function public.member_portal_send_message(uuid, text) from public, anon;
+grant execute on function public.member_portal_send_message(uuid, text) to authenticated;
+
+-- Conversation du membre + marque « lu » les messages venant du gym.
+create or replace function public.member_portal_messages(p_gym uuid)
+returns jsonb language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_acc public.member_accounts;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated' using errcode = '42501';
+  end if;
+  select * into v_acc from public.member_accounts ma where ma.user_id = v_uid and ma.gym_id = p_gym;
+  if not found then
+    return '[]'::jsonb;
+  end if;
+  update public.member_messages
+  set read_by_member_at = clock_timestamp()
+  where gym_id = p_gym and member_id = v_acc.member_id
+    and sender = 'gym' and read_by_member_at is null;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+      'id', x.id, 'sender', x.sender, 'body', x.body, 'created_at', x.created_at,
+      'read_by_gym_at', x.read_by_gym_at, 'read_by_member_at', x.read_by_member_at
+    ) order by x.created_at)
+    from (
+      select mm.* from public.member_messages mm
+      where mm.gym_id = p_gym and mm.member_id = v_acc.member_id
+      order by mm.created_at desc limit 100
+    ) x), '[]'::jsonb);
+end;
+$$;
+
+revoke all on function public.member_portal_messages(uuid) from public, anon;
+grant execute on function public.member_portal_messages(uuid) to authenticated;
+
+-- 6. Profil du membre (mise à jour par le membre lui-même) --------------------
+-- Champs en liste blanche uniquement ; photo_url doit être un objet du membre.
+create or replace function public.member_portal_update_profile(p_gym uuid, p_patch jsonb)
+returns jsonb language plpgsql volatile security definer set search_path = '' as $$
+declare
+  v_uid uuid := auth.uid();
+  v_acc public.member_accounts;
+  v_member public.members;
+  v_patch jsonb := coalesce(p_patch, '{}'::jsonb);
+  v_birth date := null;
+  v_photo text := null;
+  v_key text;
+begin
+  if v_uid is null then
+    raise exception 'not_authenticated' using errcode = '42501';
+  end if;
+  select * into v_acc from public.member_accounts ma where ma.user_id = v_uid and ma.gym_id = p_gym;
+  if not found then
+    return jsonb_build_object('status', 'forbidden');
+  end if;
+  select * into v_member from public.members m
+  where m.id = v_acc.member_id and m.gym_id = p_gym and m.deleted_at is null;
+  if not found then
+    return jsonb_build_object('status', 'forbidden');
+  end if;
+
+  if v_patch ? 'sex'
+     and coalesce(v_patch->>'sex', '') not in ('', 'male', 'female', 'other') then
+    return jsonb_build_object('status', 'invalid', 'field', 'sex');
+  end if;
+  if v_patch ? 'birth_date' and coalesce(v_patch->>'birth_date', '') <> '' then
+    begin
+      v_birth := (v_patch->>'birth_date')::date;
+    exception when others then
+      return jsonb_build_object('status', 'invalid', 'field', 'birth_date');
+    end;
+    if v_birth < '1900-01-01' or v_birth > current_date then
+      return jsonb_build_object('status', 'invalid', 'field', 'birth_date');
+    end if;
+  end if;
+  if v_patch ? 'email' and coalesce(v_patch->>'email', '') <> ''
+     and v_patch->>'email' !~ '^[^\s@]+@[^\s@]+\.[^\s@]+$' then
+    return jsonb_build_object('status', 'invalid', 'field', 'email');
+  end if;
+  if v_patch ? 'photo_url' and coalesce(v_patch->>'photo_url', '') <> '' then
+    v_photo := v_patch->>'photo_url';
+    if v_photo !~ ('^' || p_gym::text || '/' || v_member.id::text || '/[0-9a-zA-Z_-]{4,80}\.(jpg|jpeg|png)$') then
+      return jsonb_build_object('status', 'invalid', 'field', 'photo_url');
+    end if;
+  end if;
+  for v_key in select key from jsonb_object_keys(v_patch) k(key) loop
+    if v_key not in ('first_name', 'last_name', 'phone', 'whatsapp', 'email', 'birth_date',
+                     'sex', 'address', 'nif', 'cin', 'emergency_contact_name',
+                     'emergency_contact_phone', 'guardian_name', 'photo_url') then
+      return jsonb_build_object('status', 'invalid', 'field', v_key);
+    end if;
+  end loop;
+
+  update public.members set
+    first_name = case when v_patch ? 'first_name' and trim(coalesce(v_patch->>'first_name', '')) <> ''
+                      then left(trim(v_patch->>'first_name'), 60) else first_name end,
+    last_name = case when v_patch ? 'last_name' and trim(coalesce(v_patch->>'last_name', '')) <> ''
+                     then left(trim(v_patch->>'last_name'), 60) else last_name end,
+    phone = case when v_patch ? 'phone' then nullif(left(trim(coalesce(v_patch->>'phone', '')), 32) , '') else phone end,
+    whatsapp = case when v_patch ? 'whatsapp' then nullif(left(trim(coalesce(v_patch->>'whatsapp', '')), 32), '') else whatsapp end,
+    email = case when v_patch ? 'email' then nullif(lower(trim(coalesce(v_patch->>'email', ''))), '') else email end,
+    birth_date = case when v_patch ? 'birth_date' then v_birth else birth_date end,
+    sex = case when v_patch ? 'sex' then nullif(v_patch->>'sex', '') else sex end,
+    address = case when v_patch ? 'address' then nullif(left(trim(coalesce(v_patch->>'address', '')), 300), '') else address end,
+    nif = case when v_patch ? 'nif' then nullif(regexp_replace(coalesce(v_patch->>'nif', ''), '[^0-9]', '', 'g'), '') else nif end,
+    cin = case when v_patch ? 'cin' then nullif(left(trim(coalesce(v_patch->>'cin', '')), 32), '') else cin end,
+    emergency_contact_name = case when v_patch ? 'emergency_contact_name' then nullif(left(trim(coalesce(v_patch->>'emergency_contact_name', '')), 120), '') else emergency_contact_name end,
+    emergency_contact_phone = case when v_patch ? 'emergency_contact_phone' then nullif(left(trim(coalesce(v_patch->>'emergency_contact_phone', '')), 32), '') else emergency_contact_phone end,
+    guardian_name = case when v_patch ? 'guardian_name' then nullif(left(trim(coalesce(v_patch->>'guardian_name', '')), 120), '') else guardian_name end,
+    photo_url = case when v_patch ? 'photo_url' then v_photo else photo_url end,
+    updated_at = clock_timestamp()
+  where id = v_member.id;
+
+  return jsonb_build_object('status', 'ok', 'member_id', v_member.id);
+end;
+$$;
+
+revoke all on function public.member_portal_update_profile(uuid, jsonb) from public, anon;
+grant execute on function public.member_portal_update_profile(uuid, jsonb) to authenticated;
+
+-- Le membre peut téléverser UNIQUEMENT ses propres photos :
+-- member-photos/<gym_id>/<member_id>/<fichier>.(jpg|jpeg|png)
+create or replace function public.mp_can_write_photo(p_name text)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select auth.uid() is not null and exists (
+    select 1 from public.member_accounts ma
+    where ma.user_id = auth.uid()
+      and ma.gym_id::text = (storage.foldername(p_name))[1]
+      and ma.member_id::text = (storage.foldername(p_name))[2])
+$$;
+
+revoke all on function public.mp_can_write_photo(text) from public;
+grant execute on function public.mp_can_write_photo(text) to authenticated;
+
+drop policy if exists member_portal_photo_insert on storage.objects;
+create policy member_portal_photo_insert on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'member-photos' and public.mp_can_write_photo(name));
+
+drop policy if exists member_portal_photo_update on storage.objects;
+create policy member_portal_photo_update on storage.objects
+  for update to authenticated
+  using (bucket_id = 'member-photos' and public.mp_can_write_photo(name))
+  with check (bucket_id = 'member-photos' and public.mp_can_write_photo(name));
 
 notify pgrst, 'reload schema';
 

@@ -185,3 +185,18 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
     (`MemberGymsPanel` | carte de connexion), mobile = onglets « Propriétaire / Personnel » | « Espace membre ». `/espace-membre` ouvre
     la même page sur l'onglet membre. Bouton « Se connecter en tant que membre » → `/espace-membre/connexion` (`member_login_page.dart`,
     RPC `member_portal_my_gyms` ajoutée à SQL 34) : ouvre directement le gym du membre ou propose le choix.
+
+- 2026-10-30 — Espace membre côté accueil : membres/accès, messagerie, modèles d'annonces ; profil modifiable par le membre (analyze OK, 100 tests OK, PGlite OK, 9 tests Deno OK).
+  * SQL `34_member_portal.sql` (réappliquer — idempotent) : `member_messages` (conversation membre ↔ gym, realtime, accusés de lecture),
+    `member_portal_send_message` (40/j), `member_portal_messages`, `member_portal_update_profile` (champs en liste blanche + photo
+    contrôlée), `mp_is_portal_member`/`mp_can_write_photo`, policies Storage (le membre n'écrit que dans `member-photos/<gym>/<membre>/`).
+    `member_portal_me` renvoie désormais le profil complet (whatsapp, birth_date, sex, adresse, urgence, responsable).
+  * Edge Function `manage_member_account` (À DÉPLOYER : `supabase functions deploy manage_member_account`, mêmes variables que
+    manage_staff) : le personnel crée/réinitialise le mot de passe d'un membre (compte Auth créé confirmé ou mot de passe réinitialisé,
+    jamais sur un compte staff/partagé) et révoque l'accès (compte Auth orphelin supprimé).
+  * `/member-space` réorganisée en 4 onglets : **Membres** (liste complète + statut du compte + accès/mot de passe + fiche),
+    **Messages** (conversations membres, badge non lus, réponse, temps réel), **Annonces** (modèles prêts : horaires, fermeture,
+    rappel paiement, promo, événement), **Lien/QR**.
+  * Fiche membre (`/members/<id>`) : carte « Espace membre » avec statut du compte + création/réinitialisation du mot de passe.
+  * Dashboard membre : 5 onglets (ajout **Messages** en temps réel) ; onglet Profil : « Modifier mon profil » (photo téléversée,
+    naissance, sexe, téléphones, urgence…) et « Mot de passe » (GoTrue direct).

@@ -261,7 +261,10 @@ Configurer ces valeurs dans les paramètres des Edge Functions et déployer :
 ```sh
 supabase functions deploy create_gym_owner
 supabase functions deploy manage_staff
+supabase functions deploy manage_member_account
 ```
+
+`manage_member_account` (mêmes variables `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GYMDESK_ALLOWED_ORIGINS`) permet au personnel de créer/réinitialiser le mot de passe de l'espace membre d'un adhérent et de le révoquer, depuis **Espace membre** ou la fiche du membre. Sans elle, le bouton « Accès / mot de passe » renvoie `function_missing`.
 
 Ne pas désactiver les contrôles du JWT de la passerelle pour masquer une erreur de configuration. Configurer un service SMTP adapté dans Supabase Auth et tester les liens de récupération sur le déploiement cible. Un retour HTTP accepté ne garantit pas que l’email a effectivement été livré.
 

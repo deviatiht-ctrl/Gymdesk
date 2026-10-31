@@ -5,7 +5,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/member_portal_repository.dart';
+import '../data/member_session.dart';
 import 'install_banner.dart';
+import 'member_messages_tab.dart';
+import 'member_profile_sheet.dart';
 import 'member_ui.dart';
 
 /// Tableau de bord du membre : abonnement, activité, paiements, gym.
@@ -66,7 +69,17 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [_home(), _activity(), _payments(), _gymInfo()];
+    final pages = [
+      _home(),
+      _activity(),
+      MemberMessagesTab(
+        gymId: _gym['id'].toString(),
+        memberId: _member['id']?.toString() ?? '',
+        accent: _accent,
+      ),
+      _payments(),
+      _gymInfo(),
+    ];
     return Scaffold(
       backgroundColor: memberSurface,
       body: RefreshIndicator(
@@ -101,8 +114,9 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
         destinations: const [
           NavigationDestination(icon: Icon(LucideIcons.house), label: 'Accueil'),
           NavigationDestination(icon: Icon(LucideIcons.activity), label: 'Activité'),
+          NavigationDestination(icon: Icon(LucideIcons.messagesSquare), label: 'Messages'),
           NavigationDestination(icon: Icon(LucideIcons.receipt), label: 'Paiements'),
-          NavigationDestination(icon: Icon(LucideIcons.building2), label: 'Mon gym'),
+          NavigationDestination(icon: Icon(LucideIcons.user), label: 'Profil'),
         ],
       ),
     );
@@ -648,6 +662,39 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
           GymLogo(path: _gym['logo_url'] as String?, name: _gym['name']?.toString() ?? '', size: 58, accent: _accent),
         ]),
       ),
+      const SizedBox(height: 12),
+      Row(children: [
+        Expanded(
+          child: FilledButton.tonalIcon(
+            style: FilledButton.styleFrom(
+              backgroundColor: _accent.withAlpha(24),
+              foregroundColor: _accent,
+              minimumSize: const Size.fromHeight(46),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: () async {
+              final saved = await showMemberProfileSheet(context, data: widget.data);
+              if (saved) await widget.onRefresh();
+            },
+            icon: const Icon(LucideIcons.userRoundPen, size: 18),
+            label: const Text('Modifier mon profil', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: FilledButton.tonalIcon(
+            style: FilledButton.styleFrom(
+              backgroundColor: memberSurface,
+              foregroundColor: memberInk,
+              minimumSize: const Size.fromHeight(46),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: _changePassword,
+            icon: const Icon(LucideIcons.keyRound, size: 18),
+            label: const Text('Mot de passe', style: TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ),
+      ]),
       const SectionTitle('Contacter le gym', icon: LucideIcons.messageCircle),
       if (digits.length >= 8) ...[
         _contact(LucideIcons.messageCircle, 'WhatsApp', phone, () => launchUrl(Uri.parse('https://wa.me/${digits.length == 8 ? '509$digits' : digits}'), mode: LaunchMode.externalApplication)),
@@ -663,6 +710,77 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
       Text('Connecté : ${widget.data['email'] ?? ''}', textAlign: TextAlign.center, style: const TextStyle(color: memberMuted, fontSize: 12)),
       TextButton.icon(onPressed: widget.onSignOut, icon: const Icon(LucideIcons.logOut, size: 16), label: const Text('Se déconnecter')),
     ]);
+  }
+
+  /// « Changer mon mot de passe » : direct GoTrue sur le compte du membre.
+  Future<void> _changePassword() async {
+    final password = TextEditingController();
+    final confirm = TextEditingController();
+    var busy = false;
+    String? error;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setD) => AlertDialog(
+          title: const Text('Changer mon mot de passe'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: password,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Nouveau mot de passe (8+)', prefixIcon: Icon(LucideIcons.lock, size: 18)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: confirm,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: 'Confirmer', prefixIcon: Icon(LucideIcons.lockKeyhole, size: 18)),
+            ),
+            if (error != null) ...[const SizedBox(height: 12), ErrorBox(error!)],
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (password.text.length < 8) {
+                        setD(() => error = memberAuthError('weak_password'));
+                        return;
+                      }
+                      if (password.text != confirm.text) {
+                        setD(() => error = 'Les deux mots de passe ne correspondent pas.');
+                        return;
+                      }
+                      setD(() {
+                        busy = true;
+                        error = null;
+                      });
+                      try {
+                        await MemberAuth.instance.updatePassword(password.text);
+                        if (context.mounted) Navigator.pop(context, true);
+                      } on MemberAuthException catch (e) {
+                        setD(() {
+                          busy = false;
+                          error = memberAuthError(e.code);
+                        });
+                      } catch (_) {
+                        setD(() {
+                          busy = false;
+                          error = memberAuthError('network');
+                        });
+                      }
+                    },
+              child: const Text('Enregistrer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    password.dispose();
+    confirm.dispose();
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Mot de passe modifié.')));
+    }
   }
 
   Widget _contact(IconData icon, String title, String value, VoidCallback onTap) => Padding(

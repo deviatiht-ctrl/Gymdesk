@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../app/providers.dart';
+import '../../../app/runtime.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
 import '../../badges/data/badges_repository.dart';
@@ -20,6 +21,7 @@ import '../../payments/domain/payment.dart';
 import '../../payments/domain/currency.dart';
 import '../../payments/presentation/collect_payment_dialog.dart';
 import '../../payments/presentation/receipt_sheet.dart';
+import '../../member_portal/presentation/member_access.dart';
 import '../../plans/data/plans_repository.dart';
 import '../../plans/domain/plan.dart';
 import '../../subscriptions/data/subscriptions_repository.dart';
@@ -948,6 +950,73 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
           ),
         );
 
+  /// Accès espace membre : statut du compte + définition/révocation du mot de
+  /// passe via l'Edge Function manage_member_account (dialogue partagé).
+  Widget _portalCard(Member member, AppRuntime runtime) {
+    final gymId = runtime.session?.gymId ?? '';
+    return FutureBuilder<Map<String, dynamic>?>(
+      future: runtime.client
+          .from('member_accounts')
+          .select('id, email, created_at, last_seen_at')
+          .eq('gym_id', gymId)
+          .eq('member_id', member.id)
+          .maybeSingle(),
+      builder: (context, snapshot) {
+        final account = snapshot.data;
+        final hasAccount = account != null;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(
+                  child: Text('Espace membre', style: Theme.of(context).textTheme.titleLarge),
+                ),
+                Icon(
+                  hasAccount ? LucideIcons.smartphone : LucideIcons.keyRound,
+                  size: 20,
+                  color: hasAccount ? const Color(0xFF059669) : Colors.grey,
+                ),
+              ]),
+              const SizedBox(height: 10),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const LinearProgressIndicator()
+              else
+                Text(
+                  hasAccount
+                      ? 'Compte actif : ${account['email'] ?? ''}'
+                          '${account['last_seen_at'] != null ? '\nDernière visite app : ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.tryParse(account['last_seen_at'].toString())?.toLocal() ?? DateTime.now())}' : ''}'
+                      : 'Aucun accès. Définissez un mot de passe pour que le membre se connecte à son espace (abonnement, visites, messages).',
+                  style: const TextStyle(color: Colors.black54, height: 1.4),
+                ),
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                FilledButton.tonalIcon(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          final changed = await showMemberAccessSheet(
+                            context,
+                            client: runtime.client,
+                            gymId: gymId,
+                            memberId: member.id,
+                            memberName: member.fullName,
+                            memberEmail: member.email,
+                            account: account,
+                          );
+                          if (changed || mounted) setState(() {});
+                        },
+                  icon: const Icon(LucideIcons.keyRound, size: 16),
+                  label: Text(hasAccount ? 'Réinitialiser le mot de passe' : 'Créer l’accès'),
+                ),
+              ]),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
@@ -1371,6 +1440,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                           );
                   },
                 ),
+                const SizedBox(height: 20),
+                _portalCard(member, runtime),
                 const SizedBox(height: 20),
                 Card(
                   child: Padding(

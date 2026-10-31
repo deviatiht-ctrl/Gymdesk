@@ -78,6 +78,32 @@ begin
   if (public.member_portal_request_renewal(gym, plan))->>'status' <> 'ok' then raise exception 'FAIL renewal'; end if;
   if (public.member_portal_request_renewal(gym, plan))->>'status' <> 'already_pending' then raise exception 'FAIL renewal dup'; end if;
   if (public.member_portal_me(gym))->'pending_renewal' is null then raise exception 'FAIL pending renewal'; end if;
+  -- Messagerie : le membre écrit au gym, relit sa conversation.
+  if (public.member_portal_send_message(gym, '  '))->>'status' <> 'invalid' then raise exception 'FAIL empty message'; end if;
+  if (public.member_portal_send_message(gym, 'Bonjour, la salle ouvre à quelle heure demain ?'))->>'status' <> 'ok' then raise exception 'FAIL send message'; end if;
+  v := public.member_portal_messages(gym);
+  if jsonb_array_length(v) <> 1 or v->0->>'sender' <> 'member' then raise exception 'FAIL messages %', v; end if;
+  -- Le membre voit sa conversation via la policy (direct + realtime).
+  if (select count(*) from public.member_messages) <> 1 then raise exception 'FAIL member reads own messages'; end if;
+  -- Profil : champs autorisés seulement, date/email validés, photo contrôlée.
+  if (public.member_portal_update_profile(gym, jsonb_build_object('role', 'x')))->>'status' <> 'invalid' then raise exception 'FAIL patch whitelist'; end if;
+  if (public.member_portal_update_profile(gym, jsonb_build_object('birth_date', 'pas-une-date')))->>'status' <> 'invalid' then raise exception 'FAIL bad birth_date'; end if;
+  if (public.member_portal_update_profile(gym, jsonb_build_object('email', 'nope')))->>'status' <> 'invalid' then raise exception 'FAIL bad email'; end if;
+  if (public.member_portal_update_profile(gym, jsonb_build_object('photo_url', other_gym::text || '/' || member::text || '/x.jpg')))->>'status' <> 'invalid' then raise exception 'FAIL foreign photo'; end if;
+  v := public.member_portal_update_profile(gym, jsonb_build_object(
+        'phone', '+509 9999 0000', 'birth_date', '1995-04-12', 'sex', 'female',
+        'emergency_contact_name', 'Maman', 'photo_url', gym::text || '/' || member::text || '/abcd1234.jpg'));
+  if v->>'status' <> 'ok' then raise exception 'FAIL update profile %', v; end if;
+  v := public.member_portal_me(gym);
+  if v->'member'->>'phone' <> '+509 9999 0000' or v->'member'->>'birth_date' <> '1995-04-12'
+     or v->'member'->>'sex' <> 'female' or v->'member'->>'emergency_contact_name' <> 'Maman'
+     or v->'member'->>'photo_url' <> gym::text || '/' || member::text || '/abcd1234.jpg' then
+    raise exception 'FAIL profile fields %', v->'member';
+  end if;
+  -- Upload photo : seulement dans le dossier du membre lié.
+  if not public.mp_can_write_photo(gym::text || '/' || member::text || '/p1.jpg') then raise exception 'FAIL own photo write'; end if;
+  if public.mp_can_write_photo(gym::text || '/' || member_noemail::text || '/p1.jpg') then raise exception 'FAIL other member photo write'; end if;
+  if public.mp_can_write_photo(other_gym::text || '/' || member::text || '/p1.jpg') then raise exception 'FAIL other gym photo write'; end if;
   execute 'reset role';
 
   -- Intruder with same phone but other email cannot take the member.
@@ -86,6 +112,10 @@ begin
   if (public.member_portal_link(gym, '37112233'))->>'status' <> 'not_found' then raise exception 'FAIL intruder link'; end if;
   if public.mp_can_read_object('member-photos', gym::text || '/m.jpg') then raise exception 'FAIL intruder photo'; end if;
   if (public.member_portal_request_renewal(gym, plan))->>'status' <> 'forbidden' then raise exception 'FAIL intruder renewal'; end if;
+  if (public.member_portal_send_message(gym, 'hack'))->>'status' <> 'forbidden' then raise exception 'FAIL intruder send'; end if;
+  if jsonb_array_length(public.member_portal_messages(gym)) <> 0 then raise exception 'FAIL intruder messages'; end if;
+  if (select count(*) from public.member_messages) <> 0 then raise exception 'FAIL intruder reads messages'; end if;
+  if (public.member_portal_update_profile(gym, jsonb_build_object('phone', '1')))->>'status' <> 'forbidden' then raise exception 'FAIL intruder profile'; end if;
   execute 'reset role';
 
   -- Member without email on file links with phone + member number.
@@ -128,7 +158,29 @@ begin
     raise exception 'FAIL cross gym announcement';
   exception when insufficient_privilege then null; end;
   if (select count(*) from public.member_accounts) <> 3 then raise exception 'FAIL staff sees accounts'; end if;
+  -- Messagerie côté accueil : inbox, réponse, accusé de lecture.
+  if (select count(*) from public.member_messages where gym_id = gym and sender = 'member' and read_by_gym_at is null) <> 1 then
+    raise exception 'FAIL staff inbox';
+  end if;
+  insert into public.member_messages(gym_id, member_id, sender, body, read_by_gym_at)
+  values (gym, member, 'gym', 'Nous ouvrons à 6h demain.', clock_timestamp());
+  update public.member_messages set read_by_gym_at = clock_timestamp()
+  where gym_id = gym and sender = 'member' and read_by_gym_at is null;
+  begin
+    insert into public.member_messages(gym_id, member_id, sender, body)
+    values (other_gym, member_other, 'gym', 'Hack');
+    raise exception 'FAIL cross gym message';
+  exception when insufficient_privilege then null; end;
   execute 'reset role';
+  perform set_config('request.jwt.claim.sub', member_user::text, true);
+  execute 'set local role authenticated';
+  v := public.member_portal_messages(gym);
+  if jsonb_array_length(v) <> 2 or v->1->>'sender' <> 'gym' or v->1->>'read_by_member_at' is null then
+    raise exception 'FAIL gym reply read %', v;
+  end if;
+  execute 'reset role';
+  perform set_config('request.jwt.claim.sub', owner_user::text, true);
+  execute 'set local role authenticated';
   perform set_config('request.jwt.claim.sub', member_user::text, true);
   execute 'set local role authenticated';
   v := public.member_portal_me(gym);
