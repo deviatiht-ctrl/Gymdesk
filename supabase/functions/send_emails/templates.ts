@@ -14,9 +14,9 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
     return m ? `${m[3]}/${m[2]}/${m[1]}` : value;
   };
   const money = (amount: unknown, currency: unknown) => `${amount ?? 0} ${currency ?? 'USD'}`;
-  // Lang manm yo (gyms.settings.member_language). Sèlman rapèl yo tradui pou
-  // kounye a; lòt imèl yo rete an fransè pou pa melanje lang nan yon mesaj.
-  const lang = (job.kind === 'renewal_reminder' || job.kind === 'payment_receipt')
+  // Lang manm yo (gyms.settings.member_language). Sèlman rapèl, resi ak aksè
+  // espas manm tradui pou kounye a; lòt imèl yo rete an fransè.
+  const lang = (job.kind === 'renewal_reminder' || job.kind === 'payment_receipt' || job.kind === 'member_access')
     && (p.language === 'ht' || p.language === 'en') ? p.language : 'fr';
   const t = (fr: string, ht: string, en: string) => lang === 'ht' ? ht : lang === 'en' ? en : fr;
 
@@ -148,6 +148,24 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
       note = 'Conservez ce reçu comme justificatif de paiement.';
     }
     rows = rows.filter(([label]) => label !== '');
+  } else if (job.kind === 'member_access') {
+    title = t('Votre accès à l’espace membre', 'Aksè w nan espas manm lan', 'Your member area access');
+    subject = t('Vos identifiants espace membre', 'Idantifyan espas manm ou', 'Your member area login');
+    intro = t(
+      `${brand} vous a ouvert un accès à votre espace membre : abonnement, visites et messages. Voici vos identifiants de connexion.`,
+      `${brand} ouvri yon aksè pou ou nan espas manm ou : abònman, vizit ak mesaj. Men enfòmasyon pou w konekte.`,
+      `${brand} has opened your member area: membership, visits and messages. Here are your login details.`,
+    );
+    rows = [
+      [t('Email de connexion', 'Imèl pou konekte', 'Login email'), p.login_email],
+      [t('Mot de passe', 'Modpas', 'Password'), p.password],
+      [t('Numéro de membre', 'Nimewo manm', 'Member number'), p.member_number],
+    ];
+    note = t(
+      'Ce mot de passe est personnel : ne le partagez avec personne. Vous pouvez le changer à tout moment avec « Mot de passe oublié ».',
+      'Modpas sa a pèsonèl : pa bay pèsonn li. Ou ka chanje l nenpòt lè ak « Mot de passe oublié ».',
+      'This password is personal: do not share it. You can change it anytime with “Forgot password”.',
+    );
   } else if (job.kind === 'daily_report') {
     const reportDate = date(p.report_date);
     title = `Rapport d’activité du ${reportDate}`;
@@ -178,6 +196,19 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
   }
 
   const details = rows.filter(([, value]) => value != null && value !== '');
+  let portalUrl: string | null = null;
+  if (job.kind === 'member_access' && typeof p.portal_url === 'string') {
+    try {
+      const url = new URL(p.portal_url);
+      if (url.protocol === 'https:') portalUrl = url.href;
+    } catch {
+      portalUrl = null;
+    }
+  }
+  const actionUrl = receiptUrl ?? portalUrl;
+  const actionLabel = receiptUrl
+    ? t('Télécharger le reçu (PDF)', 'Telechaje resi a (PDF)', 'Download receipt (PDF)')
+    : t('Ouvrir mon espace membre', 'Louvri espas manm mwen', 'Open my member area');
   const contact = platform
     ? 'SecurGYM — Sécurité et gestion de votre gym'
     : [p.gym_phone, p.gym_address].filter(Boolean).join(' · ');
@@ -227,9 +258,9 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
                 </tr>`).join('')}
               </table>` : ''}
               ${note ? `<p style="margin:0 0 16px;font-size:14px;color:#4b5563">${escape(note)}</p>` : ''}
-              ${receiptUrl ? `
+              ${actionUrl ? `
               <p style="margin:0 0 20px;text-align:center">
-                <a href="${escape(receiptUrl)}" style="display:inline-block;padding:12px 28px;background:${color};color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;border-radius:8px">${escape(t('Télécharger le reçu (PDF)', 'Telechaje resi a (PDF)', 'Download receipt (PDF)'))}</a>
+                <a href="${escape(actionUrl)}" style="display:inline-block;padding:12px 28px;background:${color};color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;border-radius:8px">${escape(actionLabel)}</a>
               </p>` : ''}
               <p style="margin:0 0 16px;font-size:14px;color:#4b5563">${escape(reply)}</p>
               <p style="margin:0 0 20px">${t('Cordialement', 'Mèsi', 'Best regards')},<br>${escape(brand)}</p>
@@ -264,6 +295,7 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
       details.map(([label, value]) => `${label} : ${value}`).join('\n'),
       note,
       receiptUrl ? `${t('Reçu PDF', 'Resi PDF', 'PDF receipt')} : ${receiptUrl}` : '',
+      portalUrl ? `${actionLabel} : ${portalUrl}` : '',
       reply,
       `${t('Cordialement', 'Mèsi', 'Best regards')},\n${brand}`,
       contact,

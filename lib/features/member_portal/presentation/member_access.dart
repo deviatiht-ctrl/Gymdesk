@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../badges/data/whatsapp_service.dart';
 import '../data/member_account_admin.dart';
 import 'member_ui.dart';
 
@@ -26,6 +28,7 @@ Future<bool> showMemberAccessSheet(
   required String memberId,
   required String memberName,
   String? memberEmail,
+  String? memberPhone,
   Map<String, dynamic>? account,
 }) async {
   final result = await showModalBottomSheet<bool>(
@@ -40,6 +43,7 @@ Future<bool> showMemberAccessSheet(
         memberId: memberId,
         memberName: memberName,
         memberEmail: memberEmail,
+        memberPhone: memberPhone,
         account: account,
       ),
     ),
@@ -54,6 +58,7 @@ class _MemberAccessSheet extends StatefulWidget {
     required this.memberId,
     required this.memberName,
     required this.memberEmail,
+    required this.memberPhone,
     required this.account,
   });
   final SupabaseClient client;
@@ -61,6 +66,7 @@ class _MemberAccessSheet extends StatefulWidget {
   final String memberId;
   final String memberName;
   final String? memberEmail;
+  final String? memberPhone;
   final Map<String, dynamic>? account;
 
   @override
@@ -74,6 +80,7 @@ class _MemberAccessSheetState extends State<_MemberAccessSheet> {
   bool _showPassword = false;
   String? _error;
   String? _done;
+  ({String email, String password})? _sent;
 
   bool get _hasAccount => widget.account != null;
 
@@ -100,20 +107,43 @@ class _MemberAccessSheetState extends State<_MemberAccessSheet> {
       _done = null;
     });
     try {
-      final email = await MemberAccountAdmin(widget.client).setPassword(
+      final password = _password.text;
+      final result = await MemberAccountAdmin(widget.client).setPassword(
         gymId: widget.gymId,
         memberId: widget.memberId,
         email: _email.text,
-        password: _password.text,
+        password: password,
       );
       if (!mounted) return;
-      setState(() => _done = 'Accès créé pour $email. Communiquez le mot de passe au membre.');
+      setState(() {
+        _sent = (email: result.email, password: password);
+        _done = result.emailSent
+            ? 'Accès créé. Les identifiants ont été envoyés automatiquement par email à ${result.email}.'
+            : 'Accès créé pour ${result.email}, mais l’email n’a pas pu être envoyé. Envoyez les identifiants par WhatsApp.';
+      });
     } on MemberAccountException catch (e) {
       setState(() => _error = memberAccountError(e.code));
     } catch (_) {
       setState(() => _error = memberAccountError('network'));
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _sendWhatsApp() async {
+    final sent = _sent;
+    if (sent == null) return;
+    final message = 'Bonjour ${widget.memberName},\n\n'
+        'Votre accès à l’espace membre est prêt.\n'
+        '• Lien : https://securgym.com/m/${widget.gymId}\n'
+        '• Email : ${sent.email}\n'
+        '• Mot de passe : ${sent.password}\n\n'
+        'Ce mot de passe est personnel, ne le partagez avec personne.';
+    final phone = WhatsAppService.formatPhoneNumber(widget.memberPhone ?? '');
+    final uri = Uri.parse('https://wa.me/${phone.length >= 8 ? phone : ''}?text=${Uri.encodeComponent(message)}');
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication).catchError((_) => false);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible d’ouvrir WhatsApp.')));
     }
   }
 
@@ -218,7 +248,7 @@ class _MemberAccessSheetState extends State<_MemberAccessSheet> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Le mot de passe remplace l’ancien si le membre avait déjà un accès. Communiquez-le par un canal sûr.',
+            'Le mot de passe remplace l’ancien si le membre avait déjà un accès. Il est envoyé automatiquement au membre par email ; vous pouvez aussi l’envoyer par WhatsApp.',
             style: TextStyle(color: memberMuted, fontSize: 12, height: 1.35),
           ),
           if (_error != null) ...[const SizedBox(height: 12), ErrorBox(_error!)],
@@ -236,6 +266,16 @@ class _MemberAccessSheetState extends State<_MemberAccessSheet> {
                 const SizedBox(width: 10),
                 Expanded(child: Text(_done!, style: const TextStyle(color: Color(0xFF065F46), fontSize: 13))),
               ]),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF128C7E),
+                minimumSize: const Size.fromHeight(44),
+              ),
+              onPressed: _sendWhatsApp,
+              icon: const Icon(LucideIcons.messageCircle, size: 18),
+              label: const Text('Envoyer aussi par WhatsApp', style: TextStyle(fontWeight: FontWeight.w700)),
             ),
           ],
           const SizedBox(height: 16),

@@ -1002,6 +1002,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                             memberId: member.id,
                             memberName: member.fullName,
                             memberEmail: member.email,
+                            memberPhone: member.whatsapp ?? member.phone,
                             account: account,
                           );
                           if (changed || mounted) setState(() {});

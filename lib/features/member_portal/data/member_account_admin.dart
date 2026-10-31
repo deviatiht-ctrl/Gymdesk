@@ -12,11 +12,12 @@ class MemberAccountAdmin {
 
   final SupabaseClient client;
 
-  /// Crée ou réinitialise le mot de passe d'accès d'un membre.
-  /// Renvoie l'email du compte en cas de succès, sinon lève
+  /// Crée ou réinitialise le mot de passe d'accès d'un membre ; le serveur
+  /// envoie automatiquement les identifiants par email au membre.
+  /// Renvoie l'email du compte et si l'email est parti, sinon lève
   /// [MemberAccountException] avec un code stable ('shared_account',
   /// 'email_required', 'weak_password', 'function_missing', …).
-  Future<String> setPassword({
+  Future<({String email, bool emailSent})> setPassword({
     required String gymId,
     required String memberId,
     required String email,
@@ -29,7 +30,10 @@ class MemberAccountAdmin {
       'email': email.trim().toLowerCase(),
       'password': password,
     });
-    return data['email']?.toString() ?? email.trim().toLowerCase();
+    return (
+      email: data['email']?.toString() ?? email.trim().toLowerCase(),
+      emailSent: data['email_sent'] == true,
+    );
   }
 
   /// Retire l'accès espace membre (délie le compte ; supprime le compte Auth

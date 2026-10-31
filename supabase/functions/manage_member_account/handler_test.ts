@@ -26,6 +26,8 @@ class TestGateway implements MemberAccountGateway {
   linked = 0;
   unlinked = 0;
   memberEmails: string[] = [];
+  emailResult: boolean | Error = true;
+  sentEmails: { email: string; password: string }[] = [];
 
   actor(_token: string): Promise<string> {
     if (!this.authorized) return Promise.reject(new ApiError('access_denied', 403));
@@ -42,6 +44,10 @@ class TestGateway implements MemberAccountGateway {
   linkAccount(): Promise<void> { this.linked++; return Promise.resolve(); }
   unlinkAccount(): Promise<void> { this.unlinked++; return Promise.resolve(); }
   setMemberEmail(_g: string, _m: string, email: string): Promise<void> { this.memberEmails.push(email); return Promise.resolve(); }
+  sendAccessEmail(_g: string, _m: string, email: string, password: string): Promise<boolean> {
+    this.sentEmails.push({ email, password });
+    return this.emailResult instanceof Error ? Promise.reject(this.emailResult) : Promise.resolve(this.emailResult);
+  }
 }
 
 function request(body: unknown = base) {
@@ -112,6 +118,37 @@ Deno.test('resets the password of an already linked account without relinking', 
   const res = await call(g);
   assert(res.status === 200);
   assert(g.passwords.length === 1 && g.created === 0 && g.linked === 0);
+});
+
+Deno.test('emails the credentials to the member automatically', async () => {
+  const g = new TestGateway();
+  const res = await call(g);
+  assert(res.status === 200 && res.body.email_sent === true);
+  assert(g.sentEmails.length === 1);
+  assert(g.sentEmails[0].email === 'membre@example.invalid' && g.sentEmails[0].password === base.password);
+});
+
+Deno.test('account stays created when the email cannot be sent', async () => {
+  const g = new TestGateway();
+  g.emailResult = new Error('brevo down');
+  const res = await call(g);
+  assert(res.status === 200 && res.body.email_sent === false);
+  g.emailResult = false;
+  assert((await call(g)).body.email_sent === false);
+});
+
+Deno.test('send_email false skips the email', async () => {
+  const g = new TestGateway();
+  const res = await call(g, request({ ...base, send_email: false }));
+  assert(res.status === 200 && res.body.email_sent === false && g.sentEmails.length === 0);
+});
+
+Deno.test('no email on revoke or failed validation', async () => {
+  const g = new TestGateway();
+  g.linkedUser = memberUser;
+  await call(g, request({ action: 'revoke', gym_id: gymId, member_id: memberId }));
+  await call(g, request({ ...base, password: 'court' }));
+  assert(g.sentEmails.length === 0);
 });
 
 Deno.test('revoke unlinks and removes orphan auth user', async () => {

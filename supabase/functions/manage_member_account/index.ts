@@ -6,5 +6,6 @@ const origins = new Set((Deno.env.get('GYMDESK_ALLOWED_ORIGINS') ?? '').split(',
 if (!url || !key) {
   Deno.serve(() => new Response(JSON.stringify({ error: 'server_configuration' }), { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } }));
 } else {
-  Deno.serve(createMemberAccountHandler(new SupabaseMemberGateway(url.replace(/\/$/, ''), key, ''), origins));
+  const publicUrl = Deno.env.get('GYMDESK_PUBLIC_URL') || 'https://securgym.com';
+  Deno.serve(createMemberAccountHandler(new SupabaseMemberGateway(url.replace(/\/$/, ''), key, publicUrl), origins));
 }

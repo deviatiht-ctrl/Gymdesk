@@ -141,6 +141,7 @@ class _MemberSpaceAdminPageState extends ConsumerState<MemberSpaceAdminPage>
       memberId: entry.member.id,
       memberName: '${entry.member.firstName} ${entry.member.lastName}'.trim(),
       memberEmail: entry.member.email,
+      memberPhone: entry.member.whatsapp ?? entry.member.phone,
       account: account,
     );
     if (changed || mounted) await _loadRemoteTables();

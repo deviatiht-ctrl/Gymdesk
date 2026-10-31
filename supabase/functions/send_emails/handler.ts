@@ -4,7 +4,7 @@ export interface EmailJob {
   id: string;
   gym_id: string;
   lease_token: string;
-  kind: 'gym_welcome' | 'member_welcome' | 'member_renewal' | 'renewal_reminder' | 'campaign' | 'payment_receipt' | 'daily_report';
+  kind: 'gym_welcome' | 'member_welcome' | 'member_renewal' | 'renewal_reminder' | 'campaign' | 'payment_receipt' | 'daily_report' | 'member_access';
   recipient: string;
   payload: Record<string, unknown>;
 }
