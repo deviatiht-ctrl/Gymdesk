@@ -42,14 +42,14 @@ class _OffersPageState extends ConsumerState<OffersPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('4 Plan Anyèl yo anrejistre nan baz la avèk siksè !'),
+            content: Text('Les 4 plans officiels ont été enregistrés avec succès !'),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erè : $e')),
+          SnackBar(content: Text('Erreur : $e')),
         );
       }
     } finally {
@@ -89,7 +89,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
     final featuresController = TextEditingController(
       text: existing != null && existing.features.isNotEmpty
           ? existing.features.join('\n')
-          : 'Jiska 250 manb aktif\nDepasman : +2.00 USD / manb extra\nAksè Badj QR & Kòd PIN sekirize\nOpsyon Tablèt Android : +180 USD\nLektè anprent pa enkli (sou kòmand nan Pro/Enterprise)',
+          : 'Jusqu’à 250 membres actifs\nDépassement : +2,00 USD / membre supplémentaire\nAccès badge QR & code PIN sécurisé\nOption tablette Android : +180 USD\nLecteur d’empreintes non inclus (sur commande dans les offres Pro/Entreprise)',
     );
 
     String billingPeriod = existing?.billingPeriod ?? 'annual';
@@ -123,7 +123,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                       TextField(
                         controller: idController,
                         decoration: const InputDecoration(
-                          labelText: 'ID Inik (pa egzanp: pro_annual, starter)',
+                          labelText: 'ID unique (ex. : pro_annual, starter)',
                           prefixIcon: Icon(LucideIcons.key),
                         ),
                       ),
@@ -140,7 +140,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                     TextField(
                       controller: descController,
                       decoration: const InputDecoration(
-                        labelText: 'Deskripsyon kout',
+                        labelText: 'Description courte',
                         prefixIcon: Icon(LucideIcons.alignLeft),
                       ),
                     ),
@@ -179,7 +179,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                       initialValue: billingPeriod,
                       decoration: InputDecoration(labelText: s.text('offer_billing_period')),
                       items: [
-                        const DropdownMenuItem(value: 'one_time', child: Text('Peman an 1 sèl fwa (A vi)')),
+                        const DropdownMenuItem(value: 'one_time', child: Text('Paiement unique (à vie)')),
                         DropdownMenuItem(value: 'annual', child: Text(s.text('annual'))),
                         DropdownMenuItem(value: 'monthly', child: Text(s.text('monthly'))),
                       ],
@@ -200,7 +200,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                             controller: maxMembersController,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(
-                              labelText: 'Max Manb (0 = Ilimite)',
+                              labelText: 'Max membres (0 = illimité)',
                               prefixIcon: Icon(LucideIcons.users),
                             ),
                           ),
@@ -211,7 +211,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                             controller: overageMemberFeeController,
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             decoration: const InputDecoration(
-                              labelText: 'Frè Depasman / manb',
+                              labelText: 'Frais de dépassement / membre',
                               prefixIcon: Icon(LucideIcons.userPlus),
                             ),
                           ),
@@ -226,7 +226,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                             controller: tabletCountController,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(
-                              labelText: 'Tablèt Gratis',
+                              labelText: 'Tablette offerte',
                               prefixIcon: Icon(LucideIcons.tablet),
                             ),
                           ),
@@ -237,7 +237,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                             controller: tabletOptionalPriceController,
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                             decoration: const InputDecoration(
-                              labelText: 'Pri Opsyon Tablèt',
+                              labelText: 'Prix option tablette',
                               prefixIcon: Icon(LucideIcons.dollarSign),
                             ),
                           ),
@@ -257,19 +257,19 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                     // Switches pou opsyon kle
                     SwitchListTile(
                       title: Text(s.text('includes_tablet')),
-                      subtitle: const Text('Founi yon tablèt Android pou scan badges nan gym nan'),
+                      subtitle: const Text('Fournit une tablette Android pour scanner les badges dans la salle'),
                       value: includesTablet,
                       onChanged: (val) => setDialogState(() => includesTablet = val),
                     ),
                     SwitchListTile(
-                      title: const Text('Modil Byometrik (Anprent Dijital)'),
-                      subtitle: const Text('Pèmèt lektè anprent nan gym nan (Lektè USB a sou kòmand, se kliyan ki peye l)'),
+                      title: const Text('Module biométrique (empreintes digitales)'),
+                      subtitle: const Text('Active le lecteur d’empreintes dans la salle (lecteur USB sur commande, à la charge du client)'),
                       value: biometricSupported,
                       onChanged: (val) => setDialogState(() => biometricSupported = val),
                     ),
                     SwitchListTile(
                       title: Text(s.text('is_hot_plan')),
-                      subtitle: const Text('Mete yon bèl etikèt "PI POPILÈ 🔥" ak koulè anfaz'),
+                      subtitle: const Text('Affiche le badge « LE PLUS POPULAIRE 🔥 » en évidence'),
                       value: isHot,
                       onChanged: (val) => setDialogState(() => isHot = val),
                     ),
@@ -339,7 +339,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                   } catch (e) {
                     if (ctx.mounted) {
                       ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(content: Text('Erè nan anrejistreman: $e')),
+                        SnackBar(content: Text('Erreur d’enregistrement : $e')),
                       );
                     }
                   }
@@ -362,7 +362,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(s.text('delete_offer')),
-        content: Text('Èske ou sèten ou vle efase/dezaktive plan "${offer.name}" la?'),
+        content: Text('Voulez-vous vraiment supprimer/désactiver l’offre « ${offer.name} » ?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.text('cancel'))),
           FilledButton(
@@ -405,7 +405,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                   const SizedBox(height: 4),
                   Text(
                     isSuperAdmin
-                        ? 'Ou gen kontwòl total : ou ka ajoute, modifye pri, avantaj, tablèt, ak badges pou chak plan.'
+                        ? 'Contrôle total : ajoutez ou modifiez prix, avantages, tablettes et badges de chaque offre.'
                         : s.text('offers_catalog_hint'),
                     style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
@@ -429,7 +429,7 @@ class _OffersPageState extends ConsumerState<OffersPage> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(LucideIcons.sparkles, size: 18),
-                    label: const Text('Inisyalize 4 Plan Anyèl yo'),
+                    label: const Text('Initialiser les 4 plans officiels'),
                     onPressed: _busy ? null : _seedOfficialPlans,
                   ),
                   const SizedBox(width: 8),
@@ -566,7 +566,7 @@ class _OfferCard extends StatelessWidget {
                     ),
                     Chip(
                       label: Text(offer.isOneTime
-                          ? 'Peman Inik (A vi)'
+                          ? s.text('billing_one_time')
                           : s.text(offer.isAnnual ? 'annual' : 'monthly')),
                       visualDensity: VisualDensity.compact,
                       backgroundColor: offer.isOneTime || offer.isAnnual
@@ -599,7 +599,7 @@ class _OfferCard extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.only(bottom: 4, left: 6),
                         child: Text(
-                          '(Achte plas nèt)',
+                          '(achat définitif)',
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: colors.outline,
                             fontWeight: FontWeight.w600,
@@ -629,39 +629,58 @@ class _OfferCard extends StatelessWidget {
                 _FeatureRow(
                   icon: LucideIcons.users,
                   text: offer.maxMembers == 0
-                      ? 'Manb Ilimite (San limit) 🚀'
-                      : 'Jiska ${offer.maxMembers} manb aktif',
+                      ? 'Membres illimités 🚀'
+                      : 'Jusqu’à ${offer.maxMembers} membres actifs',
                   highlight: offer.maxMembers == 0,
                 ),
                 const SizedBox(height: 8),
                 if (offer.overageMemberFee > 0) ...[
                   _FeatureRow(
                     icon: LucideIcons.userPlus,
-                    text: 'Depasman : +${offer.overageMemberFee.toStringAsFixed(2)} USD / manb extra',
+                    text: 'Dépassement : +${offer.overageMemberFee.toStringAsFixed(2)} USD / membre supplémentaire',
                   ),
                   const SizedBox(height: 8),
                 ],
                 const _FeatureRow(
                   icon: LucideIcons.shieldCheck,
-                  text: 'Aksè 100% Byometrik & PIN (San badj fizik)',
+                  text: 'Accès par badge QR & code PIN sécurisés',
                   highlight: true,
                 ),
                 const SizedBox(height: 8),
-                const _FeatureRow(
+                if (offer.badgeQuota > 0) ...[
+                  _FeatureRow(
+                    icon: LucideIcons.badgeCheck,
+                    text: '${offer.badgeQuota} badges physiques QR inclus 🪪',
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                _FeatureRow(
                   icon: LucideIcons.tablet,
-                  text: 'Tablèt Android : sou kòmand (se kliyan ki peye l)',
+                  text: offer.includesTablet
+                      ? '${offer.tabletCount > 0 ? offer.tabletCount : 1} tablette${offer.tabletCount > 1 ? 's' : ''} Android incluse${offer.tabletCount > 1 ? 's' : ''} 📱'
+                      : 'Tablette Android : sur commande (+${offer.tabletOptionalPrice.toStringAsFixed(0)} ${offer.currency})',
+                  highlight: offer.includesTablet,
                 ),
                 const SizedBox(height: 8),
                 if (offer.biometricSupported || offer.includesDoorAccess) ...[
                   const _FeatureRow(
                     icon: LucideIcons.fingerprint,
-                    text: 'Sistèm Kontwòl Aksè & Lektè anprent USB Enkli ✅',
+                    text: 'Système de contrôle d’accès & lecteur d’empreintes USB inclus ✅',
                     highlight: true,
                   ),
                   const SizedBox(height: 8),
-                  const _FeatureRow(
+                  _FeatureRow(
                     icon: LucideIcons.wrench,
-                    text: 'Enstalasyon pòt pa ekip teknik : sou kòmand (se kliyan ki peye l)',
+                    text: offer.installationIncluded
+                        ? 'Installation complète sur place incluse 🛠️'
+                        : 'Installation de la porte : sur commande (à la charge du client)',
+                    highlight: offer.installationIncluded,
+                  ),
+                  const SizedBox(height: 8),
+                ] else ...[
+                  const _FeatureRow(
+                    icon: LucideIcons.fingerprint,
+                    text: 'Lecteur d’empreintes non inclus (réservé aux plans supérieurs)',
                   ),
                   const SizedBox(height: 8),
                 ],
@@ -682,7 +701,7 @@ class _OfferCard extends StatelessWidget {
                             Icon(LucideIcons.creditCard, size: 16, color: colors.primary),
                             const SizedBox(width: 6),
                             Text(
-                              'Peman an 3 Fwa Disponib 💳',
+                              'Paiement en 3 fois disponible 💳',
                               style: theme.textTheme.labelMedium?.copyWith(
                                 color: colors.primary,
                                 fontWeight: FontWeight.bold,
@@ -692,9 +711,9 @@ class _OfferCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '• Tranche 1 (Akonpt Materyèl/Enstalasyon) : ${offer.installment1.toStringAsFixed(0)} ${offer.currency}\n'
-                          '• Tranche 2 (30 jou) : ${offer.installment2.toStringAsFixed(0)} ${offer.currency}\n'
-                          '• Tranche 3 (60 jou) : ${offer.installment3.toStringAsFixed(0)} ${offer.currency}',
+                          '• Tranche 1 (acompte matériel/installation) : ${offer.installment1.toStringAsFixed(0)} ${offer.currency}\n'
+                          '• Tranche 2 (30 jours) : ${offer.installment2.toStringAsFixed(0)} ${offer.currency}\n'
+                          '• Tranche 3 (60 jours) : ${offer.installment3.toStringAsFixed(0)} ${offer.currency}',
                           style: theme.textTheme.bodySmall?.copyWith(
                             height: 1.4,
                             fontWeight: FontWeight.w600,

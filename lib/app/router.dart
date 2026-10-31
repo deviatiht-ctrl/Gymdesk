@@ -6,6 +6,7 @@ import '../core/access_control/access_popup_overlay.dart';
 import '../core/access_control/display_bridge.dart';
 import '../core/sync/sync_models.dart';
 import '../core/widgets/async_panel.dart';
+import '../core/widgets/securgym_background.dart';
 import '../features/admin/presentation/declarations_page.dart';
 import '../features/admin/presentation/email_settings_page.dart';
 import '../features/admin/presentation/offers_page.dart';
@@ -24,6 +25,7 @@ import '../features/dashboard/presentation/local_overview_page.dart';
 import '../features/employees/presentation/employees_page.dart';
 import '../features/enrollment/presentation/enrollment_wizard_page.dart';
 import '../features/gyms/presentation/gyms_page.dart';
+import '../features/gyms/presentation/gym_detail_page.dart';
 import '../features/gyms/presentation/create_gym_page.dart';
 import '../features/members/presentation/member_detail_page.dart';
 import '../features/members/presentation/member_form_page.dart';
@@ -451,6 +453,11 @@ GoRouter createRouter(AppRuntime runtime) {
         ),
         GoRoute(path: '/gyms', builder: (context, state) => const GymsPage()),
         GoRoute(
+          path: '/gyms/:id',
+          builder: (context, state) =>
+              GymDetailPage(gymId: state.pathParameters['id']!),
+        ),
+        GoRoute(
           path: '/admin/declarations',
           builder: (context, state) => const DeclarationsPage(),
         ),
@@ -610,16 +617,28 @@ class _AppShell extends StatelessWidget {
             }
             final wide = constraints.maxWidth >= 800;
             final isExtended = constraints.maxWidth >= 1200;
+            final platform = runtime.session?.isPlatformAdmin == true;
+            final scaffold = Theme.of(context).colorScheme.surface;
             return Scaffold(
               appBar: AppBar(
                 title: Row(
                   children: [
-                    Flexible(
-                      child: Text(
-                        runtime.session?.name ?? 'SecurGYM',
-                        overflow: TextOverflow.ellipsis,
+                    if (platform)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 10),
+                        child: Image.asset(
+                          'assets/brand/logo_horizontal.png',
+                          height: 30,
+                          fit: BoxFit.contain,
+                        ),
+                      )
+                    else
+                      Flexible(
+                        child: Text(
+                          runtime.session?.name ?? 'SecurGYM',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
                     const SizedBox(width: 10),
                     Tooltip(
                       message: 'Sécurisé par SecurGYM',
@@ -670,10 +689,23 @@ class _AppShell extends StatelessWidget {
                       minExtendedWidth: 220,
                       leading: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: _GymLogo(
-                          runtime: runtime,
-                          extended: isExtended,
-                        ),
+                        child: platform
+                            ? (isExtended
+                                  ? Image.asset(
+                                      'assets/brand/logo_horizontal.png',
+                                      width: 150,
+                                      fit: BoxFit.contain,
+                                    )
+                                  : Image.asset(
+                                      'assets/brand/icon_securgym.png',
+                                      width: 34,
+                                      height: 34,
+                                      fit: BoxFit.contain,
+                                    ))
+                            : _GymLogo(
+                                runtime: runtime,
+                                extended: isExtended,
+                              ),
                       ),
                       trailing: Expanded(
                         child: Align(
@@ -724,7 +756,16 @@ class _AppShell extends StatelessWidget {
                     ),
                     const VerticalDivider(width: 1),
                   ],
-                  Expanded(child: child),
+                  Expanded(
+                    child: platform
+                        ? SecurGymBackground(
+                            overlayColor: scaffold,
+                            overlayOpacity: 0.90,
+                            useSafeArea: false,
+                            child: child,
+                          )
+                        : child,
+                  ),
                 ],
               ),
               bottomNavigationBar: wide

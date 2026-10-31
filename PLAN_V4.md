@@ -219,3 +219,24 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
   * `supabase/sql/35_branding_fix.sql` (appliqué via Management API + vérifié) : whitelist + `biometric_config`
     (objet ≤ 16 Ko), phone 32→64 (client `_validate` + branding_page alignés), logo accepte `<gym_id>/logos/...`
     restreint au dossier de la salle. Assertion ajoutée à `member_portal_tests.sql` + chaîne PGlite étendue (test OK).
+
+- 2026-10-30 — Admin plateforme : plans en français, détail gym cliquable, fond + logo SecurGYM, signup corrigé.
+  * Offres : `platform_offers` normalisées en français en prod (PLAN 1 : DÉMARRAGE / 2 : CROISSANCE / 3 : PROFESSIONNEL /
+    4 : ENTREPRISE) — les UPDATE doivent être envoyés une requête à la fois via l'API Management (les multi-statements
+    réencodent l'UTF-8). `19_one_time_payment_offers.sql` et `PlatformOffer.defaultAnnualPlans` alignés sur la config live
+    (basic 150 m./install incluse, medium 1 000 m./install sur commande, pro 1 000 m. + 1 tablette + 200 badges, enterprise
+    illimité + 1 tablette + 500 badges). `loadOffers` n'utilise le fallback que si les plans officiels sont absents.
+  * `supabase/sql/36_admin_gym_detail.sql` (appliqué + vérifié en prod) : `platform_gym_detail` (fiche complète : stats
+    membres/abonnements actifs, contrat/offre, totaux paiements, propriétaire/contact) et `platform_update_gym`
+    (édition super-admin avec contrôle de version). RLS : `is_super_admin()` uniquement.
+  * UI admin : lignes de `/gyms` cliquables → `/gyms/<id>` (page détail ~800 lignes : stats, contrat, propriétaire,
+    actions modifier/suspendre/réactiver/réinitialiser le mot de passe propriétaire) ; shell admin avec `SecurGymBackground`
+    + logo SecurGYM ; `offers_page` tout en français et lignes capacités basées sur la config réelle (tablette incluse vs
+    sur commande, badges, installation).
+  * Signup : cartes de plan directement sélectionnables (plus de slider), `_offerId` par défaut `plan_basic`,
+    `create_gym_with_owner` durci (validation des champs + offer_id, erreurs d'insert vérifiées, nettoyage des enregistrements
+    partiels, réutilisation sûre d'un utilisateur Auth existant) et redéployée.
+  * Réparé `send_emails/templates.ts` (branche daily_report corrompue dans HEAD) — `deno check` OK.
+  * Tests : `admin_offers_test.ts` mis à jour (les offres `per_member`/`tiered` n'existent plus → `plan_basic`) ;
+    `platform_offers_test.dart` réécrit sur la config actuelle ; `admin_gym_detail_test.ts` (PGlite) OK.
+    Résultat : analyze propre, 40/40 Deno, suite Flutter verte.

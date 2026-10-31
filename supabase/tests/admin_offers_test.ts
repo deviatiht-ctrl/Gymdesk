@@ -35,6 +35,9 @@ async function setup(): Promise<PGlite> {
       values ('${GYM}', 'TST', 'Test Gym', 'America/Port-au-Prince', 'HTG', 'trial');
     insert into public.members(gym_id, member_number, qr_token, first_name, last_name)
       values ('${GYM}', 'TST-000001', 'token-demo-00000000000000000001', 'Demo', 'Member');
+    insert into public.platform_offers (id, name, description, billing_period, price, currency, config, active)
+      values ('plan_basic', 'PLAN 1 : DÉMARRAGE (Porte biométrique)', 'Offre de test', 'annual', 950, 'USD', '{}'::jsonb, true)
+      on conflict (id) do update set name = excluded.name, active = true;
     select set_config('request.jwt.claim.sub', '${ADMIN}', false);
   `);
   return db;
@@ -44,7 +47,7 @@ Deno.test('platform_register_payment creates an active contract, an approved dec
   const db = await setup();
   try {
     const result = await db.query<{ platform_register_payment: { contract_id: string; declaration_id: string } }>(
-      `select public.platform_register_payment('${GYM}', 'per_member', 45, 'USD', 'cash', 'REC-1', 'Paiement accueil', true)`,
+      `select public.platform_register_payment('${GYM}', 'plan_basic', 45, 'USD', 'cash', 'REC-1', 'Paiement accueil', true)`,
     );
     const { contract_id, declaration_id } = result.rows[0].platform_register_payment;
     if (!contract_id || !declaration_id) throw new Error('missing ids');
@@ -52,7 +55,7 @@ Deno.test('platform_register_payment creates an active contract, an approved dec
     const contract = await db.query<{ status: string; offer_id: string; expires_at: string | null }>(
       `select status, offer_id, expires_at from public.gym_contracts where id = '${contract_id}'`,
     );
-    if (contract.rows[0].status !== 'active' || contract.rows[0].offer_id !== 'per_member' || contract.rows[0].expires_at === null) {
+    if (contract.rows[0].status !== 'active' || contract.rows[0].offer_id !== 'plan_basic' || contract.rows[0].expires_at === null) {
       throw new Error('contract not active');
     }
     const gym = await db.query<{ status: string }>(`select status from public.gyms where id = '${GYM}'`);
@@ -68,7 +71,7 @@ Deno.test('platform_register_payment with p_paid=false creates a trial contract 
   const db = await setup();
   try {
     const result = await db.query<{ platform_register_payment: { contract_id: string; declaration_id: string | null } }>(
-      `select public.platform_register_payment('${GYM}', 'tiered', 0, 'USD', 'cash', null, null, false)`,
+      `select public.platform_register_payment('${GYM}', 'plan_basic', 0, 'USD', 'cash', null, null, false)`,
     );
     const { contract_id, declaration_id } = result.rows[0].platform_register_payment;
     if (!contract_id || declaration_id !== null) throw new Error('unexpected declaration');
@@ -84,20 +87,20 @@ Deno.test('platform_register_payment with p_paid=false creates a trial contract 
 Deno.test('platform_gym_overview returns contract and member counts; non-admin is rejected', async () => {
   const db = await setup();
   try {
-    await db.query(`select public.platform_register_payment('${GYM}', 'per_member', 45, 'USD', 'cash', null, null, true)`);
+    await db.query(`select public.platform_register_payment('${GYM}', 'plan_basic', 45, 'USD', 'cash', null, null, true)`);
     const overview = await db.query<{ platform_gym_overview: Array<Record<string, unknown>> }>(
       'select public.platform_gym_overview()',
     );
     const row = overview.rows[0].platform_gym_overview.find((r) => r['gym_id'] === GYM);
-    if (!row || row['members'] !== 1 || row['offer_name'] !== 'Par Membre Actif' || row['contract_status'] !== 'active') {
+    if (!row || row['members'] !== 1 || row['offer_name'] !== 'PLAN 1 : DÉMARRAGE (Porte biométrique)' || row['contract_status'] !== 'active') {
       throw new Error(`unexpected overview: ${JSON.stringify(row)}`);
     }
     let denied = false;
     try {
-      await db.query(`select public.platform_register_payment('${GYM}', 'per_member', 10, 'USD', 'cash', null, null, true)`);
+      await db.query(`select public.platform_register_payment('${GYM}', 'plan_basic', 10, 'USD', 'cash', null, null, true)`);
       // devient non admin
       await db.exec(`select set_config('request.jwt.claim.sub', '', false)`);
-      await db.query(`select public.platform_register_payment('${GYM}', 'per_member', 10, 'USD', 'cash', null, null, true)`);
+      await db.query(`select public.platform_register_payment('${GYM}', 'plan_basic', 10, 'USD', 'cash', null, null, true)`);
     } catch {
       denied = true;
     }

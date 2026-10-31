@@ -109,10 +109,9 @@ class GymsRepository {
       ];
       final officialPlanIds = {'plan_basic', 'plan_medium', 'plan_pro', 'plan_enterprise'};
       final hasOfficial = loaded.any((o) => officialPlanIds.contains(o.id));
-      final hasOutdated = loaded.any((o) =>
-          officialPlanIds.contains(o.id) &&
-          (o.billingPeriod == 'annual' || o.badgeQuota > 0 || o.includesTablet));
-      if (!hasOfficial || hasOutdated) {
+      // Le catalogue serveur fait foi : on ne bascule sur les plans
+      // embarqués que si les offres officielles n'ont jamais été seedées.
+      if (!hasOfficial) {
         return PlatformOffer.defaultAnnualPlans;
       }
       return loaded;
@@ -324,6 +323,25 @@ class GymsRepository {
         );
         return Gym.fromJson(Map<String, dynamic>.from(response as Map));
       });
+
+  /// Fiche complète d'une salle (super admin) : stats, contrat, propriétaire.
+  Future<GymDetail> gymDetail(String gymId) => _request(() async {
+    final response = await client.rpc(
+      'platform_gym_detail',
+      params: {'p_gym': gymId},
+    );
+    return GymDetail.fromJson(Map<String, dynamic>.from(response as Map));
+  });
+
+  /// Édition super admin des champs d'identité de la salle.
+  Future<Gym> updateGym(String gymId, Map<String, dynamic> payload) =>
+      _request(() async {
+    final response = await client.rpc(
+      'platform_update_gym',
+      params: {'p_gym': gymId, 'p_payload': payload},
+    );
+    return Gym.fromJson(Map<String, dynamic>.from(response as Map));
+  });
 
   Future<void> resetOwnerPassword(Gym gym) => _request(() async {
     await client.functions.invoke(

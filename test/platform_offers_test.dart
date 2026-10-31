@@ -3,7 +3,7 @@ import 'package:gym_desk/features/gyms/domain/gym.dart';
 
 void main() {
   group('Platform Offers & 3-Installment Payments', () {
-    test('Default annual plans include all 4 updated official tiers', () {
+    test('Default plans include all 4 official tiers', () {
       final plans = PlatformOffer.defaultAnnualPlans;
       expect(plans.length, 4);
 
@@ -19,7 +19,7 @@ void main() {
       expect(basic.billingPeriod, 'one_time');
       expect(basic.badgeQuota, 0);
       expect(basic.includesTablet, isFalse);
-      expect(basic.installationIncluded, isFalse);
+      expect(basic.installationIncluded, isTrue);
       expect(basic.biometricSupported, isTrue);
       expect(basic.includesDoorAccess, isTrue);
       expect(basic.installmentsAllowed, isTrue);
@@ -29,7 +29,7 @@ void main() {
       expect(basic.installment1 + basic.installment2 + basic.installment3, basic.price);
 
       // 2. Medium Plan
-      expect(medium.maxMembers, 500);
+      expect(medium.maxMembers, 1000);
       expect(medium.price, 1450.0);
       expect(medium.isOneTime, isTrue);
       expect(medium.badgeQuota, 0);
@@ -47,9 +47,10 @@ void main() {
       expect(pro.maxMembers, 1000);
       expect(pro.price, 2200.0);
       expect(pro.isOneTime, isTrue);
-      expect(pro.badgeQuota, 0);
-      expect(pro.includesTablet, isFalse);
-      expect(pro.installationIncluded, isFalse);
+      expect(pro.badgeQuota, 200);
+      expect(pro.includesTablet, isTrue);
+      expect(pro.tabletCount, 1);
+      expect(pro.installationIncluded, isTrue);
       expect(pro.biometricSupported, isTrue);
       expect(pro.installmentsAllowed, isTrue);
       expect(pro.installment1, 1300.0);
@@ -61,9 +62,10 @@ void main() {
       expect(enterprise.maxMembers, 0); // Unlimited
       expect(enterprise.price, 3200.0);
       expect(enterprise.isOneTime, isTrue);
-      expect(enterprise.badgeQuota, 0);
-      expect(enterprise.includesTablet, isFalse);
-      expect(enterprise.installationIncluded, isFalse);
+      expect(enterprise.badgeQuota, 500);
+      expect(enterprise.includesTablet, isTrue);
+      expect(enterprise.tabletCount, 1);
+      expect(enterprise.installationIncluded, isTrue);
       expect(enterprise.biometricSupported, isTrue);
       expect(enterprise.installmentsAllowed, isTrue);
       expect(enterprise.installment1, 1800.0);
@@ -72,14 +74,15 @@ void main() {
       expect(enterprise.installment1 + enterprise.installment2 + enterprise.installment3, enterprise.price);
     });
 
-    test('All plans are one-time purchase with no badges and paid hardware/installation', () {
+    test('All plans are one-time purchase with biometric door kit and 3 installments', () {
       for (final plan in PlatformOffer.defaultAnnualPlans) {
         expect(plan.isOneTime, isTrue);
-        expect(plan.badgeQuota, 0);
-        expect(plan.includesTablet, isFalse);
-        expect(plan.installationIncluded, isFalse);
-        expect(plan.installment1, greaterThan(plan.price * 0.50));
+        expect(plan.biometricSupported, isTrue);
+        expect(plan.includesDoorAccess, isTrue);
         expect(plan.doorHardwareKit, contains('FSTW F30'));
+        expect(plan.installmentsAllowed, isTrue);
+        expect(plan.installment1, greaterThan(plan.price * 0.50));
+        expect(plan.installment1 + plan.installment2 + plan.installment3, plan.price);
       }
     });
   });

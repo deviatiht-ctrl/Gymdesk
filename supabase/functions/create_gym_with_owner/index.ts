@@ -18,8 +18,10 @@ interface RequestBody {
   owner_phone: string;
   owner_password?: string;
   gym: GymPayload;
-  offer_id: string; // 'per_member' | 'tiered' | 'unlimited_annual'
+  offer_id: string; // 'plan_basic' | 'plan_medium' | 'plan_pro' | 'plan_enterprise' | legacy ids
 }
+
+const DEFAULT_OFFER = 'plan_basic';
 
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get('Origin') ?? '*';
@@ -34,6 +36,9 @@ Deno.serve(async (req: Request) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  const fail = (error: string, status = 500) =>
+    new Response(JSON.stringify({ error }), { status, headers: corsHeaders });
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -45,12 +50,26 @@ Deno.serve(async (req: Request) => {
     const { owner_name, owner_email, owner_phone, owner_password, gym, offer_id } = body;
 
     if (!owner_name || !owner_email || !owner_phone || !gym?.name || !gym?.code) {
-      return new Response(JSON.stringify({ error: 'missing_fields' }), { status: 400, headers: corsHeaders });
+      return fail('missing_fields', 400);
     }
 
     const cleanEmail = owner_email.trim().toLowerCase();
     const cleanPhone = owner_phone.replace(/\s+/g, '');
     const cleanCode = gym.code.trim().toUpperCase();
+    const wantedOffer = (offer_id || DEFAULT_OFFER).trim();
+
+    // 0. L'offre doit exister et être active — sinon l'inscription est refusée
+    //    avant de créer quoi que ce soit.
+    const { data: offer } = await supabase
+      .from('platform_offers')
+      .select('*')
+      .eq('id', wantedOffer)
+      .eq('active', true)
+      .maybeSingle();
+
+    if (!offer) {
+      return fail('invalid_offer', 400);
+    }
 
     // 1. Anti-abuse : vérification email et téléphone unique
     const { data: existingStaff } = await supabase
@@ -59,7 +78,7 @@ Deno.serve(async (req: Request) => {
       .or(`phone.eq.${cleanPhone}`);
 
     if (existingStaff && existingStaff.length > 0) {
-      return new Response(JSON.stringify({ error: 'phone_already_used_for_trial' }), { status: 409, headers: corsHeaders });
+      return fail('phone_already_used_for_trial', 409);
     }
 
     // Vérifier l'unicité du code de salle
@@ -70,11 +89,12 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     if (existingGym) {
-      return new Response(JSON.stringify({ error: 'duplicate_code' }), { status: 409, headers: corsHeaders });
+      return fail('duplicate_code', 409);
     }
 
     // 2. Création ou récupération de l'utilisateur Auth
     let userId: string;
+    let createdAuthUser = false;
     const { data: existingUsers } = await supabase.auth.admin.listUsers();
     const foundUser = existingUsers?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
 
@@ -88,12 +108,17 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (userStaff) {
-        return new Response(JSON.stringify({ error: 'owner_already_has_gym' }), { status: 409, headers: corsHeaders });
+        return fail('owner_already_has_gym', 409);
       }
       userId = foundUser.id;
+      // Compte Auth orphelin (tentative précédente interrompue) :
+      // aligner le mot de passe sur celui saisi maintenant.
+      if (owner_password && owner_password.length >= 8) {
+        await supabase.auth.admin.updateUserById(userId, { password: owner_password });
+      }
     } else {
       if (!owner_password || owner_password.length < 8) {
-        return new Response(JSON.stringify({ error: 'password_too_short' }), { status: 400, headers: corsHeaders });
+        return fail('password_too_short', 400);
       }
       const { data: newUser, error: createAuthError } = await supabase.auth.admin.createUser({
         email: cleanEmail,
@@ -102,15 +127,32 @@ Deno.serve(async (req: Request) => {
         user_metadata: { full_name: owner_name, phone: cleanPhone },
       });
       if (createAuthError || !newUser?.user) {
-        return new Response(JSON.stringify({ error: createAuthError?.message ?? 'auth_creation_failed' }), { status: 500, headers: corsHeaders });
+        return fail(createAuthError?.message ?? 'auth_creation_failed', 500);
       }
       userId = newUser.user.id;
+      createdAuthUser = true;
     }
 
     // 3. Dates d'essai serveur : 7 jours automatiques
     const now = new Date();
     const trialEndsAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const gymId = crypto.randomUUID();
+    const staffId = crypto.randomUUID();
+
+    // Nettoyage maximal si une étape échoue après la création de la salle,
+    // pour ne pas laisser de salle/staff/contrat partiel.
+    const cleanup = async () => {
+      try { await supabase.from('badges').delete().eq('gym_id', gymId); } catch { /* best effort */ }
+      try { await supabase.from('badge_batches').delete().eq('gym_id', gymId); } catch { /* best effort */ }
+      try { await supabase.from('badge_templates').delete().eq('gym_id', gymId); } catch { /* best effort */ }
+      try { await supabase.from('plans').delete().eq('gym_id', gymId); } catch { /* best effort */ }
+      try { await supabase.from('gym_contracts').delete().eq('gym_id', gymId); } catch { /* best effort */ }
+      try { await supabase.from('staff').delete().eq('gym_id', gymId); } catch { /* best effort */ }
+      try { await supabase.from('gyms').delete().eq('id', gymId); } catch { /* best effort */ }
+      if (createdAuthUser) {
+        try { await supabase.auth.admin.deleteUser(userId); } catch { /* best effort */ }
+      }
+    };
 
     // 4. Création de la salle (status = 'trial')
     const { data: newGym, error: gymError } = await supabase
@@ -138,17 +180,23 @@ Deno.serve(async (req: Request) => {
           scan_sound: true,
           scan_vibrate: true,
           entry_duplicate_seconds: 3,
+          biometric_config: {
+            enabled: offer?.config?.biometric_supported === true,
+            mode: 'app_controls_door',
+          },
         },
       })
       .select()
       .single();
 
     if (gymError) {
-      return new Response(JSON.stringify({ error: gymError.message }), { status: 500, headers: corsHeaders });
+      if (createdAuthUser) {
+        try { await supabase.auth.admin.deleteUser(userId); } catch { /* best effort */ }
+      }
+      return fail(gymError.message);
     }
 
     // 5. Création du compte staff owner
-    const staffId = crypto.randomUUID();
     const { error: staffError } = await supabase
       .from('staff')
       .insert({
@@ -162,29 +210,35 @@ Deno.serve(async (req: Request) => {
       });
 
     if (staffError) {
-      return new Response(JSON.stringify({ error: staffError.message }), { status: 500, headers: corsHeaders });
+      await cleanup();
+      return fail(staffError.message);
     }
 
-    // 6. Récupérer le snapshot de l'offre
-    const { data: offer } = await supabase
-      .from('platform_offers')
-      .select('*')
-      .eq('id', offer_id || 'per_member')
-      .maybeSingle();
-
-    // 7. Création du contrat d'essai
-    await supabase
+    // 6. Contrat d'essai lié à l'offre choisie (snapshot complet, dont
+    //    les capacités biométrie/porte/tablette du plan).
+    const { error: contractError } = await supabase
       .from('gym_contracts')
       .insert({
         gym_id: gymId,
-        offer_id: offer_id || 'per_member',
+        offer_id: wantedOffer,
         status: 'trial',
-        price_snapshot: offer ? { name: offer.name, price: offer.price, currency: offer.currency, config: offer.config } : {},
+        price_snapshot: {
+          name: offer.name,
+          price: offer.price,
+          currency: offer.currency,
+          billing_period: offer.billing_period,
+          config: offer.config,
+        },
         starts_at: now.toISOString(),
         expires_at: trialEndsAt.toISOString(),
       });
 
-    // 8. Plans de membres par défaut
+    if (contractError) {
+      await cleanup();
+      return fail(contractError.message);
+    }
+
+    // 7. Plans de membres par défaut
     const defaultPlans = [
       { name: '1 Mois', duration_days: 30, price: gym.currency === 'USD' ? 25 : 2500, sort_order: 1 },
       { name: '3 Mois', duration_days: 90, price: gym.currency === 'USD' ? 65 : 6500, sort_order: 2 },
@@ -194,7 +248,7 @@ Deno.serve(async (req: Request) => {
     ];
 
     for (const p of defaultPlans) {
-      await supabase.from('plans').insert({
+      const { error: planError } = await supabase.from('plans').insert({
         gym_id: gymId,
         name: p.name,
         duration_days: p.duration_days,
@@ -203,10 +257,14 @@ Deno.serve(async (req: Request) => {
         active: true,
         sort_order: p.sort_order,
       });
+      if (planError) {
+        await cleanup();
+        return fail(planError.message);
+      }
     }
 
-    // 9. Modèle de badge par défaut V2 (CR80 anonyme)
-    await supabase.from('badge_templates').insert({
+    // 8. Modèle de badge par défaut V2 (CR80 anonyme)
+    const { error: templateError } = await supabase.from('badge_templates').insert({
       gym_id: gymId,
       name: 'Badge Standard CR80 V2',
       is_default: true,
@@ -221,10 +279,14 @@ Deno.serve(async (req: Request) => {
         show_badge_number: true,
       },
     });
+    if (templateError) {
+      await cleanup();
+      return fail(templateError.message);
+    }
 
-    // 10. Lot d'essai de 10 badges
+    // 9. Lot d'essai de 10 badges
     const batchId = crypto.randomUUID();
-    await supabase.from('badge_batches').insert({
+    const { error: batchError } = await supabase.from('badge_batches').insert({
       id: batchId,
       gym_id: gymId,
       label: 'Lot d\'essai (10 badges)',
@@ -234,6 +296,10 @@ Deno.serve(async (req: Request) => {
       source: 'trial',
       generated_by: staffId,
     });
+    if (batchError) {
+      await cleanup();
+      return fail(batchError.message);
+    }
 
     const trialBadges = [];
     for (let i = 1; i <= 10; i++) {
@@ -249,16 +315,21 @@ Deno.serve(async (req: Request) => {
         status: 'unassigned',
       });
     }
-    await supabase.from('badges').insert(trialBadges);
+    const { error: badgesError } = await supabase.from('badges').insert(trialBadges);
+    if (badgesError) {
+      await cleanup();
+      return fail(badgesError.message);
+    }
 
     return new Response(JSON.stringify({
       success: true,
       gym: newGym,
       staff_id: staffId,
       user_id: userId,
+      offer_id: wantedOffer,
       trial_ends_at: trialEndsAt.toISOString(),
     }), { headers: corsHeaders });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message || 'internal_server_error' }), { status: 500, headers: corsHeaders });
+    return fail(err?.message || 'internal_server_error', 500);
   }
 });

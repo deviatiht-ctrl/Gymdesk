@@ -31,8 +31,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
   final _ownerPhone = TextEditingController();
   final _ownerPassword = TextEditingController();
   String _currency = 'HTG';
-  String _offerId = 'per_member';
-  double _offerIndex = 0;
+  String _offerId = 'plan_basic';
   List<Map<String, dynamic>> _offers = const [];
 
   @override
@@ -88,7 +87,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
       _ownerPassword.text.length >= 8;
 
   Future<void> _submit() async {
-    if (_busy || !_gymValid || !_ownerValid) return;
+    if (_busy || !_gymValid || !_ownerValid || _offer == null) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -330,67 +329,51 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     ],
   );
 
+  String _billingLabel(String? period, AppStrings s) => switch (period) {
+    'annual' => '/${s.text('per_year')}',
+    'monthly' => '/${s.text('per_month')}',
+    'one_time' || 'unique' => ' · ${s.text('billing_one_time')}',
+    'lifetime' => ' · ${s.text('billing_lifetime')}',
+    _ => '',
+  };
+
+  Widget _capabilityChip(String label, IconData icon, ThemeData theme) =>
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: theme.colorScheme.primary),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+
   Widget _planStep(AppStrings s, ThemeData theme) {
-    final count = _offers.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(s.text('signup_plan_step'), style: theme.textTheme.titleLarge),
         const SizedBox(height: 8),
         Text(
-          s.text('signup_plan_hint'),
+          s.text('select_plan_hint'),
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.outline,
           ),
         ),
         const SizedBox(height: 16),
-        if (count > 1)
-          Slider(
-            value: _offerIndex.clamp(0, (count - 1).toDouble()),
-            min: 0,
-            max: (count - 1).toDouble(),
-            divisions: count - 1,
-            onChanged: (v) => setState(() {
-              _offerIndex = v;
-              _offerId = _offers[v.round()]['id'] as String;
-            }),
-          ),
-        if (_offer != null)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        _offer!['name'] as String? ?? '',
-                        style: theme.textTheme.titleLarge,
-                      ),
-                      Text(
-                        '${_offer!['price']} ${_offer!['currency']}/${_offer!['billing_period'] == 'annual' ? s.text('per_year') : s.text('per_month')}',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: theme.colorScheme.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(_offer!['description'] as String? ?? ''),
-                  const SizedBox(height: 8),
-                  Text(
-                    s.text('included_badges').replaceAll(
-                      '{n}',
-                      '${(_offer!['config'] as Map?)?['badge_quota'] ?? 10}',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        for (final o in _offers) _offerCard(o, s, theme),
         const SizedBox(height: 12),
         ExpansionTile(
           title: Text(s.text('compare_offers')),
@@ -398,10 +381,23 @@ class _SignupPageState extends ConsumerState<SignupPage> {
               .map(
                 (o) => ListTile(
                   title: Text(o['name'] as String? ?? ''),
-                  trailing: Text('${o['price']} ${o['currency']}'),
-                  subtitle: Text(
-                    '${(o['config'] as Map?)?['badge_quota'] ?? '-'} ${s.text('badges').toLowerCase()}',
+                  trailing: Text(
+                    '${o['price']} ${o['currency']}${_billingLabel(o['billing_period'] as String?, s)}',
                   ),
+                  subtitle: Text(
+                    ((o['config'] as Map?)?['max_members'] as num?)?.toInt() == 0
+                        ? s.text('unlimited_members')
+                        : s
+                              .text('up_to_members')
+                              .replaceAll(
+                                '{n}',
+                                '${(o['config'] as Map?)?['max_members'] ?? '-'}',
+                              ),
+                  ),
+                  selected: o['id'] == _offerId,
+                  onTap: () => setState(() {
+                    _offerId = o['id'] as String;
+                  }),
                 ),
               )
               .toList(),
@@ -421,6 +417,194 @@ class _SignupPageState extends ConsumerState<SignupPage> {
               .toList(),
         ),
       ],
+    );
+  }
+
+  Widget _offerCard(Map<String, dynamic> o, AppStrings s, ThemeData theme) {
+    final config = o['config'] as Map? ?? const {};
+    final selected = o['id'] == _offerId;
+    final maxMembers = (config['max_members'] as num?)?.toInt() ?? 0;
+    final badgeQuota = (config['badge_quota'] as num?)?.toInt() ?? 0;
+    final biometric = config['biometric_supported'] == true;
+    final doorAccess = config['includes_door_access'] == true;
+    final tabletIncluded = config['includes_tablet'] == true;
+    final tabletOptional =
+        ((config['tablet_optional_price'] as num?)?.toDouble() ?? 0) > 0;
+    final installments = config['installments_allowed'] == true;
+    final overage = (config['overage_member_fee'] as num?)?.toDouble() ?? 0;
+    final isHot = config['is_hot'] == true;
+    final features = [
+      for (final f in (config['features'] as List? ?? const [])) '$f',
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: () => setState(() {
+          _offerId = o['id'] as String;
+        }),
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: selected
+                ? theme.colorScheme.primary.withValues(alpha: 0.10)
+                : Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected
+                  ? theme.colorScheme.primary
+                  : Colors.white.withValues(alpha: 0.12),
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    selected
+                        ? LucideIcons.circleCheck
+                        : LucideIcons.circle,
+                    size: 22,
+                    color: selected
+                        ? theme.colorScheme.primary
+                        : Colors.white54,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              o['name'] as String? ?? '',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (isHot)
+                              Text(
+                                s.text('hot_badge'),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: const Color(0xfff97316),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${o['price']} ${o['currency']}${_billingLabel(o['billing_period'] as String?, s)}',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if ((o['description'] as String?)?.isNotEmpty ?? false) ...[
+                const SizedBox(height: 10),
+                Text(
+                  o['description'] as String,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _capabilityChip(
+                    maxMembers == 0
+                        ? s.text('unlimited_members')
+                        : s
+                              .text('up_to_members')
+                              .replaceAll('{n}', '$maxMembers'),
+                    LucideIcons.users,
+                    theme,
+                  ),
+                  if (biometric)
+                    _capabilityChip(
+                      s.text('biometric_access'),
+                      LucideIcons.fingerprint,
+                      theme,
+                    ),
+                  if (doorAccess)
+                    _capabilityChip(
+                      s.text('door_access_included'),
+                      LucideIcons.doorOpen,
+                      theme,
+                    ),
+                  if (tabletIncluded)
+                    _capabilityChip(
+                      s.text('included_tablet_badge'),
+                      LucideIcons.tablet,
+                      theme,
+                    )
+                  else if (tabletOptional)
+                    _capabilityChip(
+                      s.text('tablet_option'),
+                      LucideIcons.tablet,
+                      theme,
+                    ),
+                  if (badgeQuota > 0)
+                    _capabilityChip(
+                      s
+                          .text('badges_included_badge')
+                          .replaceAll('{n}', '$badgeQuota'),
+                      LucideIcons.badgeCheck,
+                      theme,
+                    )
+                  else
+                    _capabilityChip(
+                      s.text('no_physical_badges'),
+                      LucideIcons.badgeCheck,
+                      theme,
+                    ),
+                  if (installments)
+                    _capabilityChip(
+                      s.text('installments_3'),
+                      LucideIcons.creditCard,
+                      theme,
+                    ),
+                  if (overage > 0)
+                    _capabilityChip(
+                      '${s.text('per_extra_member')} : +${overage.toStringAsFixed(2)} ${o['currency']}',
+                      LucideIcons.userPlus,
+                      theme,
+                    ),
+                ],
+              ),
+              if (features.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                for (final f in features)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('• ', style: theme.textTheme.bodySmall),
+                        Expanded(
+                          child: Text(f, style: theme.textTheme.bodySmall),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 

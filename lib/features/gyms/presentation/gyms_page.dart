@@ -273,6 +273,14 @@ class _GymsPageState extends ConsumerState<GymsPage> {
     ],
   );
 
+  String _billingLabel(String? period, AppStrings s) => switch (period) {
+    'annual' => s.text('per_year'),
+    'monthly' => s.text('per_month'),
+    'one_time' || 'unique' => s.text('billing_one_time'),
+    'lifetime' => s.text('billing_lifetime'),
+    _ => '',
+  };
+
   Widget _gymRow(Gym gym, AppStrings s, GymOverview? overview) {
     final status = gym.archived ? 'archived' : gym.status;
     final color = status == 'active'
@@ -282,7 +290,11 @@ class _GymsPageState extends ConsumerState<GymsPage> {
     final expiresLabel = expires != null && expires.length >= 10
         ? expires.substring(0, 10)
         : null;
-    return Padding(
+    return InkWell(
+      onTap: () => context
+          .push('/gyms/${gym.id}')
+          .then((_) => mounted ? _reload() : null),
+      child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -319,7 +331,8 @@ class _GymsPageState extends ConsumerState<GymsPage> {
                   avatar: const Icon(LucideIcons.tag, size: 14),
                   label: Text(
                     overview.offerName != null
-                        ? '${overview.offerName} · ${overview.offerPrice?.toStringAsFixed(0) ?? ''} ${overview.offerCurrency ?? ''} ${s.text(overview.billingPeriod == 'annual' ? 'per_year' : 'per_month')}'
+                        ? '${overview.offerName} · ${overview.offerPrice?.toStringAsFixed(0) ?? ''} ${overview.offerCurrency ?? ''} ${_billingLabel(overview.billingPeriod, s)}'
+                              .trim()
                         : s.text('no_contract'),
                   ),
                   visualDensity: VisualDensity.compact,
@@ -373,6 +386,7 @@ class _GymsPageState extends ConsumerState<GymsPage> {
           const SizedBox(height: 16),
           const Divider(height: 1),
         ],
+      ),
       ),
     );
   }

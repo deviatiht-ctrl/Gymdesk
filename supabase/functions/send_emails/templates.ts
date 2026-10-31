@@ -150,13 +150,13 @@ export function renderEmail(job: EmailJob, logoUrl: string | null, receiptUrl: s
     rows = rows.filter(([label]) => label !== '');
   } else if (job.kind === 'daily_report') {
     const reportDate = date(p.report_date);
-    title = \Rapport d’activité du \;
-    subject = \Rapport quotidien · \ · \;
-    intro = \Bonjour \, voici le résumé complet des encaissements et de l’activité de votre salle pour la journée du \.\;
+    title = `Rapport d’activité du ${reportDate}`;
+    subject = `Rapport quotidien · ${brand} · ${reportDate}`;
+    intro = `Bonjour ${p.owner_name ?? p.name ?? ''}, voici le résumé complet des encaissements et de l’activité de votre salle pour la journée du ${reportDate}.`;
     rows = [
       ['Date du rapport', reportDate],
-      ['Total encaissé (USD)', \ USD\],
-      ['Total encaissé (HTG)', \ HTG\],
+      ['Total encaissé (USD)', `${p.total_usd ?? 0} USD`],
+      ['Total encaissé (HTG)', `${p.total_htg ?? 0} HTG`],
       ['Nombre de paiements', String(p.payments_count ?? 0)],
       ['Nouvelles inscriptions', String(p.new_members_count ?? 0)],
       ['Passages / Accès', String(p.checkins_count ?? 0)],
