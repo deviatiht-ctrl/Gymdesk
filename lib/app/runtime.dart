@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/access_control/display_bridge.dart';
 import '../core/auth/kiosk_native.dart';
 import '../core/auth/kiosk_service.dart';
 import '../core/auth/pin_service.dart';
@@ -46,6 +47,21 @@ class AppRuntime extends ChangeNotifier {
   DateTime _lastActivity = DateTime.now();
   DateTime? _passwordLoginAt;
   Future<void> _serial = Future.value();
+  bool _syncDeferred = false;
+
+  /// Fenêtre « 2e écran » (web `?display=1`, Windows `--access-display`) :
+  /// affichage passif — pas de déconnexion auto, pas de PIN, pas de 2e moteur de
+  /// synchronisation concurrent (la fenêtre principale synchronise déjà).
+  bool get displayOnly => AccessDisplayBridge.instance.launchedAsDisplay;
+
+  /// Démarre la synchro différée de la fenêtre 2e écran quand elle doit
+  /// fonctionner seule (fenêtre principale fermée).
+  Future<void> startDeferredSync() async {
+    final engine = sync;
+    if (!_syncDeferred || engine == null) return;
+    _syncDeferred = false;
+    await engine.start();
+  }
 
   String _cacheKey(String userId) => 'gymdesk:$namespace:staff:$userId';
   String get _onboardingKey => 'gymdesk:$namespace:onboarding';
@@ -89,6 +105,7 @@ class AppRuntime extends ChangeNotifier {
 
   Future<void> _checkIdle() async {
     if (_disposed ||
+        displayOnly ||
         (phase != SessionPhase.ready && phase != SessionPhase.recovery)) {
       return;
     }
@@ -270,7 +287,11 @@ class AppRuntime extends ChangeNotifier {
       }
       phase = SessionPhase.ready;
       _notify();
-      await engine.start();
+      if (displayOnly) {
+        _syncDeferred = true;
+      } else {
+        await engine.start();
+      }
       if (engine.state.value.phase == SyncPhase.blocked) {
         phase = SessionPhase.blocked;
         errorCode = engine.state.value.errorCode;
@@ -286,7 +307,7 @@ class AppRuntime extends ChangeNotifier {
     phase = SessionPhase.ready;
     activity();
     try {
-      if (!pinRecentlyAuthenticated && (await pin!.status()).enabled) {
+      if (!displayOnly && !pinRecentlyAuthenticated && (await pin!.status()).enabled) {
         phase = SessionPhase.locked;
       }
     } catch (_) {

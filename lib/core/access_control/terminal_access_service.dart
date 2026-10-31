@@ -107,6 +107,8 @@ class AccessPerson {
 
   bool get isEmployee => _snapshotIsEmployee ?? (employee != null);
   String get id => _snapshotId ?? (entry?.member.id ?? employee!.id);
+  /// Identifiant membre sans risque (null pour un employé ou un snapshot incomplet).
+  String? get memberId => isEmployee ? null : (_snapshotId ?? entry?.member.id);
   String get name => _snapshotName ?? (entry?.member.fullName ?? employee!.fullName);
   String get firstName => _snapshotFirstName ?? (entry?.member.firstName ?? employee!.firstName);
   bool get allowed => _snapshotAllowed ?? (isEmployee ? employee!.active : entry!.validity.valid);
@@ -448,7 +450,7 @@ class TerminalAccessService {
         if (person?.photoUrl != null) 'photo_url': person!.photoUrl,
         if (member?.memberNumber != null) 'member_number': member!.memberNumber,
         if (member?.phone != null) 'phone': member!.phone,
-        if (member?.id != null) 'member_id': member!.id,
+        if ((member?.id ?? person?.memberId) != null) 'member_id': member?.id ?? person!.memberId,
         if (person?.employee?.jobType != null) 'job_type': person!.employee!.jobType,
       };
   }

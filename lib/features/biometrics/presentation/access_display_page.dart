@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/access_control/access_monitor.dart';
+import '../../../core/access_control/display_bridge.dart';
 import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_service.dart';
@@ -23,12 +24,23 @@ import '../../settings/data/settings_repository.dart';
 
 /// Ouvri ekran aksè a nan yon fenèt apa (web) pou li ka ale sou 2yèm ekran
 /// ki devan pòt la oswa sou yon tablèt Wi-Fi.
+/// Web : vraie fenêtre navigateur (déplaçable sur le 2e écran) ; Windows : 2e
+/// processus SecurGYM. La fenêtre principale reste libre (réduire, autre page).
 Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = false]) async {
   final target = isTablet ? '/tablet-access' : '/access-display';
-  if (context != null && context.mounted) {
-    context.push(target);
+  final opened = await AccessDisplayBridge.instance.openDisplayWindow(target);
+  if (context == null || !context.mounted) return;
+  if (opened) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Écran d’accès ouvert dans une fenêtre séparée — glissez-la sur le 2e écran (F11 = plein écran).'),
+        backgroundColor: Color(0xFF0F766E),
+        duration: Duration(seconds: 5),
+      ),
+    );
     return;
   }
+  context.push(target);
 }
 
 /// Ekran devan pòt la: lè yon moun mete dwèt li sou W2 a, li montre non li,
@@ -49,6 +61,9 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   late bool _isTabletWifiMode = widget.isTabletMode;
 
   StreamSubscription<AccessDecision>? _events;
+  StreamSubscription<AccessDecision>? _bridgeEvents;
+  Timer? _hostWatch;
+  bool _ownMonitor = false;
   RealtimeChannel? _realtimeSub;
   Timer? _clock;
   Timer? _dismiss;
@@ -99,12 +114,23 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
 
     // 1. Siveyan global la (AccessMonitor) trete evènman W2 yo sou Desktop ak Web (PC resepsyon).
     final monitor = AccessMonitor.instance;
-    unawaited(monitor.start(runtime));
-    _terminalOnline = monitor.terminalOnline.value;
-    _agentOnline = monitor.agentOnline.value;
     monitor.terminalOnline.addListener(_onMonitorStatus);
     monitor.agentOnline.addListener(_onMonitorStatus);
     _events = monitor.decisions.listen(_onDecision);
+    final bridge = AccessDisplayBridge.instance;
+    if (bridge.launchedAsDisplay) {
+      // Fenêtre séparée : les décisions viennent de la fenêtre principale (instantané).
+      bridge.hostAlive.addListener(_onMonitorStatus);
+      bridge.hostAgentOnline.addListener(_onMonitorStatus);
+      bridge.hostTerminalOnline.addListener(_onMonitorStatus);
+      _bridgeEvents = bridge.decisions.listen(_onDecision);
+      bridge.startDisplay();
+      _hostWatch = Timer.periodic(const Duration(seconds: 3), (_) => _ensureMonitorWhenAlone());
+      Timer(const Duration(milliseconds: 2500), _ensureMonitorWhenAlone);
+    } else {
+      unawaited(monitor.start(runtime));
+    }
+    _onMonitorStatus();
 
     // 2. Koute Supabase Realtime (Pou tablèt Wi-Fi resevwa evènman yo menm san agent lokal)
     final gymId = runtime.session?.gymId;
@@ -124,7 +150,10 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
               ),
               callback: (payload) {
                 final row = payload.newRecord;
-                if (AccessMonitor.instance.active && row['source'] == 'terminal') return;
+                if ((AccessMonitor.instance.active || AccessDisplayBridge.instance.hostAlive.value) &&
+                    row['source'] == 'terminal') {
+                  return;
+                }
                 _handleRealtimeAccessEvent(row);
               },
             )
@@ -135,10 +164,30 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
 
   void _onMonitorStatus() {
     if (!mounted) return;
+    final bridge = AccessDisplayBridge.instance;
+    final viaHost = bridge.launchedAsDisplay && bridge.hostAlive.value;
     setState(() {
-      _agentOnline = AccessMonitor.instance.agentOnline.value;
-      _terminalOnline = AccessMonitor.instance.terminalOnline.value;
+      _agentOnline = viaHost ? bridge.hostAgentOnline.value : AccessMonitor.instance.agentOnline.value;
+      _terminalOnline = viaHost ? bridge.hostTerminalOnline.value : AccessMonitor.instance.terminalOnline.value;
     });
+  }
+
+  /// Fenêtre séparée sans fenêtre principale ouverte : elle surveille le terminal
+  /// elle-même ; dès que la fenêtre principale revient, elle lui rend la main.
+  void _ensureMonitorWhenAlone() {
+    if (!mounted) return;
+    final runtime = ref.read(appRuntimeProvider);
+    final monitor = AccessMonitor.instance;
+    final hostAlive = AccessDisplayBridge.instance.hostAlive.value;
+    if (!hostAlive && !_ownMonitor) {
+      _ownMonitor = true;
+      unawaited(runtime.startDeferredSync());
+      unawaited(monitor.start(runtime));
+    } else if (hostAlive && _ownMonitor) {
+      _ownMonitor = false;
+      monitor.stop();
+    }
+    _onMonitorStatus();
   }
 
   /// Desizyon AccessMonitor la (PC): pòt, prezans ak evènman deja trete.
@@ -171,7 +220,11 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     }
 
     final member = decision.person?.entry?.member;
-    if (member != null) unawaited(_loadPhoto(member, decision));
+    if (member != null) {
+      unawaited(_loadPhoto(member, decision));
+    } else if (decision.person?.memberId != null) {
+      unawaited(_loadPhotoById(decision.person!.memberId!, decision));
+    }
     setState(() {
       _decision = decision;
       _photo = null;
@@ -256,6 +309,11 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   @override
   void dispose() {
     _events?.cancel();
+    _bridgeEvents?.cancel();
+    _hostWatch?.cancel();
+    AccessDisplayBridge.instance.hostAlive.removeListener(_onMonitorStatus);
+    AccessDisplayBridge.instance.hostAgentOnline.removeListener(_onMonitorStatus);
+    AccessDisplayBridge.instance.hostTerminalOnline.removeListener(_onMonitorStatus);
     AccessMonitor.instance.terminalOnline.removeListener(_onMonitorStatus);
     AccessMonitor.instance.agentOnline.removeListener(_onMonitorStatus);
     _realtimeSub?.unsubscribe();
@@ -469,6 +527,10 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           ),
           onPressed: () {
+            if (AccessDisplayBridge.instance.launchedAsDisplay) {
+              AccessDisplayBridge.instance.closeCurrentWindow();
+              return;
+            }
             if (Navigator.of(context).canPop()) {
               Navigator.of(context).pop();
             } else {

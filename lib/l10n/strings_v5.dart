@@ -99,6 +99,7 @@ const stringsV5 = <String, List<String>>{
   'total_registration_fees': ['Total Frè enskripsyon', 'Total Frais d’inscription', 'Total Registration Fees'],
   'total_subscriptions': ['Total Abònman / Plans', 'Total Abonnements / Plans', 'Total Subscriptions / Plans'],
   // Portail web manm (Phase 7)
+  'member_space': ['Espas manm', 'Espace membre', 'Member area'],
   'portal_requests': ['Demann an liy', 'Demandes en ligne', 'Online requests'],
   'portal_requests_hint': ['Demann enskripsyon moun voye sou sit wèb la.', 'Demandes d’adhésion soumises en ligne par les futurs membres.', 'Online join requests submitted by prospective members.'],
   'portal_no_requests': ['Pa gen okenn demann an liy k ap tann.', 'Aucune demande en ligne en attente.', 'No pending online requests.'],

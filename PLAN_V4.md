@@ -65,7 +65,7 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
       → bouton « Valider & Encaisser » pré-remplit l'assistant `/members/new`, valide l'inscription et passe le statut en `completed`.
 - [ ] 7.3 Renouvellement via lien/QR : le membre se présente, met son empreinte (USB ou porte) → la demande
       est liée à son identité ; sans empreinte il ne voit rien. Caissier valide en temps réel.
-- [ ] 7.4 Espace membre : jours restants, historique, reçus PDF, infos du gym, bouton renouveler.
+- [x] 7.4 Espace membre : jours restants, historique, reçus PDF, infos du gym, bouton renouveler (SQL 34, `lib/features/member_portal/`).
 
 ## Journal d'avancement
 (ajouter une ligne par session : date — ce qui est fait — où reprendre)
@@ -164,3 +164,20 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
   * `lib/features/members/presentation/members_page.dart` & `lib/features/portal/presentation/portal_requests_page.dart` :
     - Refonte de `MembersPage` en `CustomScrollView` (`SliverList`) : lorsque le panneau de statistiques (`MembersStatsPanel`) est ouvert, toute la page défile de façon fluide sur toutes les tailles d'écran sans jamais masquer ni écraser la liste des membres.
     - Adaptation responsive des cartes de demandes en ligne (`LayoutBuilder` + `Wrap`).
+
+- 2026-10-30 — Espace membre PWA par gym + 2e écran d'accès en vraie fenêtre (analyze OK, tests OK).
+  * SQL `supabase/sql/34_member_portal.sql` (À APPLIQUER après 33, idempotent) : `member_accounts` (lien compte Auth ↔ membre PAR gym),
+    `gym_announcements`, `portal_requests.auth_user_id`, RPC `member_portal_gyms/gym/check/link/attach_request/me/request_renewal`,
+    policies Storage (logo public des gyms actifs, photo + reçus PDF du membre lui-même). Test : `supabase/tests/member_portal_test.ts`.
+  * Routes publiques `/espace-membre` (liste des gyms + logos) et `/m/<gymId>` (connexion / activation / suivi d'inscription / tableau de bord
+    4 onglets : accueil, activité, paiements, mon gym). Session membre ISOLÉE (`member_session.dart`, REST GoTrue direct : le client Supabase
+    diffuse les connexions aux autres onglets via BroadcastChannel et déconnecterait le personnel).
+  * Membres existants : email + téléphone de la fiche (ou n° de membre si la fiche n'a pas d'email) → mot de passe → lien. Inscription en ligne :
+    case « Créer mon espace membre » dans `/join` → compte créé + demande rattachée → suivi en direct, activé automatiquement quand le gym valide.
+  * PWA : manifest par gym (nom + logo redessiné en PNG carré) généré dans `web/index.html`, bannière « Installer » (Android prompt, iOS instructions).
+  * Propriétaire : page `/member-space` (QR/lien, messages aux membres, comptes activés révocables).
+  * 2e écran d'accès : `openAccessDisplayWindow` ouvre une vraie fenêtre (web `window.open ?display=1`, Windows 2e processus `--access-display`
+    placé/maximisé sur le moniteur secondaire). Décisions transmises instantanément par `AccessDisplayBridge` (BroadcastChannel web / SSE local
+    127.0.0.1:47812 Windows). Fenêtre 2e écran : pas de PIN, pas de déconnexion auto, pas de 2e moteur de sync, confinée à l'écran d'accès ;
+    si la fenêtre principale est fermée elle surveille le terminal elle-même.
+  * Reste à faire côté serveur : appliquer SQL 34 ; ajouter `https://securgym.com/m/*` aux Redirect URLs Supabase Auth (mot de passe oublié).

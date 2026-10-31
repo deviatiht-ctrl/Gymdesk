@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../core/access_control/access_popup_overlay.dart';
+import '../core/access_control/display_bridge.dart';
 import '../core/sync/sync_models.dart';
 import '../core/widgets/async_panel.dart';
 import '../features/admin/presentation/declarations_page.dart';
@@ -27,6 +28,9 @@ import '../features/gyms/presentation/create_gym_page.dart';
 import '../features/members/presentation/member_detail_page.dart';
 import '../features/members/presentation/member_form_page.dart';
 import '../features/members/presentation/members_page.dart';
+import '../features/member_portal/presentation/member_gyms_page.dart';
+import '../features/member_portal/presentation/member_portal_page.dart';
+import '../features/member_portal/presentation/member_space_admin_page.dart';
 import '../features/messaging/presentation/campaigns_page.dart';
 import '../features/onboarding/presentation/language_selection_page.dart';
 import '../features/onboarding/presentation/onboarding_page.dart';
@@ -52,26 +56,33 @@ import 'runtime.dart';
 
 String? _deferredLocation;
 
+/// Routes publiques (sans session personnel) : adhésion en ligne, kiosque,
+/// espace membre (liste des gyms + `/m/<gym>`).
+bool isPublicPath(String path) =>
+    path.startsWith('/join') ||
+    path.startsWith('/portal') ||
+    path.startsWith('/kiosk') ||
+    path.startsWith('/espace-membre') ||
+    path == '/m' ||
+    path.startsWith('/m/');
+
 GoRouter createRouter(AppRuntime runtime) {
   final baseUri = Uri.base;
   final basePath = baseUri.path;
   final baseQuery = baseUri.hasQuery ? '?${baseUri.query}' : '';
-  final isPublicRoute = basePath.startsWith('/join') ||
-      basePath.startsWith('/portal') ||
-      basePath.startsWith('/kiosk');
+  final isPublicRoute = isPublicPath(basePath);
 
   final initialLoc = isPublicRoute ? '$basePath$baseQuery' : '/startup';
+  // Fenêtre « 2e écran » Windows (--access-display) : retour direct sur l'écran d'accès.
+  final displayRoute = AccessDisplayBridge.instance.launchRoute;
+  if (displayRoute != null) _deferredLocation = displayRoute;
 
   return GoRouter(
     initialLocation: initialLoc,
     refreshListenable: runtime,
     redirect: (context, state) {
       final path = state.uri.path;
-      if (path.startsWith('/join') ||
-          path.startsWith('/portal') ||
-          path.startsWith('/kiosk')) {
-        return null;
-      }
+      if (isPublicPath(path)) return null;
     final gate = switch (runtime.phase) {
       SessionPhase.starting => '/startup',
       SessionPhase.signedOut => runtime.onboardingDone
@@ -97,6 +108,10 @@ GoRouter createRouter(AppRuntime runtime) {
       if (runtime.session?.isPlatformAdmin != true) return target;
     }
     if (gate == null && path == _deferredLocation) _deferredLocation = null;
+    // La fenêtre 2e écran (sans PIN) reste confinée à l'affichage d'accès.
+    if (runtime.displayOnly && gate == null && path != '/access-display' && path != '/tablet-access') {
+      return displayRoute ?? '/access-display';
+    }
     if ((path == '/access-display' || path == '/tablet-access') &&
         gate == null &&
         !{'owner', 'supervisor', 'reception'}.contains(runtime.session?.role)) {
@@ -177,6 +192,11 @@ GoRouter createRouter(AppRuntime runtime) {
     if (path.startsWith('/badges') ||
         path.startsWith('/activate') ||
         path.startsWith('/settings/badges')) {
+      return '/';
+    }
+    if (path.startsWith('/member-space') &&
+        (platform ||
+            !{'owner', 'supervisor'}.contains(runtime.session?.role))) {
       return '/';
     }
     if (path.startsWith('/subscriptions/renewals') &&
@@ -277,6 +297,19 @@ GoRouter createRouter(AppRuntime runtime) {
       builder: (context, state) => PortalJoinPage(
         gymCode: (state.pathParameters['code'] ?? '').replaceAll(RegExp(r'/+$'), '').trim(),
         initialKind: state.uri.queryParameters['kind'],
+        createAccount: state.uri.queryParameters['account'] != '0',
+      ),
+    ),
+    GoRoute(
+      path: '/espace-membre',
+      builder: (context, state) => const MemberGymsPage(),
+    ),
+    GoRoute(path: '/m', redirect: (context, state) => '/espace-membre'),
+    GoRoute(
+      path: '/m/:gymId',
+      builder: (context, state) => MemberPortalPage(
+        gymId: (state.pathParameters['gymId'] ?? '').trim(),
+        requestId: state.uri.queryParameters['request'],
       ),
     ),
     GoRoute(
@@ -316,6 +349,10 @@ GoRouter createRouter(AppRuntime runtime) {
         GoRoute(
           path: '/portal-requests',
           builder: (context, state) => const PortalRequestsPage(),
+        ),
+        GoRoute(
+          path: '/member-space',
+          builder: (context, state) => const MemberSpaceAdminPage(),
         ),
         GoRoute(
           path: '/members/:id',
@@ -495,6 +532,7 @@ class _AppShell extends StatelessWidget {
       items.add(const _NavItem('/door_access', 'door_access', LucideIcons.fingerprint));
     }
     if (session?.isOwner == true || session?.isSupervisor == true) {
+      items.add(const _NavItem('/member-space', 'member_space', LucideIcons.smartphone));
       items.add(const _NavItem('/campaigns', 'campaigns', LucideIcons.mail));
     }
     if (session?.canCashier ?? true) {

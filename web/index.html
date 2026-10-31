@@ -30,7 +30,121 @@
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>SecurGYM — Sécurité et gestion de votre gym</title>
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="manifest.json" id="securgym-manifest">
+  <meta name="theme-color" content="#0F766E" id="securgym-theme">
+  <script>
+    // --- Espace membre : installation PWA par gym (logo + nom du gym) ---
+    (function () {
+      var deferred = null;
+      window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; });
+      window.addEventListener('appinstalled', function () { deferred = null; });
+      window.securgymCanInstall = function () { return deferred !== null; };
+      window.securgymPromptInstall = function () {
+        if (!deferred) return Promise.resolve('unavailable');
+        var d = deferred; deferred = null;
+        d.prompt();
+        return d.userChoice.then(function (c) { return c && c.outcome ? c.outcome : 'dismissed'; })
+          .catch(function () { return 'dismissed'; });
+      };
+      window.securgymIsStandalone = function () {
+        return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+      };
+      window.securgymIsIOS = function () {
+        return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      };
+
+      var manifestBlob = null;
+      function applyManifest(name, startPath, icons, color) {
+        var origin = location.origin;
+        var m = {
+          id: startPath, name: name, short_name: name.length > 14 ? name.substring(0, 14) : name,
+          start_url: origin + startPath, scope: origin + '/', display: 'standalone',
+          background_color: '#0B1220', theme_color: color || '#0F766E', orientation: 'portrait',
+          description: name + ' — Espace membre', icons: icons
+        };
+        if (manifestBlob) URL.revokeObjectURL(manifestBlob);
+        manifestBlob = URL.createObjectURL(new Blob([JSON.stringify(m)], { type: 'application/manifest+json' }));
+        document.getElementById('securgym-manifest').setAttribute('href', manifestBlob);
+        document.getElementById('securgym-theme').setAttribute('content', color || '#0F766E');
+        var t = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+        if (t) t.setAttribute('content', m.short_name);
+      }
+      function defaultIcons() {
+        var o = location.origin;
+        return [
+          { src: o + '/icons/Icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: o + '/icons/Icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: o + '/icons/Icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+        ];
+      }
+      // Logo du gym redessiné en carré PNG 192/512 (exigence d'installation Android/iOS).
+      function squareIcon(img, size, bg) {
+        var c = document.createElement('canvas'); c.width = size; c.height = size;
+        var g = c.getContext('2d');
+        g.fillStyle = bg; g.fillRect(0, 0, size, size);
+        var pad = size * 0.12, box = size - pad * 2;
+        var r = Math.min(box / img.naturalWidth, box / img.naturalHeight);
+        var w = img.naturalWidth * r, h = img.naturalHeight * r;
+        g.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        return c.toDataURL('image/png');
+      }
+      window.securgymSetManifest = function (name, startPath, iconUrl, color) {
+        applyManifest(name, startPath, defaultIcons(), color);
+        if (!iconUrl) return;
+        var img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function () {
+          try {
+            var i512 = squareIcon(img, 512, '#FFFFFF'), i192 = squareIcon(img, 192, '#FFFFFF');
+            applyManifest(name, startPath, [
+              { src: i192, sizes: '192x192', type: 'image/png', purpose: 'any' },
+              { src: i512, sizes: '512x512', type: 'image/png', purpose: 'any' },
+              { src: i512, sizes: '512x512', type: 'image/png', purpose: 'maskable' }
+            ], color);
+            var link = document.querySelector('link[rel="apple-touch-icon"]');
+            if (link) link.setAttribute('href', squareIcon(img, 180, '#FFFFFF'));
+          } catch (e) { /* image non CORS : icônes par défaut */ }
+        };
+        img.src = iconUrl;
+      };
+      // Ouverture directe sur /m/<gym> : manifest du gym dès le chargement.
+      var mm = location.pathname.match(/^\/m\/([0-9a-fA-F-]{36})/);
+      if (mm) applyManifest('Espace membre', '/m/' + mm[1], defaultIcons(), '#0F766E');
+    })();
+
+    // --- Contrôle d'accès : 2e écran dans une vraie fenêtre séparée, temps réel ---
+    (function () {
+      var post = null;
+      window.securgymBridgePost = function (msg) {
+        try {
+          if (!post && 'BroadcastChannel' in window) post = new BroadcastChannel('securgym-access-display');
+          if (post) post.postMessage(msg);
+        } catch (e) {}
+      };
+      window.securgymBridgeListen = function (cb) {
+        try {
+          if (!('BroadcastChannel' in window)) return false;
+          var ch = new BroadcastChannel('securgym-access-display');
+          ch.onmessage = function (e) { cb(String(e.data)); };
+          return true;
+        } catch (e) { return false; }
+      };
+      window.securgymOpenWindow = function (url, name) {
+        var w = window.open(url, name, 'popup=yes,width=1280,height=800,left=60,top=40');
+        if (!w) return false;
+        try { w.focus(); } catch (e) {}
+        // Écran secondaire détecté (Chrome/Edge) : la fenêtre s'y place en plein écran.
+        if ('getScreenDetails' in window) {
+          window.getScreenDetails().then(function (d) {
+            var s = d.screens.filter(function (x) { return x !== d.currentScreen; })[0];
+            if (s && !w.closed) { w.moveTo(s.availLeft, s.availTop); w.resizeTo(s.availWidth, s.availHeight); }
+          }).catch(function () {});
+        }
+        return true;
+      };
+      window.securgymCloseWindow = function () { try { window.close(); } catch (e) {} };
+    })();
+  </script>
 </head>
 <body>
   <!--

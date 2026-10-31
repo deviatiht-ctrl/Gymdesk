@@ -6,6 +6,7 @@ import '../../app/runtime.dart';
 import '../biometrics/access_agent_client.dart';
 import '../biometrics/agent_launcher.dart';
 import '../sync/sync_models.dart';
+import 'display_bridge.dart';
 import 'terminal_access_service.dart';
 
 /// Yon sèl siveyan tèminal W2 pou tout app la (Windows Desktop ak Web sou PC resepsyon).
@@ -74,6 +75,11 @@ class AccessMonitor {
     }
 
     unawaited(_initConnection(runtime));
+    // Fenêtre « 2e écran » séparée : reçoit chaque décision instantanément.
+    unawaited(AccessDisplayBridge.instance.startHost(
+      agentOnline: () => agentOnline.value,
+      terminalOnline: () => terminalOnline.value,
+    ));
     _syncTimer = Timer.periodic(
       const Duration(minutes: 5),
       (_) => unawaited(syncNow()),
@@ -93,6 +99,7 @@ class AccessMonitor {
   }
 
   void stop() {
+    if (_events != null) AccessDisplayBridge.instance.stopHost();
     _events?.cancel();
     _events = null;
     for (final sub in _dbSubs) {
@@ -177,7 +184,9 @@ class AccessMonitor {
     final service = _service;
     if (service == null) return;
     final decision = await service.handleTerminalEvent(event, config);
-    if (decision != null && !_decisions.isClosed) _decisions.add(decision);
+    if (decision == null) return;
+    AccessDisplayBridge.instance.publishDecision(decision);
+    if (!_decisions.isClosed) _decisions.add(decision);
   }
 
   Future<void> _relaunch() async {

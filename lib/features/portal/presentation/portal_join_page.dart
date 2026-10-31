@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:printing/printing.dart';
@@ -11,14 +12,18 @@ import 'package:uuid/uuid.dart';
 
 import '../../../app/providers.dart';
 import '../../../l10n/app_strings.dart';
+import '../../member_portal/data/member_portal_repository.dart';
+import '../../member_portal/data/member_session.dart';
+import '../../member_portal/presentation/member_ui.dart' show memberAuthError;
 import '../../payments/data/receipt_pdf.dart';
 import '../data/portal_repository.dart';
 
 class PortalJoinPage extends ConsumerStatefulWidget {
-  const PortalJoinPage({super.key, required this.gymCode, this.initialKind});
+  const PortalJoinPage({super.key, required this.gymCode, this.initialKind, this.createAccount = true});
 
   final String gymCode;
   final String? initialKind;
+  final bool createAccount;
 
   @override
   ConsumerState<PortalJoinPage> createState() => _PortalJoinPageState();
@@ -32,6 +37,10 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
   final _notesController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  late bool _createAccount = widget.createAccount;
+  bool _obscurePassword = true;
 
   bool _loadingGym = true;
   String? _loadError;
@@ -242,6 +251,22 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
       return;
     }
 
+    final wantsAccount = _createAccount && _kind == 'new_membership';
+    if (wantsAccount) {
+      if (email.isEmpty) {
+        setState(() => _formError = 'Entrez votre email pour créer votre espace membre (ou décochez l’option).');
+        return;
+      }
+      if (_passwordController.text.length < 8) {
+        setState(() => _formError = 'Mot de passe : 8 caractères minimum.');
+        return;
+      }
+      if (_passwordController.text != _confirmController.text) {
+        setState(() => _formError = 'Les deux mots de passe ne correspondent pas.');
+        return;
+      }
+    }
+
     setState(() {
       _isSubmitting = true;
       _formError = null;
@@ -261,6 +286,27 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
       );
 
       final reqId = res['request_id'] as String? ?? _sessionCode;
+      final gymId = _gym?['id']?.toString();
+      if (wantsAccount && gymId != null && res['request_id'] is String) {
+        // Compte membre créé tout de suite : la personne suit son inscription en
+        // direct dans son espace, activé dès que le gym valide.
+        try {
+          await MemberAuth.instance.signUpOrSignIn(email, _passwordController.text);
+          await MemberPortalRepository().attachRequest(reqId);
+          try {
+            await _storage.delete(key: _draftStorageKey);
+          } catch (_) {}
+          if (mounted) context.go('/m/$gymId?request=$reqId');
+          return;
+        } on MemberAuthException catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Demande envoyée, mais compte non créé : ${memberAuthError(e.code)}'),
+              duration: const Duration(seconds: 8),
+            ));
+          }
+        }
+      }
       final savedPayload = {
         'request_id': reqId,
         'first_name': fn,
@@ -635,6 +681,8 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
     _phoneController.dispose();
     _emailController.dispose();
     _notesController.dispose();
+    _passwordController.dispose();
+    _confirmController.dispose();
     super.dispose();
   }
 
@@ -1617,6 +1665,10 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
             border: OutlineInputBorder(),
           ),
         ),
+        if (_kind == 'new_membership') ...[
+          const SizedBox(height: 16),
+          _buildAccountSection(),
+        ],
         const SizedBox(height: 8),
         Row(
           children: [
@@ -1653,6 +1705,69 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildAccountSection() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0FDFA),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF99F6E4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _createAccount,
+            activeThumbColor: const Color(0xFF0F766E),
+            onChanged: (v) => setState(() => _createAccount = v),
+            title: const Text('Créer mon espace membre',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF134E4A))),
+            subtitle: const Text(
+              'Suivez votre inscription en direct, puis votre abonnement, vos visites et les messages du gym. Installable sur votre téléphone.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF115E59)),
+            ),
+          ),
+          if (_createAccount) ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: _passwordController,
+              obscureText: _obscurePassword,
+              autofillHints: const [AutofillHints.newPassword],
+              decoration: InputDecoration(
+                labelText: 'Mot de passe (8 caractères min.) *',
+                prefixIcon: const Icon(LucideIcons.lock, size: 18),
+                suffixIcon: IconButton(
+                  icon: Icon(_obscurePassword ? LucideIcons.eye : LucideIcons.eyeOff, size: 18),
+                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                ),
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _confirmController,
+              obscureText: _obscurePassword,
+              autofillHints: const [AutofillHints.newPassword],
+              decoration: const InputDecoration(
+                labelText: 'Confirmer le mot de passe *',
+                prefixIcon: Icon(LucideIcons.lockKeyhole, size: 18),
+                border: OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text('L’email ci-dessus sera votre identifiant de connexion.',
+                style: TextStyle(fontSize: 11.5, color: Color(0xFF115E59))),
+          ],
+        ],
+      ),
     );
   }
 }

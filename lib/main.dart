@@ -8,13 +8,15 @@ import 'package:timezone/data/latest.dart' as tz;
 import 'app/env.dart';
 import 'app/gym_desk_app.dart';
 import 'app/theme.dart';
+import 'core/access_control/display_bridge.dart';
 import 'core/auth/secure_session_storage.dart';
 import 'core/biometrics/agent_launcher.dart';
 import 'core/widgets/async_panel.dart';
 import 'l10n/app_strings.dart';
 
-void main() {
+void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
+  AccessDisplayBridge.instance.setLaunchArgs(args);
   tz.initializeTimeZones();
   unawaited(ensureAccessAgentRunning());
   runApp(const ProviderScope(child: _Bootstrap()));
@@ -31,9 +33,20 @@ class _BootstrapState extends State<_Bootstrap> {
   bool _passwordRecovery = false;
   String? _initialRecoveryToken;
 
+  // Espace membre : son lien « mot de passe oublié » est traité par la page membre,
+  // jamais par la session du personnel.
+  static bool get _memberRoute {
+    final path = Uri.base.path;
+    return path.startsWith('/m/') || path.startsWith('/espace-membre');
+  }
+
   @override
   void initState() {
     super.initState();
+    if (_memberRoute) {
+      _ready = _initialize();
+      return;
+    }
     try {
       final parameters = Uri.splitQueryString(Uri.base.fragment);
       if (parameters['type'] == 'recovery') {
@@ -53,6 +66,7 @@ class _BootstrapState extends State<_Bootstrap> {
       debug: false,
       authOptions: FlutterAuthClientOptions(
         localStorage: SecureSessionStorage(Uri.parse(AppEnv.supabaseUrl).host),
+        detectSessionInUri: !_memberRoute,
       ),
     );
     _passwordRecovery =
