@@ -731,6 +731,9 @@ class _GymDetailPageState extends ConsumerState<GymDetailPage> {
     }
     final period = c['billing_period'] as String?;
     final expires = c['expires_at'] as String?;
+    final snapshot = c['price_snapshot'];
+    final paid = snapshot is Map ? snapshot['price'] : snapshot;
+    final paidCurrency = (snapshot is Map ? snapshot['currency'] : null) ?? c['offer_currency'] ?? '';
     return _card('${s.text('contract')} & ${s.text('offer')}', LucideIcons.fileText, [
       _row(s.text('offer'), c['offer_name'] as String? ?? '—'),
       _row(
@@ -746,7 +749,7 @@ class _GymDetailPageState extends ConsumerState<GymDetailPage> {
       ),
       _row(
         s.text('amount_paid'),
-        '${(c['price_snapshot'] as num?)?.toStringAsFixed(0) ?? '—'} ${c['offer_currency'] ?? ''}',
+        '${paid is num ? paid.toStringAsFixed(0) : '—'} $paidCurrency',
       ),
     ]);
   }

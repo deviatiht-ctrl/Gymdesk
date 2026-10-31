@@ -760,7 +760,7 @@ class _AppShell extends StatelessWidget {
                     child: platform
                         ? SecurGymBackground(
                             overlayColor: scaffold,
-                            overlayOpacity: 0.90,
+                            overlayOpacity: 0.6,
                             useSafeArea: false,
                             child: child,
                           )
