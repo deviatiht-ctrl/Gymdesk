@@ -132,18 +132,25 @@ async function readJson(request: Request): Promise<Json> {
   try { return object(JSON.parse(new TextDecoder().decode(data))); } catch { throw new ApiError('invalid_record'); }
 }
 
+const devOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+export function originAllowed(origin: string | null, allowedOrigins: ReadonlySet<string>): boolean {
+  if (!origin) return true;
+  return allowedOrigins.has(origin) || devOriginPattern.test(origin);
+}
+
 export function authorizedHandler(gateway: Pick<PlatformGateway, 'actor'>, allowedOrigins: ReadonlySet<string>, handle: (input: Json, actor: string) => Promise<Json>) {
   return async (request: Request): Promise<Response> => {
     const origin = request.headers.get('Origin');
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' };
-    if (origin && allowedOrigins.has(origin)) {
+    if (origin && originAllowed(origin, allowedOrigins)) {
       headers['Access-Control-Allow-Origin'] = origin;
       headers['Access-Control-Allow-Headers'] = 'authorization, apikey, content-type, x-client-info';
       headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS';
     }
     const reply = (body: Json, status = 200) => new Response(JSON.stringify(body), { status, headers });
     try {
-      if (origin && !allowedOrigins.has(origin)) throw new ApiError('origin_denied', 403);
+      if (!originAllowed(origin, allowedOrigins)) throw new ApiError('origin_denied', 403);
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
       if (request.method !== 'POST') throw new ApiError('method_not_allowed', 405);
       const bearer = request.headers.get('Authorization');

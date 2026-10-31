@@ -200,3 +200,14 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
   * Fiche membre (`/members/<id>`) : carte « Espace membre » avec statut du compte + création/réinitialisation du mot de passe.
   * Dashboard membre : 5 onglets (ajout **Messages** en temps réel) ; onglet Profil : « Modifier mon profil » (photo téléversée,
     naissance, sexe, téléphones, urgence…) et « Mot de passe » (GoTrue direct).
+
+- 2026-10-30 — Déploiement Supabase + correctif « Connexion Internet indisponible » sur l'accès membre.
+  * Déployé via Management API/CLI : `34_member_portal.sql` appliqué en intégralité (`member_messages`, RPCs messages/profil/`my_gyms`),
+    Edge Function `manage_member_account` ACTIVE (verify_jwt, 401 sans token), Redirect URLs Auth (`securgym.com/m/*`, `www.securgym.com`,
+    localhost), `member_messages` dans la publication Realtime. Toutes les tables/colonnes/fonctions 01→34 vérifiées présentes.
+  * Cause réelle du faux « Connexion Internet indisponible » : `client.functions.invoke` lève `FunctionException` pour toute réponse
+    non-2xx (origin_denied, shared_account, weak_password…) et le client la masquait en « network ». `member_account_admin._invoke`
+    lit désormais `FunctionException.details.error` et remonte le vrai code (+ libellé `origin_denied`).
+  * `authorizedHandler` autorise désormais les origines `localhost`/`127.0.0.1` (tous ports) pour le dev, en plus de
+    `GYMDESK_ALLOWED_ORIGINS`. ⚠️ Pour la production : définir le secret `GYMDESK_ALLOWED_ORIGINS=https://securgym.com,https://www.securgym.com`
+    dans Edge Functions → Secrets (sans lui, tout appel navigateur → `origin_denied`). Redéployer la fonction après ce commit.

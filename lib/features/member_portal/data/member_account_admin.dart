@@ -52,6 +52,18 @@ class MemberAccountAdmin {
     FunctionResponse res;
     try {
       res = await client.functions.invoke('manage_member_account', body: body);
+    } on FunctionException catch (e) {
+      // invoke lève pour toute réponse non-2xx : récupérer le vrai code
+      // d'erreur du corps JSON plutôt que masquer en « network ».
+      final details = e.details;
+      if (e.status == 404) throw const MemberAccountException('function_missing');
+      if (details is Map && details['error'] is String) {
+        throw MemberAccountException(details['error'] as String);
+      }
+      throw MemberAccountException(switch (e.status) {
+        401 || 403 => 'access_denied',
+        _ => 'error_${e.status}',
+      });
     } catch (_) {
       throw const MemberAccountException('network');
     }
@@ -80,6 +92,8 @@ String memberAccountError(String code) => switch (code) {
       'email_required' => 'Un email valide est requis pour créer l’accès.',
       'weak_password' => 'Mot de passe trop faible (8 caractères minimum).',
       'access_denied' => 'Action réservée au personnel de ce gym.',
+      'origin_denied' =>
+        'Domaine non autorisé par le serveur : ajoutez https://securgym.com à GYMDESK_ALLOWED_ORIGINS dans les secrets des Edge Functions.',
       'rate_limited' => 'Trop de demandes. Patientez quelques minutes.',
       'network' => 'Connexion Internet indisponible. Réessayez.',
       _ => 'Une erreur est survenue. Réessayez.',
