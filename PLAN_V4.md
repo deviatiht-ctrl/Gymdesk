@@ -181,3 +181,7 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
     127.0.0.1:47812 Windows). Fenêtre 2e écran : pas de PIN, pas de déconnexion auto, pas de 2e moteur de sync, confinée à l'écran d'accès ;
     si la fenêtre principale est fermée elle surveille le terminal elle-même.
   * Reste à faire côté serveur : appliquer SQL 34 ; ajouter `https://securgym.com/m/*` aux Redirect URLs Supabase Auth (mot de passe oublié).
+  * Correction (même jour) : la liste des gyms est sur la PAGE DE CONNEXION (`login_page.dart`) : laptop ≥ 960 px = 2 colonnes
+    (`MemberGymsPanel` | carte de connexion), mobile = onglets « Propriétaire / Personnel » | « Espace membre ». `/espace-membre` ouvre
+    la même page sur l'onglet membre. Bouton « Se connecter en tant que membre » → `/espace-membre/connexion` (`member_login_page.dart`,
+    RPC `member_portal_my_gyms` ajoutée à SQL 34) : ouvre directement le gym du membre ou propose le choix.

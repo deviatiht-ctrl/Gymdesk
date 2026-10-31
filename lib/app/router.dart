@@ -28,7 +28,7 @@ import '../features/gyms/presentation/create_gym_page.dart';
 import '../features/members/presentation/member_detail_page.dart';
 import '../features/members/presentation/member_form_page.dart';
 import '../features/members/presentation/members_page.dart';
-import '../features/member_portal/presentation/member_gyms_page.dart';
+import '../features/member_portal/presentation/member_login_page.dart';
 import '../features/member_portal/presentation/member_portal_page.dart';
 import '../features/member_portal/presentation/member_space_admin_page.dart';
 import '../features/messaging/presentation/campaigns_page.dart';
@@ -302,7 +302,11 @@ GoRouter createRouter(AppRuntime runtime) {
     ),
     GoRoute(
       path: '/espace-membre',
-      builder: (context, state) => const MemberGymsPage(),
+      builder: (context, state) => const LoginPage(memberFirst: true),
+    ),
+    GoRoute(
+      path: '/espace-membre/connexion',
+      builder: (context, state) => const MemberLoginPage(),
     ),
     GoRoute(path: '/m', redirect: (context, state) => '/espace-membre'),
     GoRoute(

@@ -20,6 +20,14 @@ class MemberPortalRepository {
         .toList();
   }
 
+  /// Gyms du membre connecté (compte lié ou inscription en cours).
+  Future<List<Map<String, dynamic>>> myGyms() async {
+    final res = await _client.rpc('member_portal_my_gyms');
+    return (res as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
   Future<Map<String, dynamic>?> gym(String gymId) async {
     final res = await _client.rpc('member_portal_gym', params: {'p_gym': gymId});
     final map = Map<String, dynamic>.from(res as Map? ?? const {});

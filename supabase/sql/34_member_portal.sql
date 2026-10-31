@@ -627,6 +627,27 @@ $$;
 revoke all on function public.member_portal_request_renewal(uuid, uuid) from public, anon;
 grant execute on function public.member_portal_request_renewal(uuid, uuid) to authenticated;
 
+-- Connexion membre « sans choisir de gym » : gyms liés au compte (ou inscription en cours).
+create or replace function public.member_portal_my_gyms()
+returns jsonb language sql stable security definer set search_path = '' as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', g.id, 'name', g.name, 'logo_url', g.logo_url, 'address', g.address,
+    'accent_color', g.accent_color, 'state', x.state) order by lower(g.name)), '[]'::jsonb)
+  from (
+    select ma.gym_id, 'member'::text as state from public.member_accounts ma where ma.user_id = auth.uid()
+    union
+    select r.gym_id, 'pending'::text from public.portal_requests r
+    where r.auth_user_id = auth.uid() and r.status <> 'rejected'
+      and not exists (select 1 from public.member_accounts ma
+                      where ma.user_id = auth.uid() and ma.gym_id = r.gym_id)
+  ) x
+  join public.gyms g on g.id = x.gym_id
+  where auth.uid() is not null and g.deleted_at is null and g.status in ('active', 'trial', 'grace')
+$$;
+
+revoke all on function public.member_portal_my_gyms() from public, anon;
+grant execute on function public.member_portal_my_gyms() to authenticated;
+
 notify pgrst, 'reload schema';
 
 commit;

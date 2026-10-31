@@ -28,7 +28,7 @@ begin
           (member_other, other_gym, 'OTG-1', md5(random()::text) || md5(random()::text), 'Marie', 'Jean', 'marie@example.invalid', '37112233', null),
           (member_noemail, gym, 'MPG-2', md5(random()::text) || md5(random()::text), 'Paul', 'Noel', null, '3400 1122', null);
   insert into public.subscriptions(id, gym_id, member_id, plan_id, start_date, end_date, price, status)
-    values(sub, gym, member, plan, current_date - 5, current_date + 24, 1500, 'active');
+    values(sub, gym, member, plan, public.mp_today(gym) - 5, public.mp_today(gym) + 24, 1500, 'active');
   insert into public.payments(id, gym_id, member_id, subscription_id, amount, currency, method, paid_at)
     values(pay, gym, member, sub, 1000, 'HTG', 'cash', clock_timestamp());
   insert into public.attendance(gym_id, member_id, scanned_at, result)
@@ -133,6 +133,13 @@ begin
   execute 'set local role authenticated';
   v := public.member_portal_me(gym);
   if jsonb_array_length(v->'announcements') <> 1 or v->'announcements'->0->>'title' <> 'Fermé lundi' then raise exception 'FAIL announcements %', v->'announcements'; end if;
+  -- Generic member login: only the gyms of this account.
+  v := public.member_portal_my_gyms();
+  if jsonb_array_length(v) <> 1 or (v->0->>'id')::uuid <> gym or v->0->>'state' <> 'member' then raise exception 'FAIL my gyms %', v; end if;
+  execute 'reset role';
+  perform set_config('request.jwt.claim.sub', intruder_user::text, true);
+  execute 'set local role authenticated';
+  if jsonb_array_length(public.member_portal_my_gyms()) <> 0 then raise exception 'FAIL intruder my gyms'; end if;
   execute 'reset role';
 
   raise notice 'member portal tests passed';
