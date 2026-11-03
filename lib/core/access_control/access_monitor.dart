@@ -81,7 +81,7 @@ class AccessMonitor {
       terminalOnline: () => terminalOnline.value,
     ));
     _syncTimer = Timer.periodic(
-      const Duration(minutes: 5),
+      const Duration(minutes: 1),
       (_) => unawaited(syncNow()),
     );
   }

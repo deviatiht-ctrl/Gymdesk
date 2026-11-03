@@ -97,11 +97,11 @@ class SyncEngine {
     remote.listen(db.gymId, () {
       _debounce?.cancel();
       _debounce = Timer(
-        const Duration(milliseconds: 500),
+        const Duration(milliseconds: 250),
         () => unawaited(synchronize()),
       );
     });
-    _timer = Timer.periodic(const Duration(seconds: 60), (_) {
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!session.offlineAllowed(clock.correctedNow)) {
         _emit(SyncPhase.blocked, 'offline_expired');
       }

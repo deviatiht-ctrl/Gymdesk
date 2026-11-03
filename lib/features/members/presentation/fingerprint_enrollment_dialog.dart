@@ -22,8 +22,8 @@ class FingerprintEnrollmentDialog extends ConsumerStatefulWidget {
         subtitle = null,
         onCaptured = null;
 
-  /// Menm popup 3 kapti a, pou lòt moun pase manm (ex. anplwaye yo):
-  /// [onCaptured] resevwa 3 kapti yo (menm dwèt, verifye) epi anrejistre yo.
+  /// Menm popup anrejistreman an, pou lòt moun pase manm (ex. anplwaye yo):
+  /// [onCaptured] resevwa kapti yo epi anrejistre yo.
   const FingerprintEnrollmentDialog.generic({
     super.key,
     required String this.displayName,
@@ -79,7 +79,9 @@ class FingerprintEnrollmentDialog extends ConsumerStatefulWidget {
 
 class _FingerprintEnrollmentDialogState
     extends ConsumerState<FingerprintEnrollmentDialog> {
-  int _currentStep = 1; // 1, 2, 3
+  /// Yon sèl kapti (bon kalite) ase: anrejistreman an rapid (< 5 s).
+  static const int _required = 1;
+  int _currentStep = 1;
   final List<String> _captures = [];
   bool _busy = false;
   String _hint = '';
@@ -103,11 +105,9 @@ class _FingerprintEnrollmentDialogState
 
   void _updateHint() {
     setState(() {
-      _hint = switch (_currentStep) {
-        1 => 'Poze dwèt la sou lektè a (Kapti 1/3)',
-        2 => 'Retire dwèt la epi repoze l ankò (Kapti 2/3)',
-        _ => 'Repoze l yon dènye fwa pou konfimasyon (Kapti 3/3)',
-      };
+      _hint = _required == 1
+          ? 'Poze dwèt la byen plat sou lektè a'
+          : 'Poze dwèt la sou lektè a (Kapti $_currentStep/$_required)';
     });
   }
 
@@ -125,7 +125,7 @@ class _FingerprintEnrollmentDialogState
   Future<void> _processCapture(String template) async {
     if (_captures.length >= _currentStep) return;
 
-    // Kapti 2 ak 3 dwe matche ak premye a (menm dwèt).
+    // Lè gen plizyè kapti, yo dwe matche ak premye a (menm dwèt).
     if (_captures.isNotEmpty) {
       final bio = ref.read(biometricServiceProvider);
       final res = await bio.match1to1(
@@ -135,25 +135,25 @@ class _FingerprintEnrollmentDialogState
       if (!mounted) return;
       if (!res.isMatch) {
         setState(() => _hint =
-            'Anprent sa a pa koresponn ak premye a. Itilize menm dwèt la (Kapti $_currentStep/3).');
+            'Anprent sa a pa koresponn ak premye a. Itilize menm dwèt la (Kapti $_currentStep/$_required).');
         return;
       }
     }
 
     setState(() {
       _captures.add(template);
-      if (_currentStep < 3) {
+      if (_captures.length < _required) {
         _currentStep++;
         _updateHint();
       } else {
-        _hint = 'Tout 3 kapti yo fin fèt! Ap anrejistre...';
+        _hint = 'Anprent kaptire! Ap anrejistre...';
         _saveEnrollment();
       }
     });
   }
 
   Future<void> _saveEnrollment() async {
-    if (_captures.length < 3) return;
+    if (_captures.length < _required) return;
     setState(() => _busy = true);
 
     final template = _captures.last; // Final validated template
@@ -294,13 +294,12 @@ class _FingerprintEnrollmentDialogState
             ),
             const SizedBox(height: 24),
 
-            // 3-Step Circles Progress Indicator
-            Row(
+            if (_required > 1) Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                for (var step = 1; step <= 3; step++) ...[
+                for (var step = 1; step <= _required; step++) ...[
                   _buildStepIndicator(step),
-                  if (step < 3)
+                  if (step < _required)
                     Container(
                       width: 40,
                       height: 3,
@@ -311,7 +310,7 @@ class _FingerprintEnrollmentDialogState
                 ],
               ],
             ),
-            const SizedBox(height: 24),
+            if (_required > 1) const SizedBox(height: 24),
 
             // Fingerprint Visual Icon
             AnimatedContainer(
@@ -331,7 +330,7 @@ class _FingerprintEnrollmentDialogState
                 ),
               ),
               child: Icon(
-                _captures.length == 3
+                _captures.length >= _required
                     ? LucideIcons.circleCheck
                     : LucideIcons.fingerprint,
                 size: 56,

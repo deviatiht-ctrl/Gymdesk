@@ -2338,9 +2338,9 @@ class AppStrings {
       'USB Reader Disconnected or Unsupported',
     ],
     'enroll_fingerprint': [
-      'Anrejistre Anprent (3 Kapti)',
-      'Enregistrer empreinte (3 captures)',
-      'Enroll Fingerprint (3 captures)',
+      'Anrejistre Anprent',
+      'Enregistrer empreinte',
+      'Enroll Fingerprint',
     ],
     'fingerprint_registered': [
       'Anprent anrejistre',
