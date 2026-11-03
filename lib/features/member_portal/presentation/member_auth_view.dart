@@ -24,6 +24,7 @@ class _MemberAuthViewState extends State<MemberAuthView> {
   final _phone = TextEditingController();
   final _number = TextEditingController();
   bool _activate = false;
+  bool _phoneMode = true;
   bool _needNumber = false;
   bool _busy = false;
   bool _obscure = true;
@@ -67,6 +68,69 @@ class _MemberAuthViewState extends State<MemberAuthView> {
         await MemberAuth.instance.signIn(_email.text, _password.text);
         widget.onSignedIn();
       });
+
+  Future<void> _phoneLogin() => _run(() async {
+        if (_phone.text.replaceAll(RegExp(r'\D'), '').length < 8) {
+          throw const MemberAuthException('invalid_phone');
+        }
+        try {
+          await MemberAuth.instance.signInWithPhone(_gymId, _phone.text);
+        } on MemberAuthException catch (e) {
+          throw MemberAuthException(e.code == 'not_found' ? 'phone_not_found' : e.code);
+        }
+        widget.onSignedIn();
+      });
+
+  Widget _phoneView() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text(
+          'Membre de ${widget.gym['name']} ? Entrez le numéro de téléphone de votre fiche.',
+          style: const TextStyle(color: memberMuted, fontSize: 13, height: 1.4),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          controller: _phone,
+          keyboardType: TextInputType.phone,
+          autofillHints: const [AutofillHints.telephoneNumber],
+          decoration: _deco('Numéro de téléphone', LucideIcons.phone, hint: '+509 3700 0000'),
+          onSubmitted: (_) => _busy ? null : _phoneLogin(),
+        ),
+        if (_error != null) ...[const SizedBox(height: 14), ErrorBox(_error!)],
+        const SizedBox(height: 18),
+        SizedBox(
+          height: 52,
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: _accent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: _busy ? null : _phoneLogin,
+            child: _busy
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Entrer dans mon espace', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+          ),
+        ),
+        TextButton(
+          onPressed: _busy ? null : () => setState(() => _setPhoneMode(false)),
+          child: const Text('Se connecter avec email et mot de passe'),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            foregroundColor: _accent,
+            side: BorderSide(color: _accent),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          ),
+          onPressed: () => context.go('/join/$_gymId?account=1'),
+          icon: const Icon(LucideIcons.userPlus, size: 18),
+          label: const Text('S’inscrire en ligne', style: TextStyle(fontWeight: FontWeight.w700)),
+        ),
+      ]);
+
+  void _setPhoneMode(bool value) {
+    _phoneMode = value;
+    _error = null;
+  }
 
   Future<void> _activateAccount() => _run(() async {
         final email = _email.text.trim();
@@ -122,6 +186,7 @@ class _MemberAuthViewState extends State<MemberAuthView> {
 
   @override
   Widget build(BuildContext context) {
+    if (_phoneMode) return AutofillGroup(child: _phoneView());
     final eye = IconButton(
       icon: Icon(_obscure ? LucideIcons.eye : LucideIcons.eyeOff, size: 18),
       onPressed: () => setState(() => _obscure = !_obscure),
@@ -211,6 +276,10 @@ class _MemberAuthViewState extends State<MemberAuthView> {
         ),
         if (!_activate)
           TextButton(onPressed: _busy ? null : _forgot, child: const Text('Mot de passe oublié ?')),
+        TextButton(
+          onPressed: _busy ? null : () => setState(() => _setPhoneMode(true)),
+          child: const Text('Se connecter avec mon numéro de téléphone'),
+        ),
         const SizedBox(height: 10),
         const Row(children: [
           Expanded(child: Divider()),

@@ -150,6 +150,38 @@ class MemberAuth extends ChangeNotifier {
     throw _error(res, fallback: 'invalid_credentials');
   }
 
+  /// Connexion avec le numéro de téléphone de la fiche membre seulement :
+  /// l'Edge Function member_phone_login renvoie un jeton à usage unique.
+  /// Renvoie le prénom du membre.
+  Future<String> signInWithPhone(String gymId, String phone) async {
+    http.Response res;
+    try {
+      res = await http
+          .post(
+            Uri.parse('${AppEnv.supabaseUrl}/functions/v1/member_phone_login'),
+            headers: {..._headers, 'Authorization': 'Bearer ${AppEnv.supabaseKey}'},
+            body: jsonEncode({'gym_id': gymId, 'phone': phone}),
+          )
+          .timeout(const Duration(seconds: 25));
+    } catch (_) {
+      throw const MemberAuthException('network');
+    }
+    Map<String, dynamic> body;
+    try {
+      body = jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw const MemberAuthException('network');
+    }
+    final status = (body['status'] ?? body['error'] ?? '').toString();
+    if (status != 'ok' || body['token_hash'] is! String) {
+      throw MemberAuthException(status.isEmpty ? 'network' : status);
+    }
+    final verify = await _post('/verify', {'type': 'magiclink', 'token_hash': body['token_hash']});
+    if (verify.statusCode != 200) throw _error(verify, fallback: 'phone_login_failed');
+    await _save(MemberSessionData.fromGoTrue(jsonDecode(verify.body) as Map<String, dynamic>));
+    return body['first_name']?.toString() ?? '';
+  }
+
   /// Crée le compte (confirmation email automatique côté projet). Si l'email a déjà
   /// un compte (membre d'un autre gym, ou propriétaire), on tente la connexion avec
   /// le mot de passe saisi.

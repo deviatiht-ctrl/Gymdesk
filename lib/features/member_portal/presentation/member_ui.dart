@@ -48,6 +48,10 @@ String memberAuthError(String code) => switch (code) {
         'Votre fiche n’a pas d’email : entrez votre numéro de membre (sur votre reçu) pour confirmer votre identité.',
       'already_linked' => 'Ce membre a déjà un compte. Connectez-vous ou utilisez « Mot de passe oublié ».',
       'gym_not_found' => 'Ce gym n’est pas disponible.',
+      'phone_not_found' =>
+        'Aucun membre actif de ce gym n’a ce numéro. Vérifiez le numéro donné à l’accueil.',
+      'invalid_phone' => 'Entrez votre numéro de téléphone (8 chiffres minimum).',
+      'phone_login_failed' => 'Connexion impossible. Réessayez.',
       'reset_failed' => 'Impossible d’envoyer l’email de réinitialisation.',
       'password_update_failed' => 'Impossible de changer le mot de passe.',
       _ => 'Une erreur est survenue. Réessayez.',
