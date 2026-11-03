@@ -57,6 +57,8 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetFingerprintConfig(IntPtr context, uint deviceId, IntPtr config);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_SetFingerprintConfig(IntPtr context, uint deviceId, IntPtr config);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetUserDatas(IntPtr context, uint deviceId, IntPtr uids, uint uidCount, [In, Out] BS2UserBlob[] userBlobs, uint userMask);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_RemoveUser(IntPtr context, uint deviceId, IntPtr uids, uint uidCount);
@@ -804,6 +806,7 @@ static class Program
         }
         Console.WriteLine("watching\t" + id + "\tdoor=" + doorId);
         Console.WriteLine("standalone\t" + EnsureStandalone(id).Replace('\t', ' '));
+        Console.WriteLine("fpconfig\t" + EnsureFingerConfig(id).Replace('\t', ' '));
         Console.Out.Flush();
         Console.Error.WriteLine("[watch] Siveyan aktive" + (seconds > 0 ? " pandan " + seconds + "s" : "") + " — eskane dwèt la sou W2 a kounye a...");
         var started = DateTime.UtcNow;
@@ -832,8 +835,8 @@ static class Program
             {
                 lastStandalone = DateTime.UtcNow;
                 string fix;
-                lock (cmdLock) { fix = EnsureStandalone(id); }
-                if (fix.StartsWith("ok\tfixed")) { Console.WriteLine("standalone\t" + fix.Replace('\t', ' ')); Console.Out.Flush(); }
+                lock (cmdLock) { fix = EnsureStandalone(id) + " | " + EnsureFingerConfig(id); }
+                if (fix.Contains("fixed")) { Console.WriteLine("standalone\t" + fix.Replace('\t', ' ')); Console.Out.Flush(); }
             }
             if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 20)
             {
@@ -1191,6 +1194,51 @@ static class Program
         finally { Marshal.FreeHGlobal(buf); }
     }
 
+    // BS2FingerprintConfig (48 bytes): securityLevel @0 | fastMode @1 | sensitivity @2 |
+    // sensorMode @3 (0=ALWAYS_ON, 1=PROXIMITY) | templateFormat @4 | scanTimeout @6 (u16) |
+    // successiveScan @8 | advancedEnrollment @9 | showImage @10 | lfdLevel @11 | checkDuplicate @12.
+    // Mòd PROXIMITY: premye kontak la sèlman reveye kaptè a -> moun nan oblije
+    // mete dwèt li 2 fwa. LFD (fo dwèt) ka rejte premye eseye a tou.
+    // Nou fòse: kaptè toujou limen, LFD etenn, sansiblite maks, sekirite NORMAL.
+    // templateFormat PA chanje (sa ta kraze anprent ki deja sou W2 a).
+    static string EnsureFingerConfig(uint id)
+    {
+        var buf = Marshal.AllocHGlobal(64);
+        try
+        {
+            for (var i = 0; i < 64; i++) Marshal.WriteByte(buf, i, 0);
+            var rc = Native.BS2_GetFingerprintConfig(ctx, id, buf);
+            if (rc < 0) return "err\tfpconfig\tGetFingerprintConfig: " + rc;
+            var before = "security=" + Marshal.ReadByte(buf, 0) + " fast=" + Marshal.ReadByte(buf, 1)
+                + " sensitivity=" + Marshal.ReadByte(buf, 2) + " sensorMode=" + Marshal.ReadByte(buf, 3)
+                + " lfd=" + Marshal.ReadByte(buf, 11) + " scanTimeout=" + (ushort)Marshal.ReadInt16(buf, 6);
+            var ok = Marshal.ReadByte(buf, 0) == 0 && Marshal.ReadByte(buf, 2) == 7
+                && Marshal.ReadByte(buf, 3) == 0 && Marshal.ReadByte(buf, 11) == 0;
+            if (ok) return "ok\tfpconfig\t" + before;
+            Marshal.WriteByte(buf, 0, 0);   // NORMAL
+            Marshal.WriteByte(buf, 2, 7);   // MOST_SENSITIVE
+            Marshal.WriteByte(buf, 3, 0);   // ALWAYS_ON
+            Marshal.WriteByte(buf, 11, 0);  // LFD OFF
+            rc = Native.BS2_SetFingerprintConfig(ctx, id, buf);
+            if (rc < 0) return "err\tsetfpconfig\tSetFingerprintConfig: " + rc;
+            return "ok\tfixed\tfpconfig " + before + " -> security=0 sensitivity=7 sensorMode=0 lfd=0";
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+    }
+
+    static int FpFix(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var a = EnsureFingerConfig(id);
+        var b = EnsureStandalone(id);
+        Native.BS2_DisconnectDevice(ctx, id);
+        Console.WriteLine(a);
+        Console.WriteLine(b);
+        return a.StartsWith("ok\t") && b.StartsWith("ok\t") ? 0 : -1;
+    }
+
     static int Standalone(string ip, ushort port)
     {
         uint id;
@@ -1463,6 +1511,9 @@ static class Program
                 case "authcfg":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tauthcfg <ip> [port]"); return 1; }
                     return AuthCfg(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "fpfix":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tfpfix <ip> [port]"); return 1; }
+                    return FpFix(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
                 case "standalone":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tstandalone <ip> [port]"); return 1; }
                     return Standalone(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);

@@ -80,9 +80,12 @@ class AccessMonitor {
       agentOnline: () => agentOnline.value,
       terminalOnline: () => terminalOnline.value,
     ));
+    // Chak minit: delta. Chak 60 min: tout moun ki gen anprent (si W2 a te
+    // netwaye oswa ranplase, anprent SecurGYM yo remonte poukont yo).
+    var ticks = 0;
     _syncTimer = Timer.periodic(
       const Duration(minutes: 1),
-      (_) => unawaited(syncNow()),
+      (_) => unawaited(syncNow(forceFull: ++ticks % 60 == 0)),
     );
   }
 
@@ -94,7 +97,8 @@ class AccessMonitor {
     config = await TerminalAccessService.loadConfig(runtime.client, session);
     if (running) {
       terminalOnline.value = await agent.watchTerminal(terminalIp: config.terminalIp);
-      unawaited(syncNow());
+      // Premye sync apre demaraj: TOUT anprent SecurGYM yo (W2 a ka te efase).
+      unawaited(syncNow(forceFull: true));
     }
   }
 
