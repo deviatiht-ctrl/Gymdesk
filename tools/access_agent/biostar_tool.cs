@@ -69,6 +69,14 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetAuthConfig(IntPtr context, uint deviceId, IntPtr config);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_SetAuthConfig(IntPtr context, uint deviceId, IntPtr config);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetIPConfig(IntPtr context, uint deviceId, IntPtr config);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_GetIPConfigViaUDP(IntPtr context, uint deviceId, IntPtr config);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_SetIPConfigViaUDP(IntPtr context, uint deviceId, IntPtr config);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_VerifyFingerprint(IntPtr context, uint deviceId, IntPtr finger);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_ScanFingerprintEx(IntPtr context, uint deviceId, IntPtr finger, uint templateIndex, uint quality, byte templateFormat, out uint outQuality, IntPtr cbReadyToScan);
@@ -795,10 +803,12 @@ static class Program
             Native.BS2_ReleaseObject(doorObj);
         }
         Console.WriteLine("watching\t" + id + "\tdoor=" + doorId);
+        Console.WriteLine("standalone\t" + EnsureStandalone(id).Replace('\t', ' '));
         Console.Out.Flush();
         Console.Error.WriteLine("[watch] Siveyan aktive" + (seconds > 0 ? " pandan " + seconds + "s" : "") + " — eskane dwèt la sou W2 a kounye a...");
         var started = DateTime.UtcNow;
         var lastBeat = DateTime.UtcNow;
+        var lastStandalone = DateTime.UtcNow;
         var exitCode = 0;
         while (seconds <= 0 || (DateTime.UtcNow - started).TotalSeconds < seconds)
         {
@@ -817,6 +827,13 @@ static class Program
                     var capturedPort = port;
                     new System.Threading.Thread(() => RunDoorCommand(deviceId, capturedDoor, cmd, resFile, capturedIp, capturedPort)) { IsBackground = true }.Start();
                 }
+            }
+            if ((DateTime.UtcNow - lastStandalone).TotalMinutes >= 5)
+            {
+                lastStandalone = DateTime.UtcNow;
+                string fix;
+                lock (cmdLock) { fix = EnsureStandalone(id); }
+                if (fix.StartsWith("ok\tfixed")) { Console.WriteLine("standalone\t" + fix.Replace('\t', ' ')); Console.Out.Flush(); }
             }
             if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 20)
             {
@@ -1151,6 +1168,110 @@ static class Program
         return 0;
     }
 
+    // BioStar 2 ka aktive "Server Matching" oswa "Global APB": lè sa a W2 a
+    // voye chak anprent sou PC a, epi si kab la dekonekte TOUT moun refize.
+    // Nou fòse W2 a verifye anprent yo li menm, ak dat fen abònman an.
+    static string EnsureStandalone(uint id)
+    {
+        var buf = Marshal.AllocHGlobal(512);
+        try
+        {
+            for (var i = 0; i < 512; i++) Marshal.WriteByte(buf, i, 0);
+            var rc = Native.BS2_GetAuthConfig(ctx, id, buf);
+            if (rc < 0) return "err\tauthcfg\tGetAuthConfig: " + rc;
+            var server = Marshal.ReadByte(buf, 78);
+            var apb = Marshal.ReadByte(buf, 44);
+            if (server == 0 && apb == 0) return "ok\tstandalone\tserverMatching=0\tglobalAPB=0";
+            Marshal.WriteByte(buf, 78, 0);
+            Marshal.WriteByte(buf, 44, 0);
+            rc = Native.BS2_SetAuthConfig(ctx, id, buf);
+            if (rc < 0) return "err\tsetauthcfg\tSetAuthConfig: " + rc;
+            return "ok\tfixed\tserverMatching=" + server + "->0\tglobalAPB=" + apb + "->0";
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+    }
+
+    static int Standalone(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var res = EnsureStandalone(id);
+        Native.BS2_DisconnectDevice(ctx, id);
+        Console.WriteLine(res);
+        return res.StartsWith("ok\t") ? 0 : -1;
+    }
+
+    // BS2IpConfig (108 bytes): connectionMode @0 | useDHCP @1 | useDNS @2 |
+    // ipAddress[16] @4 | gateway[16] @20 | subnetMask[16] @36 | serverAddr[16] @52 |
+    // port @68 | serverPort @70
+    const int IpCfgSize = 108;
+
+    static string ReadStr(IntPtr buf, int offset)
+    {
+        var b = new byte[16];
+        Marshal.Copy(new IntPtr(buf.ToInt64() + offset), b, 0, 16);
+        return System.Text.Encoding.ASCII.GetString(b).TrimEnd('\0').Trim();
+    }
+
+    static void WriteStr(IntPtr buf, int offset, string value)
+    {
+        var b = System.Text.Encoding.ASCII.GetBytes(value);
+        for (var i = 0; i < 16; i++) Marshal.WriteByte(buf, offset + i, i < b.Length && i < 15 ? b[i] : (byte)0);
+    }
+
+    static string DescribeIpCfg(IntPtr buf)
+    {
+        return "mode=" + (Marshal.ReadByte(buf, 0) == 0 ? "server_to_device" : "device_to_server")
+            + "\tdhcp=" + Marshal.ReadByte(buf, 1)
+            + "\tip=" + ReadStr(buf, 4) + "\tmask=" + ReadStr(buf, 36) + "\tgw=" + ReadStr(buf, 20)
+            + "\tserver=" + ReadStr(buf, 52) + ":" + (ushort)Marshal.ReadInt16(buf, 70)
+            + "\tport=" + (ushort)Marshal.ReadInt16(buf, 68);
+    }
+
+    static int NetCfg(string ip, ushort port)
+    {
+        uint id;
+        var rc = Connect(ip, port, out id);
+        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+        var buf = Marshal.AllocHGlobal(IpCfgSize);
+        try
+        {
+            for (var i = 0; i < IpCfgSize; i++) Marshal.WriteByte(buf, i, 0);
+            rc = Native.BS2_GetIPConfig(ctx, id, buf);
+            if (rc < 0) Console.WriteLine("err\tipcfg\tGetIPConfig: " + rc);
+            else Console.WriteLine("netcfg\t" + id + "\t" + DescribeIpCfg(buf));
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+        Native.BS2_DisconnectDevice(ctx, id);
+        return rc < 0 ? rc : 0;
+    }
+
+    // Fikse IP W2 a pa UDP broadcast (mache menm si W2 a sou yon lòt sou-rezo
+    // oswa an DHCP): DHCP etenn, IP/mask/gateway fiks. Mòd koneksyon an pa chanje.
+    static int SetIp(uint deviceId, string newIp, string mask, string gw)
+    {
+        Native.BS2_SetDeviceSearchingTimeout(ctx, 5);
+        Native.BS2_SearchDevices(ctx);
+        var buf = Marshal.AllocHGlobal(IpCfgSize);
+        try
+        {
+            for (var i = 0; i < IpCfgSize; i++) Marshal.WriteByte(buf, i, 0);
+            var rc = Native.BS2_GetIPConfigViaUDP(ctx, deviceId, buf);
+            if (rc < 0) { Console.WriteLine("err\tipcfg\tGetIPConfigViaUDP: " + rc); return rc; }
+            var before = DescribeIpCfg(buf);
+            Marshal.WriteByte(buf, 1, 0);
+            WriteStr(buf, 4, newIp);
+            WriteStr(buf, 36, mask);
+            WriteStr(buf, 20, gw);
+            rc = Native.BS2_SetIPConfigViaUDP(ctx, deviceId, buf);
+            if (rc < 0) { Console.WriteLine("err\tsetip\tSetIPConfigViaUDP: " + rc); return rc; }
+            Console.WriteLine("ok\tsetip\t" + deviceId + "\t" + newIp + "\tbefore: " + before);
+            return 0;
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+    }
+
     static int RmUser(string ip, string uid, ushort port)
     {
         uint id;
@@ -1342,6 +1463,17 @@ static class Program
                 case "authcfg":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\tauthcfg <ip> [port]"); return 1; }
                     return AuthCfg(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "standalone":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tstandalone <ip> [port]"); return 1; }
+                    return Standalone(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "netcfg":
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tnetcfg <ip> [port]"); return 1; }
+                    return NetCfg(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                case "setip":
+                    if (args.Length < 4) { Console.WriteLine("err\tusage\tsetip <deviceId> <ip> [mask] [gw]"); return 1; }
+                    return SetIp(uint.Parse(args[2]), args[3],
+                        args.Length > 4 ? args[4] : "255.255.255.0",
+                        args.Length > 5 ? args[5] : "0.0.0.0");
                 case "vscan":
                     if (args.Length < 4) { Console.WriteLine("err\tusage\tvscan <ip> <uid> [port]"); return 1; }
                     return VScan(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);

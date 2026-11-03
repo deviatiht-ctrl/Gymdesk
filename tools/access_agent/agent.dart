@@ -14,7 +14,7 @@ import 'suprema_ffi.dart';
 ///   signale honnêtement (`reader_connected: false`) : aucune capture simulée.
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
-const String agentVersion = '3.5.0';
+const String agentVersion = '3.6.0';
 bool _doorConnected = true;
 
 ReaderBackend? _sdk;
@@ -186,26 +186,8 @@ Future<void> _autoDiscoverOrConfigureTerminal() async {
   if (now.difference(_lastAutoNetCheck).inSeconds < 20) return;
   _lastAutoNetCheck = now;
   try {
-    // 0. Si adaptatè Ethernet la konekte dirèk ak W2 a san routeur DHCP (APIPA 169.254.x.x),
-    // eseye mete 192.168.1.50/24 otomatikman sou li.
-    final interfaces = await NetworkInterface.list(type: InternetAddressType.IPv4);
-    final has192 = interfaces.any(
-      (iface) => iface.addresses.any((a) => a.address.startsWith('192.168.1.')),
-    );
-    if (!has192) {
-      for (final iface in interfaces) {
-        final nameLower = iface.name.toLowerCase();
-        final isEth = nameLower.contains('ethernet') || nameLower.contains('eth') || nameLower.contains('lan');
-        final hasApipa = iface.addresses.any((a) => a.address.startsWith('169.254.'));
-        if (isEth || hasApipa) {
-          await Process.run('netsh', [
-            'interface', 'ip', 'set', 'address',
-            'name=${iface.name}', 'static', '192.168.1.50', '255.255.255.0',
-          ]);
-        }
-      }
-    }
-
+    // Konfigirasyon kat rezo a (192.168.1.50, wout W2) se Gadyen_Ultime.ps1
+    // (tach SYSTEM) ki fè l: ajan an pa janm touche Wi-Fi a.
     // 1. Chèche si gen yon tèminal BioEntry W2 sou rezo lokal la via UDP broadcast
     final lines = await _biostarRun(['search'], timeout: const Duration(seconds: 8));
     for (final l in lines) {
@@ -213,6 +195,19 @@ Future<void> _autoDiscoverOrConfigureTerminal() async {
         final foundIp = l[3].trim();
         final foundPort = int.tryParse(l[4].trim()) ?? 51211;
         final current = terminalConfig();
+        final wantedIp = current['ip'].toString();
+        if (foundIp.isNotEmpty && foundIp != wantedIp) {
+          // W2 a chanje IP (DHCP/reset): remete l fiks sou IP SecurGYM nan.
+          final fixed = await _biostarRun(
+            ['setip', l[1].trim(), wantedIp, '255.255.255.0', '0.0.0.0'],
+            timeout: const Duration(seconds: 15),
+          );
+          if (fixed.any((f) => f.first == 'ok')) {
+            print('[W2] IP tèminal la te $foundIp — remete fiks sou $wantedIp');
+            await Future<void>.delayed(const Duration(seconds: 4));
+            return;
+          }
+        }
         if (foundIp.isNotEmpty && (foundIp != current['ip'] || foundPort != current['port'])) {
           _terminalConfig = {'ip': foundIp, 'port': foundPort};
           try {
