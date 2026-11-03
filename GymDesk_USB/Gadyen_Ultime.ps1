@@ -69,6 +69,9 @@ function Set-W2Network([string]$w2) {
       Where-Object { $ids -notcontains $_.InterfaceIndex } |
       ForEach-Object { Remove-NetIPAddress -InterfaceIndex $_.InterfaceIndex -IPAddress $ip -Confirm:$false; $changed = $true }
   }
+  Get-NetRoute -DestinationPrefix "$w2/32" -ErrorAction SilentlyContinue |
+    Where-Object { $ids -notcontains $_.InterfaceIndex } |
+    ForEach-Object { Remove-NetRoute -InterfaceIndex $_.InterfaceIndex -DestinationPrefix "$w2/32" -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
   foreach ($a in $sel) {
     $i = $a.ifIndex
     $ipif = Get-NetIPInterface -InterfaceIndex $i -AddressFamily IPv4
@@ -166,10 +169,10 @@ if ($Repare) {
       Start-Sleep -Seconds 5
     }
   }
-  Write-Host "Fose W2 verifye anprent yo li menm (menm si kab la dekonekte)..."
-  $r = & $tool $dll standalone $w2 51211
+  Write-Host "Fose W2 verifye anprent yo li menm + 1 kontak (kapte toujou limen, LFD etenn)..."
+  $r = & $tool $dll fpfix $w2 51211
   Write-Host ("  " + ($r -join ' '))
-  if ($r -match 'fixed') { Log ("W2 standalone: " + ($r -join ' ')) }
+  if ($r -match 'fixed') { Log ("W2 fpfix: " + ($r -join ' ')) }
   & $tool $dll netcfg $w2 51211 | ForEach-Object { Write-Host ("  " + $_) }
   Pop-Location
   Write-Eta $w2
