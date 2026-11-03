@@ -66,6 +66,7 @@ class PlansRepository {
           : draft.description.trim(),
       'active': draft.active,
       'sort_order': draft.sortOrder,
+      'flexible': draft.flexible,
       'created_at':
           existing?.row['created_at'] ?? changedAt.toUtc().toIso8601String(),
       'updated_at': changedAt.toUtc().toIso8601String(),

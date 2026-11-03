@@ -923,6 +923,22 @@ class AppStrings {
     'validity_archived': ['Achive', 'Archivé', 'Archived'],
     'days': ['jou', 'jours', 'days'],
     'duration_days': ['Kantite jou', 'Durée (jours)', 'Duration (days)'],
+    'flexible_plan': ['Plan modifiable', 'Plan modifiable', 'Flexible plan'],
+    'flexible_plan_hint': [
+      'Dat kòmansman, dat fen ak kantite kòb la ap chwazi lè w ap enskri oswa renouvle manm nan.',
+      'Date de début, date de fin et montant choisis à l’inscription ou au renouvellement.',
+      'Start date, end date and amount are chosen at enrollment or renewal.',
+    ],
+    'default_amount': [
+      'Kantite kòb pa defo',
+      'Montant par défaut',
+      'Default amount',
+    ],
+    'plan_amount': [
+      'Kantite kòb plan an',
+      'Montant du plan',
+      'Plan amount',
+    ],
     'price': ['Pri', 'Prix', 'Price'],
     'sort_order': ['Lòd afichaj', 'Ordre d’affichage', 'Display order'],
     'description': ['Deskripsyon', 'Description', 'Description'],

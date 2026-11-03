@@ -277,4 +277,53 @@ void main() {
       );
     },
   );
+
+  test('flexible plan renews with the chosen dates and amount', () async {
+    final member = await repository.register(draft, changedAt: now);
+    final saved = Member(
+      jsonDecode(
+            (await db.record(SyncEntity.members, member.memberId))!.payload,
+          )
+          as Json,
+    );
+    final flexible = GymPlan({...plan().row, 'flexible': true});
+    final renewed = await repository.renew(
+      saved,
+      flexible,
+      start: DateTime.utc(2026, 2, 1),
+      end: DateTime.utc(2026, 2, 20),
+      customDates: true,
+      price: 750,
+      changedAt: now,
+    );
+    expect(ymd(renewed.startDate), '2026-02-01');
+    expect(ymd(renewed.endDate), '2026-02-20');
+    expect(renewed.price, 750);
+    await expectLater(
+      repository.renew(
+        saved,
+        flexible,
+        start: DateTime.utc(2026, 3, 1),
+        customDates: true,
+        price: 750,
+        changedAt: now,
+        payment: const PaymentCommand(
+          memberId: '',
+          amount: 800,
+          currency: 'HTG',
+          method: 'cash',
+        ),
+      ),
+      throwsA(isA<MemberFailure>()),
+    );
+    final fixed = await repository.renew(
+      saved,
+      plan(),
+      start: DateTime.utc(2026, 4, 1),
+      customDates: true,
+      price: 750,
+      changedAt: now,
+    );
+    expect(fixed.price, 1000);
+  });
 }

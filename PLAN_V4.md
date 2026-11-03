@@ -240,3 +240,4 @@ Mettre à jour ce fichier à chaque étape terminée. Vérification : voir `AGEN
   * Tests : `admin_offers_test.ts` mis à jour (les offres `per_member`/`tiered` n'existent plus → `plan_basic`) ;
     `platform_offers_test.dart` réécrit sur la config actuelle ; `admin_gym_detail_test.ts` (PGlite) OK.
     Résultat : analyze propre, 40/40 Deno, suite Flutter verte.
+- 2026-10-31 — Plans modifiables (`plans.flexible`, migration 37) : dates début/fin et montant choisis à l'inscription et au renouvellement (analyze OK, 101 tests OK).

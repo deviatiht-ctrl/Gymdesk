@@ -84,6 +84,25 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
   String _registrationFeeMode = 'separate'; // 'separate', 'included', 'waived'
   double _customRegistrationFee = 0.0;
   final _registrationFeeController = TextEditingController();
+  final _flexiblePriceController = TextEditingController();
+
+  bool get _isFlexiblePlan => _selectedPlan?.flexible ?? false;
+
+  double get _planPrice {
+    final plan = _selectedPlan;
+    if (plan == null) return 0.0;
+    if (!plan.flexible) return plan.price;
+    final amount = double.tryParse(
+      _flexiblePriceController.text.replaceAll(',', '.'),
+    );
+    return amount != null && amount.isFinite && amount >= 0 ? amount : 0.0;
+  }
+
+  double get _planRegistrationPrice {
+    final plan = _selectedPlan;
+    if (plan == null) return 0.0;
+    return plan.flexible ? _planPrice + plan.registrationFee : plan.registrationPrice;
+  }
 
   double get _effectiveRegistrationFee {
     if (_isExistingMember) return 0.0;
@@ -96,20 +115,23 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
 
   double _calculateTotalDue() {
     if (_selectedPlan == null) return 0.0;
-    if (_isExistingMember) return _selectedPlan!.price;
+    if (_isExistingMember) return _planPrice;
     if (_registrationFeeMode == 'separate') {
-      return _selectedPlan!.price + _effectiveRegistrationFee;
+      return _planPrice + _effectiveRegistrationFee;
     }
     if (_registrationFeeMode == 'included') {
-      return _selectedPlan!.registrationPrice;
+      return _planRegistrationPrice;
     }
-    return _selectedPlan!.price;
+    return _planPrice;
   }
 
   void _onSelectPlan(GymPlan plan) {
     setState(() {
       _selectedPlan = plan;
       _endDate = subscriptionEnd(_startDate, plan.durationDays);
+      if (plan.flexible) {
+        _flexiblePriceController.text = plan.price > 0 ? plan.price.toStringAsFixed(0) : '';
+      }
       _customRegistrationFee = plan.registrationFee;
       _registrationFeeController.text = plan.registrationFee > 0
           ? plan.registrationFee.toStringAsFixed(0)
@@ -397,6 +419,10 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       setState(() => _errorMessage = s.text('select_plan_required'));
       return false;
     }
+    if (_isFlexiblePlan && _planPrice <= 0) {
+      setState(() => _errorMessage = s.text('plan_amount'));
+      return false;
+    }
     return true;
   }
 
@@ -435,6 +461,10 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     }
     if (_selectedPlan == null) {
       setState(() => _errorMessage = s.text('select_plan_required'));
+      return false;
+    }
+    if (_isFlexiblePlan && _planPrice <= 0) {
+      setState(() => _errorMessage = s.text('plan_amount'));
       return false;
     }
     final amt = double.tryParse(_paymentAmountController.text) ?? 0;
@@ -484,7 +514,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       final plan = _selectedPlan!;
       final startOnly = dateOnly(_startDate);
       final endDate = dateOnly(_endDate.isBefore(startOnly) ? subscriptionEnd(startOnly, plan.durationDays) : _endDate);
-      final amt = double.tryParse(_paymentAmountController.text) ?? plan.price;
+      final amt = double.tryParse(_paymentAmountController.text) ?? _planPrice;
       final cashier = _cashier;
       final received = cashier.receivedInBase;
       final creditAdded = _keepChangeAsCredit && received > amt ? received - amt : 0.0;
@@ -522,7 +552,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
           planId: plan.id,
           startDate: _startDate,
           endDate: endDate,
-          price: _isExistingMember ? plan.price : (planFee > 0 ? planFee : plan.registrationPrice),
+          price: _isExistingMember ? _planPrice : (planFee > 0 ? planFee : _planRegistrationPrice),
           status: 'active',
         ),
         payment: PaymentCommand(
@@ -801,6 +831,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     _paymentReceivedController.dispose();
     _referenceController.dispose();
     _registrationFeeController.dispose();
+    _flexiblePriceController.dispose();
     _pinController.dispose();
     _bioEventSub?.cancel();
     _biometricService.stopCapture();
@@ -1038,7 +1069,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                   if (picked != null) {
                                     setState(() {
                                       _startDate = dateOnly(picked);
-                                      _endDate = subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30);
+                                      if (!_isFlexiblePlan || _endDate.isBefore(_startDate)) {
+                                        _endDate = subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30);
+                                      }
                                     });
                                   }
                                 },
@@ -1117,7 +1150,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                         ),
                                       ),
                                       Text(
-                                        '${plan.durationDays} ${s.text('days')} · ${price.toStringAsFixed(0)} ${plan.currency}',
+                                        plan.flexible
+                                            ? s.text('flexible_plan')
+                                            : '${plan.durationDays} ${s.text('days')} · ${price.toStringAsFixed(0)} ${plan.currency}',
                                         style: TextStyle(
                                           fontSize: 12,
                                           color: isSelected ? const Color(0xFF115E59) : Colors.grey.shade700,
@@ -1136,6 +1171,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 ),
               ),
               const SizedBox(height: 16),
+              _buildFlexibleAmountSection(s),
 
               _buildRegistrationFeeSection(s),
               const SizedBox(height: 16),
@@ -1513,7 +1549,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
 
     final isFr = s.locale.languageCode == 'fr';
     final regFee = _effectiveRegistrationFee;
-    final planPrice = _selectedPlan?.price ?? 0.0;
+    final planPrice = _planPrice;
     final total = _calculateTotalDue();
 
     return Card(
@@ -1818,7 +1854,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                           if (picked != null) {
                             setState(() {
                               _startDate = dateOnly(picked);
-                              _endDate = subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30);
+                              if (!_isFlexiblePlan || _endDate.isBefore(_startDate)) {
+                                _endDate = subscriptionEnd(_startDate, _selectedPlan?.durationDays ?? 30);
+                              }
                             });
                           }
                         },
@@ -1886,20 +1924,70 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               leading: Icon(isSelected ? LucideIcons.checkCircle2 : LucideIcons.circle, color: isSelected ? const Color(0xFF0F766E) : Colors.grey),
               title: Text(plan.name, style: const TextStyle(fontWeight: FontWeight.bold)),
               subtitle: Text(
-                plan.enrollmentPrice != null && !_isExistingMember
+                plan.flexible
+                    ? s.text('flexible_plan')
+                    : plan.enrollmentPrice != null && !_isExistingMember
                     ? '${plan.durationDays} ${s.text('days')} · (Renouvèlman: ${plan.price.toStringAsFixed(0)} ${plan.currency})'
                     : '${plan.durationDays} ${s.text('days')}',
               ),
               trailing: Text(
-                '${effectivePrice.toStringAsFixed(0)} ${plan.currency}',
+                plan.flexible ? '—' : '${effectivePrice.toStringAsFixed(0)} ${plan.currency}',
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
               ),
             ),
           );
         }),
         const SizedBox(height: 16),
+        _buildFlexibleAmountSection(s),
         _buildRegistrationFeeSection(s),
       ],
+    );
+  }
+
+  Widget _buildFlexibleAmountSection(AppStrings s) {
+    if (!_isFlexiblePlan) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        elevation: 0,
+        color: const Color(0xFFF0FDFA),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Color(0xFF99F6E4)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${s.text('flexible_plan')} · ${ymd(_startDate)} → ${ymd(_endDate)} (${dateOnly(_endDate).difference(dateOnly(_startDate)).inDays} ${s.text('days')})',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                s.text('flexible_plan_hint'),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _flexiblePriceController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: s.text('plan_amount'),
+                  suffixText: _currency,
+                  border: const OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+                onChanged: (_) => setState(() {
+                  _paymentAmountController.text = _calculateTotalDue().toStringAsFixed(0);
+                }),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1907,7 +1995,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     final isFr = s.locale.languageCode == 'fr';
     final totalDue = _calculateTotalDue();
     final regFee = _effectiveRegistrationFee;
-    final planPrice = _selectedPlan?.price ?? 0.0;
+    final planPrice = _planPrice;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

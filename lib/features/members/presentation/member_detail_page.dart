@@ -301,6 +301,9 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
       text: replaceTarget != null ? '0' : (plan?.price.toStringAsFixed(2) ?? ''),
     );
     final received = TextEditingController();
+    final planAmount = TextEditingController(
+      text: plan?.price.toStringAsFixed(2) ?? '',
+    );
     String method = 'cash';
     var keepCredit = false;
     var markValid = true;
@@ -366,6 +369,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                           .toList(),
                       onChanged: (p) => setDialog(() {
                         plan = p;
+                        planAmount.text = p?.price.toStringAsFixed(2) ?? '';
                         if (replaceTarget == null) {
                           paid.text = p?.price.toStringAsFixed(2) ?? '';
                         }
@@ -391,7 +395,9 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               if (date != null) {
                                 setDialog(() {
                                   start = dateOnly(date);
-                                  end = subscriptionEnd(start, plan?.durationDays ?? 30);
+                                  if (!(plan?.flexible ?? false) || end.isBefore(start)) {
+                                    end = subscriptionEnd(start, plan?.durationDays ?? 30);
+                                  }
                                 });
                               }
                             },
@@ -451,6 +457,23 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                         onChanged: (v) => setDialog(() => markValid = v),
                       ),
                     ),
+                    if (plan?.flexible ?? false) ...[
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: planAmount,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: s.text('plan_amount'),
+                          helperText: s.text('flexible_plan_hint'),
+                          helperMaxLines: 2,
+                        ),
+                        onChanged: (v) => setDialog(() {
+                          if (replaceTarget == null) paid.text = v;
+                        }),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     TextFormField(
                       controller: paid,
@@ -532,14 +555,19 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     if (confirmed != true || plan == null) {
       paid.dispose();
       received.dispose();
+      planAmount.dispose();
       return;
     }
     final amount = double.tryParse(paid.text.replaceAll(',', '.')) ?? 0;
     final got = double.tryParse(received.text.replaceAll(',', '.')) ?? amount;
     final selected = plan!;
+    final selectedPrice = selected.flexible
+        ? double.tryParse(planAmount.text.replaceAll(',', '.')) ?? -1
+        : selected.price;
     paid.dispose();
     received.dispose();
-    if (amount < 0 || amount > selected.price) {
+    planAmount.dispose();
+    if (selectedPrice < 0 || amount < 0 || amount > selectedPrice) {
       _error('invalid_record');
       return;
     }
@@ -552,7 +580,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
             method: method,
             receivedAmount: got,
             keepChangeAsCredit: keepCredit,
-            planFee: selected.price,
+            planFee: selectedPrice,
             paymentReason: 'Renouvellement (${selected.name})',
           )
         : null;
@@ -568,6 +596,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
         replaceSubscriptionId: replacePrevious ? latestSub?.id : null,
         changedAt: _now,
         payment: command,
+        price: selectedPrice,
       );
     });
     if (created != null) {

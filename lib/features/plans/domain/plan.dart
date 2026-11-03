@@ -20,6 +20,9 @@ class GymPlan {
   String get currency => row['currency'] as String? ?? 'HTG';
   String? get description => row['description'] as String?;
   bool get active => row['active'] == true;
+
+  /// Plan modifiable : dates et montant choisis à l'inscription / au renouvellement.
+  bool get flexible => row['flexible'] == true;
   int get sortOrder => (row['sort_order'] as num?)?.toInt() ?? 0;
   String get updatedAt => row['updated_at'] as String;
   String? get deletedAt => row['deleted_at'] as String?;
@@ -62,6 +65,7 @@ class PlanDraft {
     this.description = '',
     this.active = true,
     this.sortOrder = 0,
+    this.flexible = false,
   });
   final String name;
   final int durationDays;
@@ -72,6 +76,7 @@ class PlanDraft {
   final String description;
   final bool active;
   final int sortOrder;
+  final bool flexible;
 }
 
 class PlanFailure implements Exception {

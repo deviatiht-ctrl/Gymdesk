@@ -50,6 +50,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
       'sort_order': TextEditingController(text: '${plan?.sortOrder ?? 0}'),
     };
     var active = plan?.active ?? true;
+    var flexible = plan?.flexible ?? false;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -72,6 +73,14 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                           ? s.text('invalid_record')
                           : null,
                     ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(s.text('flexible_plan')),
+                      subtitle: Text(s.text('flexible_plan_hint')),
+                      value: flexible,
+                      onChanged: (v) => setDialog(() => flexible = v),
+                    ),
+                    if (!flexible) ...[
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: fields['duration_days'],
@@ -83,6 +92,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                           ? s.text('invalid_record')
                           : null,
                     ),
+                    ],
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: fields['price'],
@@ -90,7 +100,9 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                         decimal: true,
                       ),
                       decoration: InputDecoration(
-                        labelText: s.text('renewal_price'),
+                        labelText: s.text(
+                          flexible ? 'default_amount' : 'renewal_price',
+                        ),
                       ),
                       validator: (v) {
                         final amount = double.tryParse(
@@ -120,6 +132,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                             : null;
                       },
                     ),
+                    if (!flexible) ...[
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: fields['enrollment_price'],
@@ -139,6 +152,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                             : null;
                       },
                     ),
+                    ],
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: fields['sort_order'],
@@ -194,11 +208,14 @@ class _PlansPageState extends ConsumerState<PlansPage> {
       await _repository.save(
         PlanDraft(
           name: fields['name']!.text,
-          durationDays: int.parse(fields['duration_days']!.text),
+          durationDays: (int.tryParse(fields['duration_days']!.text) ?? 30)
+              .clamp(1, 3650),
           price: double.parse(fields['price']!.text.replaceAll(',', '.')),
-          enrollmentPrice: double.tryParse(
-            fields['enrollment_price']!.text.replaceAll(',', '.'),
-          ),
+          enrollmentPrice: flexible
+              ? null
+              : double.tryParse(
+                  fields['enrollment_price']!.text.replaceAll(',', '.'),
+                ),
           registrationFee: double.tryParse(
             fields['registration_fee']!.text.replaceAll(',', '.'),
           ) ?? 0.0,
@@ -209,6 +226,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
           description: fields['description']!.text,
           active: active,
           sortOrder: int.tryParse(fields['sort_order']!.text) ?? 0,
+          flexible: flexible,
         ),
         existing: plan,
         changedAt:
@@ -337,7 +355,7 @@ class _PlansPageState extends ConsumerState<PlansPage> {
                     contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     title: Text(plan.name),
                     subtitle: Text(
-                      '${s.text('duration_days')}: ${plan.durationDays} · ${plan.price.toStringAsFixed(2)} ${plan.currency}${plan.registrationFee > 0 ? ' · +${plan.registrationFee.toStringAsFixed(2)} ${plan.currency} (${s.text('registration_fee').toLowerCase()})' : ''}${plan.description == null ? '' : '\n${plan.description}'}',
+                      '${plan.flexible ? s.text('flexible_plan') : '${s.text('duration_days')}: ${plan.durationDays}'} · ${plan.price.toStringAsFixed(2)} ${plan.currency}${plan.registrationFee > 0 ? ' · +${plan.registrationFee.toStringAsFixed(2)} ${plan.currency} (${s.text('registration_fee').toLowerCase()})' : ''}${plan.description == null ? '' : '\n${plan.description}'}',
                     ),
                     trailing: Wrap(
                       spacing: 8,

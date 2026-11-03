@@ -375,12 +375,17 @@ class MembersRepository {
     String? replaceSubscriptionId,
     required DateTime changedAt,
     PaymentCommand? payment,
+    double? price,
   }) => _local(() async {
     if (!{'owner', 'supervisor', 'reception', 'manager'}.contains(session.role)) {
       throw const MemberFailure('access_denied');
     }
     _validatePayment(payment);
-    if (payment != null && payment.amount > plan.price + 0.001) {
+    final planPrice = plan.flexible && price != null ? price : plan.price;
+    if (!planPrice.isFinite || planPrice < 0 || planPrice > 999999999) {
+      throw const MemberFailure('invalid_record');
+    }
+    if (payment != null && payment.amount > planPrice + 0.001) {
       throw const MemberFailure('invalid_record');
     }
     final subscriptions = await db
@@ -415,7 +420,7 @@ class MembersRepository {
         : subscriptionEnd(startDate, plan.durationDays);
     final subscriptionId = _uuid.v4();
     final amount = payment?.amount ?? 0;
-    final isValidActive = forceActive || (amount >= plan.price && session.canManageGym);
+    final isValidActive = forceActive || (amount >= planPrice && session.canManageGym);
     final subscription = GymSubscription({
       'id': subscriptionId,
       'gym_id': session.gymId,
@@ -423,7 +428,7 @@ class MembersRepository {
       'plan_id': plan.id,
       'start_date': ymd(startDate),
       'end_date': ymd(endDate),
-      'price': plan.price,
+      'price': planPrice,
       'enrollment_kind': 'renewal',
       'status': isValidActive ? 'active' : 'pending',
       'renewed_from': current.isEmpty ? null : current.first.id,
