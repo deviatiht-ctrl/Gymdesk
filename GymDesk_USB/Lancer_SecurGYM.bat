@@ -24,6 +24,12 @@ for /l %%i in (1,1,15) do (
 :agent_ready
 set "DATA_DIR=%~dp0data\profile"
 
+rem --- 2b. Synchronisation automatique de la derniere version Web si disponible ---
+if exist "%~dp0..\web_deploy\main.dart.js" (
+    xcopy /Y /D /Q "%~dp0..\web_deploy\*" "%~dp0web\" >nul 2>&1
+    if exist "%~dp0..\web_deploy\assets" xcopy /Y /D /Q /S "%~dp0..\web_deploy\assets\*" "%~dp0web\assets\" >nul 2>&1
+)
+
 rem --- 3. Ouverture instantanee de la version Web SecurGYM (compatible USB + IP) ---
 if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
     start "" "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --app=http://127.0.0.1:47811 --user-data-dir="%DATA_DIR%" --no-first-run --window-size=1280,800
