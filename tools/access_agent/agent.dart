@@ -1000,9 +1000,15 @@ Future<bool> _serveStaticFile(HttpRequest request, HttpResponse res, String reqP
   if (file.existsSync()) {
     final mime = _getMimeType(file.path);
     res.headers.set('Content-Type', mime);
-    res.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.headers.set('Pragma', 'no-cache');
-    res.headers.set('Expires', '0');
+    final p = file.path.toLowerCase();
+    final isHtmlOrBootstrap = p.endsWith('.html') || p.endsWith('flutter_bootstrap.js') || p.endsWith('version.json');
+    if (isHtmlOrBootstrap) {
+      res.headers.set('Cache-Control', 'no-cache, must-revalidate');
+      res.headers.set('Pragma', 'no-cache');
+    } else {
+      // Pèmèt navigatè a kenbe WASM, JS ak font yo nan kach pou demare enstantaneman
+      res.headers.set('Cache-Control', 'public, max-age=604800');
+    }
     await file.openRead().pipe(res);
     return true;
   }

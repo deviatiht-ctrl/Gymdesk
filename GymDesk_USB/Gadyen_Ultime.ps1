@@ -16,6 +16,7 @@ $EtaFile = Join-Path $Home2 'gadyen_eta.txt'
 $CfgFile = Join-Path $Home2 'gadyen.json'
 $TaskName = 'SecurGYM_Gadyen'
 $PcIp = '192.168.1.50'
+try { $saved = Get-Content $CfgFile -Raw | ConvertFrom-Json; if ($saved.pc_ip) { $PcIp = [string]$saved.pc_ip } } catch {}
 $BioStarIp = '192.168.1.16'
 $Prefix = 24
 
@@ -83,6 +84,24 @@ function Set-W2Network([string]$w2) {
     }
     if ($have -notcontains $PcIp) {
       New-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -PrefixLength $Prefix | Out-Null; $changed = $true
+    }
+    # Kab la sou routeur jim nan: si yon lot aparey gen deja IP a, Windows
+    # pa aktive l (konfli). Lè sa a nou pran yon IP lib (.250 -> .245).
+    if ($a.Status -eq 'Up') {
+      Start-Sleep -Milliseconds 1500
+      if (-not (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -AddressFamily IPv4 -PolicyStore ActiveStore |
+                Where-Object { $_.AddressState -eq 'Preferred' })) {
+        foreach ($alt in 250..245 | ForEach-Object { "192.168.1.$_" }) {
+          if ($alt -eq $PcIp) { continue }
+          if (Test-Connection -ComputerName $alt -Count 1 -Quiet) { continue }
+          Remove-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -Confirm:$false
+          New-NetIPAddress -InterfaceIndex $i -IPAddress $alt -PrefixLength $Prefix | Out-Null
+          Log ("IP $PcIp an konfli sou rezo a -> $alt")
+          $script:PcIp = $alt; $changed = $true
+          (@{ ip = $w2; port = 51211; pc_ip = $alt } | ConvertTo-Json) | Set-Content -Path $CfgFile -Encoding UTF8
+          break
+        }
+      }
     }
     if ($have -notcontains $BioStarIp) {
       New-NetIPAddress -InterfaceIndex $i -IPAddress $BioStarIp -PrefixLength $Prefix -SkipAsSource $true | Out-Null; $changed = $true
@@ -184,9 +203,12 @@ if ($Siveye) {
   $tick = 0
   while ($true) {
     try {
-      $wiredUp = Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' -and $_.PhysicalMediaType -eq '802.3' }
-      $need = $wiredUp -and (-not (Get-NetIPAddress -IPAddress $PcIp -AddressFamily IPv4 -PolicyStore ActiveStore) -or
-              -not (Get-NetRoute -DestinationPrefix "$w2/32"))
+      # Kab la ka chanje pò (dock, adaptatè USB): IP a dwe sou yon kat ki KONEKTE.
+      $upIdx = @(Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' -and $_.PhysicalMediaType -eq '802.3' } |
+        ForEach-Object { $_.ifIndex })
+      $need = $upIdx.Count -gt 0 -and (
+        -not (Get-NetIPAddress -IPAddress $PcIp -AddressFamily IPv4 | Where-Object { $upIdx -contains $_.InterfaceIndex }) -or
+        -not (Get-NetRoute -DestinationPrefix "$w2/32" | Where-Object { $upIdx -contains $_.InterfaceIndex }))
       if ($need -or ($tick % 30) -eq 0) {
         if (Set-W2Network $w2) { Log 'Rezo W2 re-aplike.' }
       }
