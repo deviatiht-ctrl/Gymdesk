@@ -234,7 +234,63 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
   Widget _subscriptionCard() {
     final sub = _sub;
     final pending = widget.data['pending_renewal'] as Map?;
+    final first = _member['first_name']?.toString().trim() ?? '';
+    final last = _member['last_name']?.toString().trim() ?? '';
+    final phone = _member['phone']?.toString().trim() ?? '';
+    final hasInfo = first.isNotEmpty || last.isNotEmpty || phone.isNotEmpty;
+
     if (sub == null) {
+      if (hasInfo) {
+        return MemberCard(
+          padding: const EdgeInsets.all(20),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              SizedBox(
+                width: 104,
+                height: 104,
+                child: Stack(alignment: Alignment.center, children: [
+                  const SizedBox.expand(
+                    child: CircularProgressIndicator(
+                      value: 1.0,
+                      strokeWidth: 10,
+                      strokeCap: StrokeCap.round,
+                      backgroundColor: Color(0x3010B981),
+                      valueColor: AlwaysStoppedAnimation(Color(0xFF10B981)),
+                    ),
+                  ),
+                  Column(mainAxisSize: MainAxisSize.min, children: const [
+                    Icon(LucideIcons.circleCheck, color: Color(0xFF10B981), size: 30),
+                    SizedBox(height: 2),
+                    Text('Actif', style: TextStyle(color: Color(0xFF10B981), fontSize: 13, fontWeight: FontWeight.w800)),
+                  ]),
+                ]),
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: const Color(0xFF10B981).withAlpha(28), borderRadius: BorderRadius.circular(20)),
+                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(LucideIcons.circleCheck, size: 13, color: Color(0xFF10B981)),
+                      SizedBox(width: 5),
+                      Text('Actif', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.w800, fontSize: 12)),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Espace membre actif',
+                      style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: memberInk)),
+                  const SizedBox(height: 4),
+                  const Text('Accès direct confirmé avec votre fiche',
+                      style: TextStyle(color: memberMuted, fontSize: 13)),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 16),
+            _renewButton(pending, label: 'Choisir ou renouveler une formule'),
+          ]),
+        );
+      }
       return MemberCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Aucun abonnement', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: memberInk)),
@@ -246,19 +302,23 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
         ]),
       );
     }
-    final status = sub['status']?.toString() ?? 'active';
+    final rawStatus = sub['status']?.toString() ?? 'active';
     final daysLeft = (sub['days_left'] as num?)?.toInt() ?? 0;
     final total = math.max(1, (sub['total_days'] as num?)?.toInt() ?? 30);
-    final ratio = status == 'active' ? (daysLeft / total).clamp(0.0, 1.0) : 0.0;
+    // Tout manm ki gen non oswa telefòn rete aktif nan espas lan
+    final status = hasInfo ? 'active' : rawStatus;
+    final ratio = status == 'active' ? (daysLeft > 0 ? (daysLeft / total).clamp(0.0, 1.0) : 1.0) : 0.0;
     final balance = (sub['balance'] as num?)?.toDouble() ?? 0;
-    final (label, color, icon) = switch (status) {
-      'active' when daysLeft <= 3 => ('Expire bientôt', const Color(0xFFF59E0B), LucideIcons.triangleAlert),
-      'active' => ('Actif', const Color(0xFF10B981), LucideIcons.circleCheck),
-      'upcoming' => ('À venir', const Color(0xFF3B82F6), LucideIcons.calendarClock),
-      'pending' => ('Paiement en attente', const Color(0xFFF59E0B), LucideIcons.hourglass),
-      'suspended' => ('Suspendu', const Color(0xFFEF4444), LucideIcons.ban),
-      _ => ('Expiré', const Color(0xFFEF4444), LucideIcons.circleX),
-    };
+    final (label, color, icon) = hasInfo
+        ? ('Actif', const Color(0xFF10B981), LucideIcons.circleCheck)
+        : switch (status) {
+            'active' when daysLeft <= 3 => ('Expire bientôt', const Color(0xFFF59E0B), LucideIcons.triangleAlert),
+            'active' => ('Actif', const Color(0xFF10B981), LucideIcons.circleCheck),
+            'upcoming' => ('À venir', const Color(0xFF3B82F6), LucideIcons.calendarClock),
+            'pending' => ('Paiement en attente', const Color(0xFFF59E0B), LucideIcons.hourglass),
+            'suspended' => ('Suspendu', const Color(0xFFEF4444), LucideIcons.ban),
+            _ => ('Expiré', const Color(0xFFEF4444), LucideIcons.circleX),
+          };
     return MemberCard(
       padding: const EdgeInsets.all(20),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -277,9 +337,9 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
                 ),
               ),
               Column(mainAxisSize: MainAxisSize.min, children: [
-                Text(status == 'active' ? '$daysLeft' : '0',
+                Text(status == 'active' ? (daysLeft > 0 ? '$daysLeft' : '✓') : '0',
                     style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w900, color: memberInk, height: 1)),
-                Text(daysLeft == 1 ? 'jour' : 'jours', style: const TextStyle(color: memberMuted, fontSize: 12)),
+                Text(daysLeft > 0 ? (daysLeft == 1 ? 'jour' : 'jours') : 'Actif', style: const TextStyle(color: memberMuted, fontSize: 12)),
               ]),
             ]),
           ),

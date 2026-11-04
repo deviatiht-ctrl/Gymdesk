@@ -992,7 +992,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
           .maybeSingle(),
       builder: (context, snapshot) {
         final account = snapshot.data;
-        final hasAccount = account != null;
+        final hasInfo = member.fullName.trim().isNotEmpty || (member.phone != null && member.phone!.trim().isNotEmpty);
+        final hasAccount = account != null || hasInfo;
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -1013,10 +1014,10 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
               else
                 Text(
                   hasAccount
-                      ? 'Compte actif : ${account['email'] ?? ''}'
-                          '${account['last_seen_at'] != null ? '\nDernière visite app : ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.tryParse(account['last_seen_at'].toString())?.toLocal() ?? DateTime.now())}' : ''}'
+                      ? 'Aksè aktif ak nimewo telefòn oswa non${account?['email'] != null ? ' (${account!['email']})' : ''}'
+                          '${account?['last_seen_at'] != null ? '\nDernière visite app : ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.tryParse(account!['last_seen_at'].toString())?.toLocal() ?? DateTime.now())}' : ''}'
                       : 'Aucun accès. Définissez un mot de passe pour que le membre se connecte à son espace (abonnement, visites, messages).',
-                  style: const TextStyle(color: Colors.black54, height: 1.4),
+                  style: TextStyle(color: hasAccount ? const Color(0xFF059669) : Colors.black54, height: 1.4, fontWeight: hasAccount ? FontWeight.w600 : FontWeight.normal),
                 ),
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [

@@ -70,28 +70,30 @@ class _MemberAuthViewState extends State<MemberAuthView> {
       });
 
   Future<void> _phoneLogin() => _run(() async {
-        if (_phone.text.replaceAll(RegExp(r'\D'), '').length < 8) {
-          throw const MemberAuthException('invalid_phone');
+        final text = _phone.text.trim();
+        final digits = text.replaceAll(RegExp(r'\D'), '');
+        if (digits.length < 8 && text.length < 2) {
+          throw const MemberAuthException('invalid_query');
         }
         try {
-          await MemberAuth.instance.signInWithPhone(_gymId, _phone.text);
+          await MemberAuth.instance.signInWithPhone(_gymId, text);
         } on MemberAuthException catch (e) {
-          throw MemberAuthException(e.code == 'not_found' ? 'phone_not_found' : e.code);
+          throw MemberAuthException(e.code == 'not_found' ? 'member_not_found' : e.code);
         }
         widget.onSignedIn();
       });
 
   Widget _phoneView() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(
-          'Membre de ${widget.gym['name']} ? Entrez le numéro de téléphone de votre fiche.',
+          'Membre de ${widget.gym['name']} ? Entrez votre numéro de téléphone ou votre nom complet.',
           style: const TextStyle(color: memberMuted, fontSize: 13, height: 1.4),
         ),
         const SizedBox(height: 14),
         TextField(
           controller: _phone,
-          keyboardType: TextInputType.phone,
-          autofillHints: const [AutofillHints.telephoneNumber],
-          decoration: _deco('Numéro de téléphone', LucideIcons.phone, hint: '+509 3700 0000'),
+          keyboardType: TextInputType.text,
+          autofillHints: const [AutofillHints.name, AutofillHints.telephoneNumber],
+          decoration: _deco('Numéro de téléphone ou Nom', LucideIcons.user, hint: '+509 3700 0000 ou Nom complet'),
           onSubmitted: (_) => _busy ? null : _phoneLogin(),
         ),
         if (_error != null) ...[const SizedBox(height: 14), ErrorBox(_error!)],

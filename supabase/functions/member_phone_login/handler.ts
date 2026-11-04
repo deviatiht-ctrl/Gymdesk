@@ -87,16 +87,19 @@ export class SupabasePhoneLoginGateway extends SupabaseGateway implements PhoneL
 }
 
 export function phoneKey(phone: unknown): string {
-  const digits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
-  return digits.length >= 8 && digits.length <= 15 ? digits.slice(-8) : '';
+  const str = typeof phone === 'string' ? phone.trim() : '';
+  const digits = str.replace(/\D/g, '');
+  if (digits.length >= 8 && digits.length <= 15) return digits.slice(-8);
+  return str.length >= 2 ? str : '';
 }
 
 /** Compte Auth du membre (créé au besoin) puis jeton de connexion à usage unique. */
 export async function phoneLogin(gateway: PhoneLoginGateway, input: Json): Promise<Json> {
   const gym = uuid(input.gym_id);
-  const key = phoneKey(input.phone);
+  const q = input.query ?? input.phone;
+  const key = phoneKey(q);
   if (!key) return { status: 'invalid_phone' };
-  if (!await gateway.attempt(`phone:${gym}:${key}`)) return { status: 'too_many_attempts' };
+  if (!await gateway.attempt(`phone:${gym}:${key.toLowerCase()}`)) return { status: 'too_many_attempts' };
   const member = await gateway.member(gym, key);
   if (!member) return { status: 'not_found' };
 

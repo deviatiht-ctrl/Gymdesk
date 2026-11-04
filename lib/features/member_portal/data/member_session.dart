@@ -150,17 +150,17 @@ class MemberAuth extends ChangeNotifier {
     throw _error(res, fallback: 'invalid_credentials');
   }
 
-  /// Connexion avec le numéro de téléphone de la fiche membre seulement :
+  /// Connexion avec le numéro de téléphone ou le nom de la fiche membre :
   /// l'Edge Function member_phone_login renvoie un jeton à usage unique.
   /// Renvoie le prénom du membre.
-  Future<String> signInWithPhone(String gymId, String phone) async {
+  Future<String> signInWithPhone(String gymId, String query) async {
     http.Response res;
     try {
       res = await http
           .post(
             Uri.parse('${AppEnv.supabaseUrl}/functions/v1/member_phone_login'),
             headers: {..._headers, 'Authorization': 'Bearer ${AppEnv.supabaseKey}'},
-            body: jsonEncode({'gym_id': gymId, 'phone': phone}),
+            body: jsonEncode({'gym_id': gymId, 'phone': query, 'query': query}),
           )
           .timeout(const Duration(seconds: 25));
     } catch (_) {

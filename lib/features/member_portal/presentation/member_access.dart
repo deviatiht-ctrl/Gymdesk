@@ -82,7 +82,10 @@ class _MemberAccessSheetState extends State<_MemberAccessSheet> {
   String? _done;
   ({String email, String password})? _sent;
 
-  bool get _hasAccount => widget.account != null;
+  bool get _hasAccount =>
+      widget.account != null ||
+      widget.memberName.trim().isNotEmpty ||
+      (widget.memberPhone != null && widget.memberPhone!.trim().isNotEmpty);
 
   @override
   void initState() {
@@ -201,9 +204,9 @@ class _MemberAccessSheetState extends State<_MemberAccessSheet> {
             Expanded(
               child: Text(
                 _hasAccount
-                    ? 'Compte actif${account?['last_seen_at'] != null ? ' · vu ${fmtDate(account?['last_seen_at'], pattern: 'd MMM · HH:mm')}' : ''}'
+                    ? 'Aksè aktif ak nimewo telefòn oswa non${account?['last_seen_at'] != null ? ' · vu ${fmtDate(account!['last_seen_at'], pattern: 'd MMM · HH:mm')}' : ''}'
                     : 'Aucun accès : définissez un mot de passe pour l’activer.',
-                style: const TextStyle(color: memberMuted, fontSize: 13),
+                style: TextStyle(color: _hasAccount ? const Color(0xFF059669) : memberMuted, fontSize: 13),
               ),
             ),
           ]),

@@ -170,15 +170,19 @@ class _MemberSpaceAdminPageState extends ConsumerState<MemberSpaceAdminPage>
           builder: (context, snapshot) {
             final entries = snapshot.data ?? [];
             final accounts = _accountsByMember;
-            final active = entries.where((e) => accounts.containsKey(e.member.id)).length;
+            final active = entries.where((e) {
+              final m = e.member;
+              final hasInfo = m.fullName.trim().isNotEmpty || (m.phone != null && m.phone!.trim().isNotEmpty);
+              return hasInfo || accounts.containsKey(m.id);
+            }).length;
             return RefreshIndicator(
               onRefresh: _load,
               child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 90), children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Text(
-                    '${entries.length} membre${entries.length > 1 ? 's' : ''} · $active compte${active > 1 ? 's' : ''} espace membre',
-                    style: const TextStyle(color: memberMuted, fontSize: 12.5),
+                    '${entries.length} membre${entries.length > 1 ? 's' : ''} · $active actif${active > 1 ? 's' : ''} nan espas la (Aksè Telefòn / Non)',
+                    style: const TextStyle(color: Color(0xFF059669), fontSize: 13, fontWeight: FontWeight.w700),
                   ),
                 ),
                 if (snapshot.connectionState == ConnectionState.waiting && entries.isEmpty)
@@ -199,15 +203,25 @@ class _MemberSpaceAdminPageState extends ConsumerState<MemberSpaceAdminPage>
 
   Widget _memberTile(MemberListEntry entry, Map<String, dynamic>? account) {
     final member = entry.member;
-    final hasAccount = account != null;
+    final hasInfo = member.fullName.trim().isNotEmpty || (member.phone != null && member.phone!.trim().isNotEmpty);
+    final hasAccount = account != null || hasInfo;
     return Card(
       child: ListTile(
         onTap: () => _memberAccess(entry),
-        leading: CircleAvatar(child: Text(member.firstName.isEmpty ? '?' : member.firstName[0].toUpperCase())),
+        leading: CircleAvatar(
+          backgroundColor: hasAccount ? const Color(0xFFECFDF5) : null,
+          child: Text(
+            member.firstName.isEmpty ? '?' : member.firstName[0].toUpperCase(),
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: hasAccount ? const Color(0xFF059669) : null,
+            ),
+          ),
+        ),
         title: Text(member.fullName, style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Text(
           '${member.memberNumber} · '
-          '${hasAccount ? 'Compte actif${account['last_seen_at'] != null ? ' · vu ${fmtDate(account['last_seen_at'], pattern: 'd MMM')}' : ''}' : 'Pas d’accès espace membre'}',
+          '${hasAccount ? 'Aksè aktif (Telefòn / Non)${account?['last_seen_at'] != null ? ' · vu ${fmtDate(account!['last_seen_at'], pattern: 'd MMM')}' : ''}' : 'Pas d’accès espace membre'}',
           style: TextStyle(color: hasAccount ? const Color(0xFF059669) : memberMuted, fontSize: 12.5),
         ),
         trailing: Row(mainAxisSize: MainAxisSize.min, children: [
