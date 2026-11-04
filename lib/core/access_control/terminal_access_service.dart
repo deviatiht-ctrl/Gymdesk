@@ -8,6 +8,10 @@ import '../../features/attendance/data/attendance_repository.dart';
 import '../../features/employees/data/employees_repository.dart';
 import '../../features/employees/domain/employee.dart';
 import '../../features/members/data/members_repository.dart';
+import '../../features/members/domain/member.dart';
+import '../../features/subscriptions/domain/gym_subscription.dart';
+import '../../features/subscriptions/domain/subscription_rules.dart';
+import 'package:drift/drift.dart' show Variable;
 import '../../features/plans/domain/plan.dart';
 import '../biometrics/access_agent_client.dart';
 import '../db/local_database.dart';
@@ -167,6 +171,7 @@ class TerminalAccessService {
   static const _successEvents = {0x1000, 0x1300, 0x1600};
 
   final Map<String, DateTime> _recent = {};
+  final Map<String, AccessPerson> _fastPersonCache = {};
   Map<String, AccessPerson>? _people;
   DateTime? _peopleAt;
 
@@ -257,15 +262,169 @@ class TerminalAccessService {
     }
 
     _people = people;
+    _fastPersonCache.addAll(people);
     _peopleAt = DateTime.now();
     return people;
   }
 
-  void invalidate() => _people = null;
+  void invalidate() {
+    _people = null;
+    _fastPersonCache.clear();
+  }
+
+  void _cachePerson(AccessPerson person) {
+    _fastPersonCache[person.id] = person;
+    _fastPersonCache[terminalUid(person.id)] = person;
+    if (person.isEmployee) {
+      final emp = person.employee;
+      if (emp?.phone != null && emp!.phone!.isNotEmpty) {
+        final phoneDigits = emp.phone!.replaceAll(RegExp(r'\D'), '');
+        if (phoneDigits.isNotEmpty) _fastPersonCache[phoneDigits] = person;
+      }
+    } else {
+      final m = person.entry?.member;
+      if (m != null) {
+        final num = m.memberNumber.trim();
+        if (num.isNotEmpty) {
+          _fastPersonCache[num] = person;
+          _fastPersonCache[num.toLowerCase()] = person;
+          final digits = num.replaceAll(RegExp(r'\D'), '');
+          if (digits.isNotEmpty) {
+            _fastPersonCache[digits] = person;
+            final intVal = int.tryParse(digits);
+            if (intVal != null) _fastPersonCache['$intVal'] = person;
+          }
+        }
+        final phone = m.phone?.replaceAll(RegExp(r'\D'), '');
+        if (phone != null && phone.isNotEmpty) {
+          _fastPersonCache[phone] = person;
+        }
+      }
+    }
+  }
+
+  Future<AccessPerson?> _resolveSingleFromDb(String clean) async {
+    final gymId = session.gymId ?? db.gymId;
+    if (gymId.isEmpty) return null;
+
+    // 1. Tcheke anplwaye an premye (anjeneral mwens pase 20 ranje)
+    try {
+      final employees = await EmployeesRepository(db, session).all();
+      for (final e in employees) {
+        if (e.id == clean || terminalUid(e.id) == clean) {
+          return AccessPerson.employee(e);
+        }
+        final cleanDigits = clean.replaceAll(RegExp(r'\D'), '');
+        final phoneDigits = e.phone?.replaceAll(RegExp(r'\D'), '');
+        if (cleanDigits.isNotEmpty && phoneDigits == cleanDigits) {
+          return AccessPerson.employee(e);
+        }
+      }
+    } catch (_) {}
+
+    // 2. Tcheke manm dirèkteman nan baz SQLite la ak index (< 0.5ms)
+    Record? memberRecord;
+    String idToLookup = clean;
+    if (clean.length == 32 && RegExp(r'^[0-9a-fA-F]{32}$').hasMatch(clean)) {
+      idToLookup = '${clean.substring(0, 8)}-${clean.substring(8, 12)}-${clean.substring(12, 16)}-${clean.substring(16, 20)}-${clean.substring(20)}';
+    }
+
+    if (RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(idToLookup)) {
+      memberRecord = await db.record(SyncEntity.members, idToLookup);
+    }
+
+    if (memberRecord == null) {
+      final numRows = await db.customSelect(
+        r"SELECT * FROM records WHERE entity = 'members' AND gym_id = ? "
+        r"AND deleted_at IS NULL AND ( "
+        r"  json_extract(payload, '$.member_number') = ? OR "
+        r"  json_extract(payload, '$.member_number') = ? "
+        r") LIMIT 1",
+        variables: [
+          Variable.withString(gymId),
+          Variable.withString(clean),
+          Variable.withString(clean.replaceAll(RegExp(r'^0+'), '')),
+        ],
+        readsFrom: {db.records},
+      ).get();
+      if (numRows.isNotEmpty) {
+        memberRecord = db.records.map(numRows.first.data);
+      }
+    }
+
+    final cleanDigits = clean.replaceAll(RegExp(r'\D'), '');
+    if (memberRecord == null && cleanDigits.length >= 6) {
+      final phoneRows = await db.customSelect(
+        r"SELECT * FROM records WHERE entity = 'members' AND gym_id = ? "
+        r"AND deleted_at IS NULL AND ( "
+        r"  replace(replace(replace(replace(json_extract(payload, '$.phone'), '-', ''), ' ', ''), '+', ''), '(', '') LIKE ? "
+        r") LIMIT 1",
+        variables: [
+          Variable.withString(gymId),
+          Variable.withString('%$cleanDigits'),
+        ],
+        readsFrom: {db.records},
+      ).get();
+      if (phoneRows.isNotEmpty) {
+        memberRecord = db.records.map(phoneRows.first.data);
+      }
+    }
+
+    if (memberRecord == null) return null;
+
+    final member = Member(Map<String, dynamic>.from(jsonDecode(memberRecord.payload) as Map));
+    final subRows = await db.getMemberSubscriptions(gymId, member.id);
+    final subs = subRows
+        .map((r) => GymSubscription(Map<String, dynamic>.from(jsonDecode(r.payload) as Map)))
+        .toList();
+    final latestSub = subs.isNotEmpty ? subs.first : null;
+
+    String? planName;
+    final planId = latestSub?.planId;
+    if (planId != null && planId.isNotEmpty) {
+      final planRow = await db.record(SyncEntity.plans, planId);
+      if (planRow != null) {
+        planName = GymPlan(Map<String, dynamic>.from(jsonDecode(planRow.payload) as Map)).name;
+      }
+    }
+
+    final grace = ((session.settings['grace_days'] as num?)?.toInt() ?? 0).clamp(0, 365);
+    final allowPending = session.settings['allow_pending_subscriptions'] == true;
+    final gymDateValue = gymDate(DateTime.now(), session.timezone);
+    final validity = memberValidityFast(
+      member,
+      subs,
+      gymDateValue,
+      graceDays: grace,
+      allowPending: allowPending,
+    );
+
+    final entry = MemberListEntry(
+      member: member,
+      subscription: latestSub,
+      validity: validity,
+    );
+    return AccessPerson.member(entry, planName: planName);
+  }
 
   Future<AccessPerson?> resolve(String uid) async {
     final clean = uid.trim();
     if (clean.isEmpty || clean == '-') return null;
+
+    // 1. Kach memwa rapid (< 0.001ms)
+    final cached = _fastPersonCache[clean] ??
+        _fastPersonCache[clean.toLowerCase()] ??
+        _fastPersonCache[clean.replaceAll('-', '')];
+    if (cached != null) return cached;
+
+    // 2. Chèche dirèk nan baz SQLite la (< 0.5ms) - evite dechiffrer 50,000 manm
+    final resolved = await _resolveSingleFromDb(clean);
+    if (resolved != null) {
+      _cachePerson(resolved);
+      return resolved;
+    }
+
+    // 3. Fallback sou tout moun sèlman si li pa jwenn
     final map = await _loadPeople();
     final direct = map[clean] ?? map[clean.toLowerCase()] ?? map[clean.replaceAll('-', '')];
     if (direct != null) return direct;

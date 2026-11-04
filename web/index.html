@@ -145,6 +145,7 @@
       window.securgymCloseWindow = function () { try { window.close(); } catch (e) {} };
     })();
   </script>
+  <link rel="preload" href="logo_horizontal.png" as="image">
   <link rel="preload" href="canvaskit/canvaskit.wasm" as="fetch" crossOrigin="anonymous">
   <link rel="preload" href="main.dart.js" as="script">
   <style>
@@ -175,61 +176,42 @@
       transform: scale(1.02);
       pointer-events: none;
     }
-    .splash-content {
+        .splash-content {
       display: flex;
       flex-direction: column;
       align-items: center;
       text-align: center;
-      padding: 20px;
-      max-width: 360px;
+      padding: 24px;
+      max-width: 420px;
     }
     .splash-logo-container {
       position: relative;
-      width: 80px;
-      height: 80px;
-      margin-bottom: 24px;
+      margin-bottom: 28px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
     .splash-glow {
       position: absolute;
-      width: 100px;
-      height: 100px;
+      width: 280px;
+      height: 90px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(15, 118, 110, 0.45) 0%, rgba(15, 118, 110, 0) 70%);
-      animation: pulse-glow 2s infinite ease-in-out;
+      background: radial-gradient(ellipse at center, rgba(15, 118, 110, 0.45) 0%, rgba(15, 118, 110, 0) 70%);
+      animation: pulse-glow 2.4s infinite ease-in-out;
+      filter: blur(12px);
+      pointer-events: none;
     }
-    .splash-icon {
-      width: 64px;
-      height: 64px;
-      background: linear-gradient(135deg, #0F766E 0%, #0D9488 50%, #14B8A6 100%);
-      border-radius: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 10px 25px -5px rgba(15, 118, 110, 0.5), 0 8px 10px -6px rgba(15, 118, 110, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.15);
+    .splash-logo-img {
       position: relative;
       z-index: 2;
-    }
-    .splash-title {
-      font-size: 26px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-      margin: 0 0 6px 0;
-      color: #FFFFFF;
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-    }
-    .splash-tagline {
-      font-size: 13px;
-      font-weight: 500;
-      color: #94A3B8;
-      margin: 0 0 28px 0;
-      letter-spacing: 0.3px;
+      max-width: 280px;
+      width: 82vw;
+      height: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.5));
     }
     .splash-progress-track {
-      width: 200px;
+      width: 220px;
       height: 4px;
       background: rgba(255, 255, 255, 0.08);
       border-radius: 999px;
@@ -245,11 +227,14 @@
       width: 45%;
       background: linear-gradient(90deg, #0F766E, #14B8A6, #2DD4BF);
       border-radius: 999px;
-      animation: indeterminate 1.4s infinite cubic-bezier(0.65, 0.815, 0.735, 0.395);
+      animation: indeterminate 1.3s infinite cubic-bezier(0.65, 0.815, 0.735, 0.395);
+      box-shadow: 0 0 10px rgba(45, 212, 191, 0.6);
     }
     .splash-status {
-      font-size: 12px;
-      color: #64748B;
+      font-size: 13px;
+      font-weight: 500;
+      color: #94A3B8;
+      letter-spacing: 0.3px;
       margin: 0;
     }
     @keyframes indeterminate {
@@ -268,14 +253,8 @@
     <div class="splash-content">
       <div class="splash-logo-container">
         <div class="splash-glow"></div>
-        <div class="splash-icon">
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M6 5v14M18 5v14M2 9v6M22 9v6M6 12h12"/>
-          </svg>
-        </div>
+        <img src="logo_horizontal.png" alt="SecurGYM" class="splash-logo-img" width="280">
       </div>
-      <h1 class="splash-title">SecurGYM</h1>
-      <p class="splash-tagline">Sistèm Kontwòl ak Jesyon Gym</p>
       <div class="splash-progress-track">
         <div class="splash-progress-bar"></div>
       </div>

@@ -48,6 +48,8 @@ class LocalDatabase extends _$LocalDatabase {
     },
     beforeOpen: (details) async {
       await customStatement('CREATE INDEX IF NOT EXISTS records_tenant_id ON records(gym_id, entity, deleted_at, id);');
+      await customStatement('CREATE INDEX IF NOT EXISTS subscriptions_member ON records(entity, gym_id, json_extract(payload, \'\$.member_id\'), json_extract(payload, \'\$.end_date\'));');
+      await customStatement('CREATE INDEX IF NOT EXISTS members_number ON records(entity, gym_id, json_extract(payload, \'\$.member_number\'));');
     },
   );
 
@@ -116,6 +118,52 @@ class LocalDatabase extends _$LocalDatabase {
           ))
           .getSingleOrNull();
 
+
+  Future<List<Record>> getMemberSubscriptions(String? gymId, String memberId) async {
+    final gId = gymId ?? this.gymId;
+    final rows = await customSelect(
+      r"SELECT * FROM records WHERE entity = 'subscriptions' AND gym_id = ? "
+      r"AND json_extract(payload, '$.member_id') = ? AND deleted_at IS NULL "
+      r"ORDER BY json_extract(payload, '$.end_date') DESC",
+      variables: [Variable.withString(gId), Variable.withString(memberId)],
+      readsFrom: {records},
+    ).get();
+    return rows.map((r) => records.map(r.data)).toList();
+  }
+
+  Stream<List<Record>> watchMemberSubscriptions(String? gymId, String memberId) {
+    final gId = gymId ?? this.gymId;
+    return customSelect(
+      r"SELECT * FROM records WHERE entity = 'subscriptions' AND gym_id = ? "
+      r"AND json_extract(payload, '$.member_id') = ? AND deleted_at IS NULL "
+      r"ORDER BY json_extract(payload, '$.end_date') DESC",
+      variables: [Variable.withString(gId), Variable.withString(memberId)],
+      readsFrom: {records},
+    ).watch().map((rows) => rows.map((r) => records.map(r.data)).toList());
+  }
+
+  Future<List<Record>> getMemberPayments(String? gymId, String memberId) async {
+    final gId = gymId ?? this.gymId;
+    final rows = await customSelect(
+      r"SELECT * FROM records WHERE entity = 'payments' AND gym_id = ? "
+      r"AND json_extract(payload, '$.member_id') = ? AND deleted_at IS NULL "
+      r"ORDER BY json_extract(payload, '$.paid_at') DESC",
+      variables: [Variable.withString(gId), Variable.withString(memberId)],
+      readsFrom: {records},
+    ).get();
+    return rows.map((r) => records.map(r.data)).toList();
+  }
+
+  Stream<List<Record>> watchMemberPayments(String? gymId, String memberId) {
+    final gId = gymId ?? this.gymId;
+    return customSelect(
+      r"SELECT * FROM records WHERE entity = 'payments' AND gym_id = ? "
+      r"AND json_extract(payload, '$.member_id') = ? AND deleted_at IS NULL "
+      r"ORDER BY json_extract(payload, '$.paid_at') DESC",
+      variables: [Variable.withString(gId), Variable.withString(memberId)],
+      readsFrom: {records},
+    ).watch().map((rows) => rows.map((r) => records.map(r.data)).toList());
+  }
   Stream<List<Record>> watchRecords(SyncEntity entity, {int limit = 100}) =>
       (select(records)
             ..where(

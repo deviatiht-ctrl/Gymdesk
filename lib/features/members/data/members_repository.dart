@@ -182,30 +182,28 @@ class MembersRepository {
       });
 
   Stream<List<GymSubscription>> watchSubscriptions(String memberId) =>
-      db.watchRecords(SyncEntity.subscriptions, limit: 50000).map((rows) {
+      db.watchMemberSubscriptions(session.gymId, memberId).map((rows) {
         final subscriptions = rows
             .map(
               (row) => GymSubscription(
                 Map<String, dynamic>.from(jsonDecode(row.payload) as Map),
               ),
             )
-            .where((s) => s.memberId == memberId && s.deletedAt == null)
+            .where((s) => s.deletedAt == null)
             .toList();
-        subscriptions.sort((a, b) => b.endDate.compareTo(a.endDate));
         return subscriptions;
       });
 
   Stream<List<GymPayment>> watchPayments(String memberId) =>
-      db.watchRecords(SyncEntity.payments, limit: 50000).map((rows) {
+      db.watchMemberPayments(session.gymId, memberId).map((rows) {
         final payments = rows
             .map(
               (row) => GymPayment(
                 Map<String, dynamic>.from(jsonDecode(row.payload) as Map),
               ),
             )
-            .where((p) => p.memberId == memberId && p.deletedAt == null)
+            .where((p) => p.deletedAt == null)
             .toList();
-        payments.sort((a, b) => b.paidAt.compareTo(a.paidAt));
         return payments;
       });
 
@@ -404,8 +402,7 @@ class MembersRepository {
       throw const MemberFailure('invalid_record');
     }
     final subscriptions = await db
-        .watchRecords(SyncEntity.subscriptions, limit: 50000)
-        .first
+        .getMemberSubscriptions(session.gymId, member.id)
         .then(
           (rows) => rows
               .map(
@@ -413,7 +410,7 @@ class MembersRepository {
                   Map<String, dynamic>.from(jsonDecode(row.payload) as Map),
                 ),
               )
-              .where((s) => s.memberId == member.id && s.deletedAt == null)
+              .where((s) => s.deletedAt == null)
               .toList(),
         );
     final today = gymDate(changedAt, session.timezone);

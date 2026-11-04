@@ -85,7 +85,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     setState(() => _busy = true);
     try {
       await action();
-      await ref.read(appRuntimeProvider).sync?.synchronize();
+      // Senkronizasyon rapid an arrye-plan (pa janm bloke UI a menm le internet la lent)
+      unawaited(ref.read(appRuntimeProvider).sync?.synchronize());
     } on MemberFailure catch (e) {
       _error(e.code);
     } on SubscriptionFailure catch (e) {
