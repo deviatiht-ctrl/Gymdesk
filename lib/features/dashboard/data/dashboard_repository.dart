@@ -15,20 +15,36 @@ class DashboardRepository {
   final LocalDatabase db;
   final StaffSession session;
 
-  Stream<DashboardMetrics> watch() => db
-      .customSelect(
-        "SELECT entity, payload FROM records WHERE gym_id = ? AND deleted_at IS NULL",
-        variables: [Variable.withString(db.gymId)],
-        readsFrom: {db.records},
-      )
-      .watch()
-      .map((rows) => _metrics(rows));
+  Stream<DashboardMetrics> watch() {
+    final now = DateTime.now().toUtc();
+    final today = gymDate(now, session.timezone);
+    // Filtre attendance a soti nan kòmansman jounen an (ak yon tanpon 1 jou pou diferans UTC/lokal)
+    final recentScanThreshold = today.subtract(const Duration(days: 1)).toIso8601String();
+
+    return db
+        .customSelect(
+          "SELECT entity, payload FROM records "
+          "WHERE gym_id = ? AND deleted_at IS NULL "
+          "AND ("
+          "  entity IN ('members', 'subscriptions', 'payments') "
+          "  OR (entity = 'attendance' AND json_extract(payload, '\$.scanned_at') >= ?)"
+          ")",
+          variables: [
+            Variable.withString(db.gymId),
+            Variable.withString(recentScanThreshold),
+          ],
+          readsFrom: {db.records},
+        )
+        .watch()
+        .map((rows) => _metrics(rows));
+  }
 
   DashboardMetrics _metrics(List<QueryRow> rows) {
     final members = <Member>[];
     final subscriptions = <GymSubscription>[];
     final payments = <GymPayment>[];
     final attendance = <AttendanceEntry>[];
+
     for (final row in rows) {
       final payload = Map<String, dynamic>.from(
         jsonDecode(row.read<String>('payload')) as Map,
@@ -44,23 +60,32 @@ class DashboardRepository {
         attendance.add(AttendanceEntry(payload));
       }
     }
+
     final today = gymDate(DateTime.now().toUtc(), session.timezone);
     final expiringLimit = today.add(const Duration(days: 30));
     final expiring = <String>{};
     var pendingSubscriptions = 0;
     var pendingAmount = 0.0;
-    for (final subscription in subscriptions.where(
-      (subscription) => subscription.deletedAt == null,
-    )) {
+
+    // Indexation O(1) peman pa subscription_id pou evite bouk O(S * P)
+    final paymentsBySub = <String, double>{};
+    final todaysPayments = <GymPayment>[];
+    for (final payment in payments) {
+      if (payment.deletedAt != null) continue;
+      if (payment.subscriptionId != null) {
+        paymentsBySub[payment.subscriptionId!] =
+            (paymentsBySub[payment.subscriptionId!] ?? 0) + payment.amount;
+      }
+      if (gymDate(payment.paidAt, session.timezone) == today) {
+        todaysPayments.add(payment);
+      }
+    }
+
+    for (final subscription in subscriptions) {
+      if (subscription.deletedAt != null) continue;
       if (subscription.status == 'pending') {
         pendingSubscriptions++;
-        final paid = payments
-            .where(
-              (payment) =>
-                  payment.subscriptionId == subscription.id &&
-                  payment.deletedAt == null,
-            )
-            .fold<double>(0, (total, payment) => total + payment.amount);
+        final paid = paymentsBySub[subscription.id] ?? 0.0;
         pendingAmount += subscription.remainingAfter(paid);
       }
       if (subscription.status == 'active' &&
@@ -69,25 +94,32 @@ class DashboardRepository {
         expiring.add(subscription.memberId);
       }
     }
-    final todaysPayments = payments
-        .where(
-          (payment) =>
-              payment.deletedAt == null &&
-              gymDate(payment.paidAt, session.timezone) == today,
-        )
-        .toList();
-    final todaysAttendance = attendance
-        .where((entry) => gymDate(entry.scannedAt, session.timezone) == today)
-        .toList();
+
+    var entriesToday = 0;
+    var deniedToday = 0;
+    for (final entry in attendance) {
+      if (gymDate(entry.scannedAt, session.timezone) == today) {
+        if (entry.result.startsWith('granted')) {
+          entriesToday++;
+        } else {
+          deniedToday++;
+        }
+      }
+    }
+
+    var activeMembers = 0;
+    var suspendedMembers = 0;
+    for (final member in members) {
+      if (member.status == 'active' && member.deletedAt == null) {
+        activeMembers++;
+      } else if (member.status == 'suspended') {
+        suspendedMembers++;
+      }
+    }
+
     return DashboardMetrics(
-      activeMembers: members
-          .where(
-            (member) => member.status == 'active' && member.deletedAt == null,
-          )
-          .length,
-      suspendedMembers: members
-          .where((member) => member.status == 'suspended')
-          .length,
+      activeMembers: activeMembers,
+      suspendedMembers: suspendedMembers,
       expiringMembers: expiring.length,
       pendingSubscriptions: pendingSubscriptions,
       pendingAmount: pendingAmount,
@@ -96,12 +128,8 @@ class DashboardRepository {
         0,
         (total, payment) => total + payment.amount,
       ),
-      entriesToday: todaysAttendance
-          .where((entry) => entry.result.startsWith('granted'))
-          .length,
-      deniedToday: todaysAttendance
-          .where((entry) => !entry.result.startsWith('granted'))
-          .length,
+      entriesToday: entriesToday,
+      deniedToday: deniedToday,
     );
   }
 }

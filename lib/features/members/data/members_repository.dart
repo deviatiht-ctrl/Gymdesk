@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:drift/drift.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -56,57 +56,72 @@ class MembersRepository {
       if (members == null || subscriptions == null || controller.isClosed) {
         return;
       }
-      final byMember = <String, List<GymSubscription>>{};
-      for (final subscription in subscriptions!) {
-        byMember.putIfAbsent(subscription.memberId, () => []).add(subscription);
-      }
-      final text = query.trim().toLowerCase();
       final now = DateTime.now().toUtc();
-      final result = members!
-          .where((member) {
-            if (text.isNotEmpty) {
-              final haystack =
-                  '${member.firstName} ${member.lastName} ${member.memberNumber} ${member.phone ?? ''} ${member.nif ?? ''}'
-                      .toLowerCase();
-              if (!haystack.contains(text)) return false;
-            }
-            final validity = memberValidity(
-              member,
-              byMember[member.id] ?? const [],
-              session.settings,
-              now,
-              session.timezone,
-            );
-            return switch (filter) {
-              'active' || 'suspended' || 'archived' => member.status == filter,
-              'valid' => validity.valid,
-              'expiring' => validity.valid && (validity.daysLeft ?? 0) <= 7,
-              'expired' => validity.reason == 'expired',
-              'pending' => validity.reason == 'pending_payment',
-              'pending_fingerprint' => !member.fingerprintRegistered,
-              'none' => validity.reason == 'no_subscription',
-              _ => true,
-            };
-          })
-          .map((member) {
-            final current = _currentSubscription(
-              byMember[member.id] ?? const [],
-              now,
-            );
-            return MemberListEntry(
-              member: member,
-              subscription: current,
-              validity: memberValidity(
-                member,
-                byMember[member.id] ?? const [],
-                session.settings,
-                now,
-                session.timezone,
-              ),
-            );
-          })
-          .toList();
-      result.sort(
+      final gymDateValue = gymDate(now, session.timezone);
+      final grace = ((session.settings['grace_days'] as num?)?.toInt() ?? 0)
+          .clamp(0, 365)
+          .toInt();
+      final allowPending = session.settings['allow_access_pending'] == true;
+
+      final byMember = <String, List<GymSubscription>>{};
+      for (final s in subscriptions!) {
+        if (s.deletedAt == null && s.status != 'cancelled') {
+          byMember.putIfAbsent(s.memberId, () => []).add(s);
+        }
+      }
+      for (final list in byMember.values) {
+        if (list.length > 1) {
+          list.sort(
+            (a, b) => a.endDate != b.endDate
+                ? b.endDate.compareTo(a.endDate)
+                : b.id.compareTo(a.id),
+          );
+        }
+      }
+
+      final text = query.trim().toLowerCase();
+      final allEntries = <MemberListEntry>[];
+
+      for (final member in members!) {
+        final subs = byMember[member.id] ?? const <GymSubscription>[];
+        final validity = memberValidityFast(
+          member,
+          subs,
+          gymDateValue,
+          graceDays: grace,
+          allowPending: allowPending,
+        );
+
+        if (text.isNotEmpty) {
+          final haystack =
+              '${member.firstName} ${member.lastName} ${member.memberNumber} ${member.phone ?? ''} ${member.nif ?? ''}'
+                  .toLowerCase();
+          if (!haystack.contains(text)) continue;
+        }
+
+        final matchesFilter = switch (filter) {
+          'active' || 'suspended' || 'archived' => member.status == filter,
+          'valid' => validity.valid,
+          'expiring' => validity.valid && (validity.daysLeft ?? 0) <= 7,
+          'expired' => validity.reason == 'expired',
+          'pending' => validity.reason == 'pending_payment',
+          'pending_fingerprint' => !member.fingerprintRegistered,
+          'none' => validity.reason == 'no_subscription',
+          _ => true,
+        };
+        if (!matchesFilter) continue;
+
+        final current = _currentFromSorted(subs, gymDateValue);
+        allEntries.add(
+          MemberListEntry(
+            member: member,
+            subscription: current,
+            validity: validity,
+          ),
+        );
+      }
+
+      allEntries.sort(
         (a, b) =>
             a.member.lastName.toLowerCase() != b.member.lastName.toLowerCase()
             ? a.member.lastName.toLowerCase().compareTo(
@@ -116,7 +131,7 @@ class MembersRepository {
                 b.member.firstName.toLowerCase(),
               ),
       );
-      controller.add(result);
+      controller.add(allEntries);
     }
 
     controller = StreamController<List<MemberListEntry>>(
@@ -606,24 +621,41 @@ class MembersRepository {
     }
   }
 
-  GymSubscription? _currentSubscription(
-    List<GymSubscription> subscriptions,
-    DateTime now,
+  GymSubscription? _currentFromSorted(
+    List<GymSubscription> usableSorted,
+    DateTime gymDateValue,
   ) {
-    final date = gymDate(now, session.timezone);
-    final usable =
-        subscriptions
-            .where((s) => s.deletedAt == null && s.status != 'cancelled')
-            .toList()
-          ..sort(
-            (a, b) => a.endDate != b.endDate
-                ? b.endDate.compareTo(a.endDate)
-                : b.id.compareTo(a.id),
-          );
-    for (final subscription in usable) {
-      if (!subscription.startDate.isAfter(date)) return subscription;
+    for (final subscription in usableSorted) {
+      if (!subscription.startDate.isAfter(gymDateValue)) return subscription;
     }
-    return usable.isEmpty ? null : usable.first;
+    return usableSorted.isEmpty ? null : usableSorted.first;
+  }
+
+  Future<List<Member>> membersWithFingerprints() async {
+    final rows = await (db.select(db.records)
+          ..where(
+            (t) =>
+                t.entity.equals(SyncEntity.members.table) &
+                t.gymId.equals(db.gymId) &
+                t.deletedAt.isNull(),
+          ))
+        .get();
+    final result = <Member>[];
+    for (final r in rows) {
+      if (r.payload.contains('"fingerprint_registered":true') ||
+          r.payload.contains('"fingerprint_template"')) {
+        try {
+          final m = Member(
+            Map<String, dynamic>.from(jsonDecode(r.payload) as Map),
+          );
+          if (m.fingerprintRegistered &&
+              (m.fingerprintTemplate?.isNotEmpty ?? false)) {
+            result.add(m);
+          }
+        } catch (_) {}
+      }
+    }
+    return result;
   }
 
   void _validateRegistration(MemberRegistration draft) {

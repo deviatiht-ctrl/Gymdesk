@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -18,7 +17,6 @@ import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
 import '../../../core/widgets/scanner_camera_view.dart';
 import '../../members/data/members_repository.dart';
-import '../../members/domain/member.dart';
 import '../data/attendance_repository.dart';
 import '../domain/attendance_entry.dart';
 
@@ -155,13 +153,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
       // 2. Si pa gen badge ki te scanne:
       // Si mode se 'fingerprint_only' oswa 'combo' oswa biometrik aktive: 1:N match
       if (isBiometricEnabled || mode == 'fingerprint_only') {
-        final membersRows = await runtime.database!
-            .watchRecords(SyncEntity.members, limit: 50000)
-            .first;
-        final members = membersRows
-            .map((r) => Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map)))
-            .where((m) => m.fingerprintRegistered && (m.fingerprintTemplate?.isNotEmpty ?? false))
-            .toList();
+        final members = await _membersRepo.membersWithFingerprints();
 
         final matchedMember = await bioService.match1toN(
           candidateTemplate: template,

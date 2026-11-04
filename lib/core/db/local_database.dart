@@ -46,6 +46,9 @@ class LocalDatabase extends _$LocalDatabase {
         await customStatement('CREATE INDEX IF NOT EXISTS member_pins_member ON records(entity, gym_id, json_extract(payload, \'\$.member_id\'));');
       }
     },
+    beforeOpen: (details) async {
+      await customStatement('CREATE INDEX IF NOT EXISTS records_tenant_id ON records(gym_id, entity, deleted_at, id);');
+    },
   );
 
   Future<Record?> badgeByToken(String token) async {
@@ -348,22 +351,42 @@ class LocalDatabase extends _$LocalDatabase {
 
   Future<void> repairSyncPayloads() async {
     try {
-      await customUpdate(
-        "UPDATE records SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"') WHERE entity = 'members' AND payload LIKE '%portal_web%'",
-        updates: {records},
-      );
-      await customUpdate(
-        "UPDATE outbox SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"'), status = 'pending', last_error = null, next_attempt_at = null WHERE entity = 'members' AND payload LIKE '%portal_web%'",
-        updates: {outbox},
-      );
-      await customUpdate(
-        "UPDATE records SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"') WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
-        updates: {records},
-      );
-      await customUpdate(
-        "UPDATE outbox SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"'), status = 'pending', last_error = null, next_attempt_at = null WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
-        updates: {outbox},
-      );
+      final alreadyDone = await metadata('repaired_sync_payloads_v2');
+      if (alreadyDone == 'true') return;
+
+      final needsMemberFix = await customSelect(
+        "SELECT 1 FROM records WHERE entity = 'members' AND payload LIKE '%portal_web%' LIMIT 1",
+        readsFrom: {},
+      ).get();
+
+      if (needsMemberFix.isNotEmpty) {
+        await customUpdate(
+          "UPDATE records SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"') WHERE entity = 'members' AND payload LIKE '%portal_web%'",
+          updates: {records},
+        );
+        await customUpdate(
+          "UPDATE outbox SET payload = replace(payload, '\"enrollment_origin\":\"portal_web\"', '\"enrollment_origin\":\"new\"'), status = 'pending', last_error = null, next_attempt_at = null WHERE entity = 'members' AND payload LIKE '%portal_web%'",
+          updates: {outbox},
+        );
+      }
+
+      final needsSubFix = await customSelect(
+        "SELECT 1 FROM records WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%' LIMIT 1",
+        readsFrom: {},
+      ).get();
+
+      if (needsSubFix.isNotEmpty) {
+        await customUpdate(
+          "UPDATE records SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"') WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
+          updates: {records},
+        );
+        await customUpdate(
+          "UPDATE outbox SET payload = replace(payload, '\"enrollment_kind\":\"new\"', '\"enrollment_kind\":\"registration\"'), status = 'pending', last_error = null, next_attempt_at = null WHERE entity = 'subscriptions' AND payload LIKE '%\"enrollment_kind\":\"new\"%'",
+          updates: {outbox},
+        );
+      }
+
+      await setMetadata('repaired_sync_payloads_v2', 'true');
     } catch (_) {}
   }
 

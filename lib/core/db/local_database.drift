@@ -8,6 +8,7 @@ CREATE TABLE records (
   PRIMARY KEY (entity, id)
 );
 CREATE INDEX records_tenant ON records(gym_id, entity, deleted_at);
+CREATE INDEX records_tenant_id ON records(gym_id, entity, deleted_at, id);
 CREATE INDEX members_name ON records(entity, gym_id, json_extract(payload, '$.last_name'), id);
 CREATE INDEX members_token ON records(entity, gym_id, json_extract(payload, '$.qr_token'));
 CREATE INDEX subscriptions_member ON records(entity, gym_id, json_extract(payload, '$.member_id'), json_extract(payload, '$.end_date'));

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,7 +12,6 @@ import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/biometrics/biometric_service.dart';
-import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
 import '../../attendance/data/attendance_repository.dart';
 import '../../members/data/members_repository.dart';
@@ -204,13 +202,8 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       if (db == null) throw Exception('Database offline');
 
       // 1:N Identification dans la base locale via BiometricService
-      final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
-      final members = <Member>[];
-      for (final r in rows) {
-        try {
-          members.add(Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map)));
-        } catch (_) {}
-      }
+      final membersRepo = MembersRepository(runtime.client, db, runtime.session!);
+      final members = await membersRepo.membersWithFingerprints();
       final matched = await _biometricService.match1toN(
         candidateTemplate: probeTemplate,
         members: members,

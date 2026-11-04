@@ -34,6 +34,82 @@ class MemberValidity {
   final int? daysLeft;
 }
 
+MemberValidity memberValidityFast(
+  Member member,
+  List<GymSubscription> usableSorted,
+  DateTime gymDateValue, {
+  required int graceDays,
+  required bool allowPending,
+}) {
+  if (member.status != 'active') {
+    return MemberValidity(valid: false, reason: member.status);
+  }
+  for (final subscription in usableSorted) {
+    if (subscription.status != 'pending' || allowPending) {
+      if (!subscription.startDate.isAfter(gymDateValue) &&
+          !subscription.endDate.add(Duration(days: graceDays)).isBefore(gymDateValue)) {
+        return MemberValidity(
+          valid: true,
+          reason: 'ok',
+          subscriptionId: subscription.id,
+          endDate: subscription.endDate,
+          daysLeft: subscription.endDate
+              .difference(gymDateValue)
+              .inDays
+              .clamp(0, 36500)
+              .toInt(),
+        );
+      }
+    }
+  }
+  for (final subscription in usableSorted) {
+    if (subscription.status != 'pending' || allowPending) {
+      if (!subscription.endDate.add(Duration(days: graceDays)).isBefore(gymDateValue)) {
+        return MemberValidity(
+          valid: true,
+          reason: 'ok',
+          subscriptionId: subscription.id,
+          endDate: subscription.endDate,
+          daysLeft: subscription.endDate
+              .difference(subscription.startDate.isAfter(gymDateValue) ? subscription.startDate : gymDateValue)
+              .inDays
+              .clamp(0, 36500)
+              .toInt(),
+        );
+      }
+    }
+  }
+  for (final subscription in usableSorted) {
+    if (subscription.status == 'pending') {
+      if (!subscription.endDate.add(Duration(days: graceDays)).isBefore(gymDateValue)) {
+        return MemberValidity(
+          valid: false,
+          reason: 'pending_payment',
+          subscriptionId: subscription.id,
+          endDate: subscription.endDate,
+          daysLeft: subscription.endDate
+              .difference(subscription.startDate.isAfter(gymDateValue) ? subscription.startDate : gymDateValue)
+              .inDays
+              .clamp(0, 36500)
+              .toInt(),
+        );
+      }
+    }
+  }
+  for (final subscription in usableSorted) {
+    if (subscription.endDate.isBefore(gymDateValue)) {
+      return MemberValidity(
+        valid: false,
+        reason: 'expired',
+        subscriptionId: subscription.id,
+        endDate: subscription.endDate,
+        daysLeft: 0,
+      );
+    }
+  }
+  return const MemberValidity(valid: false, reason: 'no_subscription');
+}
+
 MemberValidity memberValidity(
   Member member,
   List<GymSubscription> subscriptions,
@@ -49,76 +125,21 @@ MemberValidity memberValidity(
       .clamp(0, 365)
       .toInt();
   final allowPending = settings['allow_access_pending'] == true;
-  final usable =
-      subscriptions
-          .where((s) => s.deletedAt == null && s.status != 'cancelled')
-          .toList()
-        ..sort(
-          (a, b) => a.endDate != b.endDate
-              ? b.endDate.compareTo(a.endDate)
-              : b.id.compareTo(a.id),
-        );
-  final pending = usable.where((s) => s.status == 'pending').toList();
-  for (final subscription in usable.where(
-    (s) => s.status != 'pending' || allowPending,
-  )) {
-    if (!subscription.startDate.isAfter(date) &&
-        !subscription.endDate.add(Duration(days: grace)).isBefore(date)) {
-      return MemberValidity(
-        valid: true,
-        reason: 'ok',
-        subscriptionId: subscription.id,
-        endDate: subscription.endDate,
-        daysLeft: subscription.endDate
-            .difference(date)
-            .inDays
-            .clamp(0, 36500)
-            .toInt(),
-      );
-    }
+  final usable = subscriptions
+      .where((s) => s.deletedAt == null && s.status != 'cancelled')
+      .toList();
+  if (usable.length > 1) {
+    usable.sort(
+      (a, b) => a.endDate != b.endDate
+          ? b.endDate.compareTo(a.endDate)
+          : b.id.compareTo(a.id),
+    );
   }
-  for (final subscription in usable.where(
-    (s) => s.status != 'pending' || allowPending,
-  )) {
-    if (!subscription.endDate.add(Duration(days: grace)).isBefore(date)) {
-      return MemberValidity(
-        valid: true,
-        reason: 'ok',
-        subscriptionId: subscription.id,
-        endDate: subscription.endDate,
-        daysLeft: subscription.endDate
-            .difference(subscription.startDate.isAfter(date) ? subscription.startDate : date)
-            .inDays
-            .clamp(0, 36500)
-            .toInt(),
-      );
-    }
-  }
-  for (final subscription in pending) {
-    if (!subscription.endDate.add(Duration(days: grace)).isBefore(date)) {
-      return MemberValidity(
-        valid: false,
-        reason: 'pending_payment',
-        subscriptionId: subscription.id,
-        endDate: subscription.endDate,
-        daysLeft: subscription.endDate
-            .difference(subscription.startDate.isAfter(date) ? subscription.startDate : date)
-            .inDays
-            .clamp(0, 36500)
-            .toInt(),
-      );
-    }
-  }
-  for (final subscription in usable) {
-    if (subscription.endDate.isBefore(date)) {
-      return MemberValidity(
-        valid: false,
-        reason: 'expired',
-        subscriptionId: subscription.id,
-        endDate: subscription.endDate,
-        daysLeft: 0,
-      );
-    }
-  }
-  return const MemberValidity(valid: false, reason: 'no_subscription');
+  return memberValidityFast(
+    member,
+    usable,
+    date,
+    graceDays: grace,
+    allowPending: allowPending,
+  );
 }
