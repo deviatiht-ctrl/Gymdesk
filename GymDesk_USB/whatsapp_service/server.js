@@ -711,20 +711,31 @@ app.get('/api/status', (req, res) => {
 // 2. Lis konplè tout liy WhatsApp yo nan cluster a
 app.get('/api/accounts', (req, res) => {
   const accounts = cluster.getAllAccounts().map((a) => ({
+    id: 'account_' + a.accountIndex,
+    account_index: a.accountIndex,
     index: a.accountIndex,
     label: a.label,
+    service_status: a.status,
     status: a.status,
+    phone_number: a.phone,
     phone: a.phone,
+    push_name: a.pushName,
     pushName: a.pushName,
+    qr_code: a.qrCodeDataUrl,
     qr: a.qrCodeDataUrl,
     rawQr: a.rawQrCode,
+    sent_today: a.sentToday,
     sentToday: a.sentToday,
+    daily_limit: a.dailyLimit,
     dailyLimit: a.dailyLimit,
-    lastSentAt: a.lastSentAt ? new Date(a.lastSentAt).toISOString() : null,
-    isRestricted: a.isRestricted,
-    restrictedUntil: a.restrictedUntil,
-    restrictionReason: a.restrictionReason,
-    lastError: a.lastError,
+    total_sent: 0,
+    is_online: true,
+    is_enabled: true,
+    last_sent_at: a.lastSentAt ? new Date(a.lastSentAt).toISOString() : null,
+    is_restricted: a.isRestricted,
+    restricted_until: a.restrictedUntil,
+    restriction_reason: a.restrictionReason,
+    last_error: a.lastError,
   }));
   res.json({ ok: true, accounts });
 });

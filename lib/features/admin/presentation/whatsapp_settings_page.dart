@@ -2047,35 +2047,37 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       if (diff.isNegative) {
         remainingText = 'Restriksyon fini';
       } else {
-        remainingText = 'h m k ap rete';
+        remainingText = '${diff.inHours}h ${diff.inMinutes % 60}m k ap rete';
       }
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isRestricted
             ? Colors.red.shade50.withOpacity(0.4)
             : isReady
                 ? Colors.green.shade50.withOpacity(0.3)
-                : theme.colorScheme.surface,
+                : isWaitingQr
+                    ? Colors.amber.shade50.withOpacity(0.3)
+                    : theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cardBorder, width: 1.3),
+        border: Border.all(color: cardBorder, width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(badgeIcon, color: badgeColor, size: 20),
+              Icon(badgeIcon, color: badgeColor, size: 22),
               const SizedBox(width: 10),
               Expanded(
                 child: Row(
                   children: [
                     Text(
-                      'Liy  : ',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      'Liy ${acc.accountIndex} : ${acc.label}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     if (acc.phoneNumber != null && acc.phoneNumber!.isNotEmpty) ...[
                       const SizedBox(width: 8),
@@ -2087,7 +2089,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         ),
                         child: Text(
                           acc.phoneNumber!,
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
@@ -2123,7 +2125,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'WhatsApp te limite nimewo sa a pou 24h. Sistèm nan mete l sou kote pou l pa voye mesaj sou li jiskaske peryòd la fini (). Tout rès mesaj yo ap voye sou lòt liy aktif yo.',
+                      'WhatsApp te limite nimewo sa a pou 24h. Sistèm nan mete l sou kote pou l pa voye mesaj sou li jiskaske peryòd la fini ($remainingText). Tout rès mesaj yo ap voye sou lòt liy aktif yo.',
                       style: TextStyle(fontSize: 12, color: Colors.red.shade900),
                     ),
                   ),
@@ -2135,12 +2137,98 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         await _loadAccountsList();
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Liy  debloke manyèlman.'), backgroundColor: Colors.teal),
+                            SnackBar(content: Text('Liy ${acc.accountIndex} debloke manyèlman.'), backgroundColor: Colors.teal),
                           );
                         }
                       }
                     },
                     child: const Text('Debloke Manyèlman', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // AFICHAJ KÒD QR LA DIRÈKTEMAN SOU KAT LA SI L AP TANN ESKANÈ!
+          if (isWaitingQr) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.shade500, width: 1.5),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 150,
+                    height: 150,
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: acc.qrCode != null && acc.qrCode!.contains(',')
+                        ? Image.memory(
+                            base64Decode(acc.qrCode!.split(',')[1]),
+                            fit: BoxFit.contain,
+                          )
+                        : (acc.qrCode != null && acc.qrCode!.isNotEmpty)
+                            ? QrImageView(
+                                data: acc.qrCode!,
+                                version: QrVersions.auto,
+                                size: 140,
+                                gapless: false,
+                              )
+                            : const Center(child: CircularProgressIndicator()),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.qrCode, color: Color(0xFF1EBE5D), size: 18),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Kòd QR pou ${acc.label}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          '1. Louvri WhatsApp sou telefòn ou.
+2. Klike sou 3 pwen anlè a > "Aparèy Konekte".
+3. Klike "Konekte yon aparèy" epi vize kamera w sou kòd sa a.',
+                          style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () => _showQrDialog(acc),
+                              icon: const Icon(LucideIcons.expand, size: 13),
+                              label: const Text('Agrandi'),
+                              style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                                await _loadAccountsList();
+                              },
+                              icon: const Icon(LucideIcons.refreshCw, size: 13),
+                              label: const Text('Rafrechi QR'),
+                              style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -2153,20 +2241,10 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           Row(
             children: [
               Text(
-                'Voye jodi a:  /  msg  •  Total istorik: ',
-                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+                'Voye jodi a: ${acc.sentToday} / ${acc.dailyLimit} msg  •  Total istorik: ${acc.totalSent}',
+                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
               ),
               const Spacer(),
-              if (isWaitingQr)
-                FilledButton.icon(
-                  onPressed: () => _showQrDialog(acc),
-                  icon: const Icon(LucideIcons.qrCode, size: 14),
-                  label: const Text('Eskane Kòd QR'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.amber.shade800,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
               if (isReady) ...[
                 OutlinedButton.icon(
                   onPressed: () async {
@@ -2185,7 +2263,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     final confirm = await showDialog<bool>(
                       context: context,
                       builder: (c) => AlertDialog(
-                        title: Text('Reyinisyalize Liy  ?'),
+                        title: Text('Reyinisyalize Liy ${acc.accountIndex} ?'),
                         content: const Text('Sa pral dekonekte nimewo sa a pou w ka eskane yon lòt nimewo ak yon nouvo kòd QR.'),
                         actions: [
                           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Anile')),
@@ -2228,7 +2306,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               children: [
                 const Icon(LucideIcons.qrCode, color: Color(0xFF1EBE5D)),
                 const SizedBox(width: 10),
-                Text('Eskane Kòd QR - '),
+                Text('Eskane Kòd QR - ${liveAcc.label}'),
               ],
             ),
             content: Column(

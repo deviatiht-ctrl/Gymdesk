@@ -256,7 +256,9 @@ class WhatsAppAccountInfo {
   final String? lastError;
 
   bool get isReady => serviceStatus.toUpperCase() == 'READY';
-  bool get isWaitingForQr => serviceStatus.toUpperCase() == 'SCAN_QR' && qrCode != null && qrCode!.isNotEmpty;
+  bool get isWaitingForQr =>
+      serviceStatus.toUpperCase() == 'SCAN_QR' ||
+      (qrCode != null && qrCode!.isNotEmpty && serviceStatus.toUpperCase() != 'READY' && serviceStatus.toUpperCase() != 'RESTRICTED');
   bool get isRestricted {
     if (serviceStatus.toUpperCase() == 'RESTRICTED') {
       if (restrictedUntil == null) return true;
@@ -275,24 +277,36 @@ class WhatsAppAccountInfo {
       }
     }
 
+    final rawStatus = (json['service_status'] ?? json['status'])?.toString() ?? 'DISCONNECTED';
+    final rawQr = (json['qr_code'] ?? json['qr'] ?? json['rawQr'])?.toString();
+    final rawIndex = (json['account_index'] ?? json['index'] as num?)?.toInt() ?? 1;
+    final rawLabel = json['label']?.toString() ?? 'Liy ' + rawIndex.toString();
+    final rawPhone = (json['phone_number'] ?? json['phone'])?.toString();
+    final rawPush = (json['push_name'] ?? json['pushName'])?.toString();
+    final rawEnabled = (json['is_enabled'] ?? json['isEnabled'] as bool?) ?? true;
+    final rawDailyLimit = (json['daily_limit'] ?? json['dailyLimit'] as num?)?.toInt() ?? 40;
+    final rawSentToday = (json['sent_today'] ?? json['sentToday'] as num?)?.toInt() ?? 0;
+    final rawTotalSent = (json['total_sent'] ?? json['totalSent'] as num?)?.toInt() ?? 0;
+    final rawOnline = (json['is_online'] ?? json['isOnline'] as bool?) ?? false;
+
     return WhatsAppAccountInfo(
-      id: json['id']?.toString() ?? '',
-      accountIndex: (json['account_index'] as num?)?.toInt() ?? 1,
-      label: json['label']?.toString() ?? 'Liy',
-      phoneNumber: json['phone_number']?.toString(),
-      pushName: json['push_name']?.toString(),
-      serviceStatus: json['service_status']?.toString() ?? 'DISCONNECTED',
-      qrCode: json['qr_code']?.toString(),
-      isEnabled: json['is_enabled'] as bool? ?? true,
-      dailyLimit: (json['daily_limit'] as num?)?.toInt() ?? 40,
-      sentToday: (json['sent_today'] as num?)?.toInt() ?? 0,
-      totalSent: (json['total_sent'] as num?)?.toInt() ?? 0,
-      lastSentAt: parseDate(json['last_sent_at']),
-      lastHeartbeat: parseDate(json['last_heartbeat']),
-      isOnline: json['is_online'] as bool? ?? false,
-      restrictedUntil: parseDate(json['restricted_until']),
-      restrictionReason: json['restriction_reason']?.toString(),
-      lastError: json['last_error']?.toString(),
+      id: json['id']?.toString() ?? 'acc_' + rawIndex.toString(),
+      accountIndex: rawIndex,
+      label: rawLabel,
+      phoneNumber: rawPhone,
+      pushName: rawPush,
+      serviceStatus: rawStatus,
+      qrCode: rawQr,
+      isEnabled: rawEnabled,
+      dailyLimit: rawDailyLimit,
+      sentToday: rawSentToday,
+      totalSent: rawTotalSent,
+      lastSentAt: parseDate(json['last_sent_at'] ?? json['lastSentAt']),
+      lastHeartbeat: parseDate(json['last_heartbeat'] ?? json['lastHeartbeat']),
+      isOnline: rawOnline,
+      restrictedUntil: parseDate(json['restricted_until'] ?? json['restrictedUntil']),
+      restrictionReason: (json['restriction_reason'] ?? json['restrictionReason'])?.toString(),
+      lastError: (json['last_error'] ?? json['lastError'])?.toString(),
     );
   }
 }
