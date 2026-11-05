@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../app/providers.dart';
 import '../sync/sync_models.dart';
@@ -12,11 +13,12 @@ import '../../features/payments/data/receipt_pdf.dart';
 
 /// Sèvis Otomatik pou notifikasyon WhatsApp SecurGYM
 /// Responsab pou:
-/// 1. Voye mesaj byenvini lè yon moun fin enskri (ak lyen espas manm li, nimewo li, etc.)
-/// 2. Voye resi peman an otomatikman an PDF sou WhatsApp
-/// 3. Voye rapèl abònman otomatik 7 jou anvan li fini
-/// 4. Asire tout mesaj gen nòt obligatwa pou anrejistre nimewo a sou non "SecurGYM"
-///    epi bay nimewo telefòn gym lan pou yo ka reponn olye yo reponn sou bot la.
+/// 1. Verifye si gym nan gen aksè abònman aktif pou sèvis WhatsApp
+/// 2. Voye mesaj byenvini lè yon moun fin enskri (ak lyen espas manm li, nimewo li, etc.)
+/// 3. Voye resi peman an otomatikman an PDF sou WhatsApp
+/// 4. Voye rapèl abònman otomatik 7 jou anvan li fini
+/// 5. Asire tout mesaj gen nòt obligatwa pou anrejistre nimewo a sou non "SecurGYM"
+///    epi bay nimewo telefòn ofisyèl gym lan pou yo ka reponn olye yo reponn sou bot la.
 class WhatsAppNotificationService {
   WhatsAppNotificationService(this._client, this._ref);
 
@@ -25,6 +27,49 @@ class WhatsAppNotificationService {
 
   // Cache pou evite voye menm rapèl la 2 fwa nan menm jounen an
   static final Set<String> _sentReminderKeys = {};
+
+  /// Verifye si gym nan gen dwa voye mesaj WhatsApp (Abònman valab, pa sispann, pa ekspire)
+  Future<WhatsAppAccessCheckResult> checkGymAccess({String? gymId}) async {
+    final runtime = _ref.read(appRuntimeProvider);
+    final isSuper = runtime.session?.isPlatformAdmin == true;
+    if (isSuper) {
+      return const WhatsAppAccessCheckResult(
+        hasAccess: true,
+        status: 'active',
+        daysRemaining: 999,
+        message: 'Aksè Super Admin aktif.',
+      );
+    }
+
+    final targetGymId = gymId ?? runtime.session?.gymId;
+    if (targetGymId == null || targetGymId.isEmpty) {
+      return const WhatsAppAccessCheckResult(
+        hasAccess: false,
+        status: 'inactive',
+        message: 'Gym pa idantifye.',
+      );
+    }
+
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'gym_whatsapp_access_check',
+        params: {'p_gym_id': targetGymId},
+      );
+      if (res != null && res is Map) {
+        return WhatsAppAccessCheckResult.fromJson(Map<String, dynamic>.from(res));
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè verifikasyon rpc gym_whatsapp_access_check: $e');
+    }
+
+    // Fallback si offline oswa tab la poko gen antre a
+    return const WhatsAppAccessCheckResult(
+      hasAccess: true,
+      status: 'active',
+      daysRemaining: 30,
+      message: 'Aksè lokal aktif.',
+    );
+  }
 
   /// 1. MESAJ BYENVINI AK ENSKRIPSYON (Welcome / Inscription)
   Future<bool> sendWelcomeMessage({
@@ -40,6 +85,14 @@ class WhatsAppNotificationService {
     if (cleanTo.length < 8) return false;
 
     final targetGymId = gymId ?? _ref.read(appRuntimeProvider).session?.gymId ?? '';
+
+    // Verifye aksè abònman gym nan
+    final access = await checkGymAccess(gymId: targetGymId);
+    if (!access.hasAccess) {
+      debugPrint('[WhatsApp] Mesaj Byenvini bloke: ${access.message}');
+      return false;
+    }
+
     final portalUrl = targetGymId.isNotEmpty
         ? 'https://securgym.com/m/$targetGymId'
         : 'https://securgym.com/espace-membre';
@@ -78,6 +131,14 @@ class WhatsAppNotificationService {
   }) async {
     final cleanTo = WhatsAppClient.normalizePhone(to);
     if (cleanTo.length < 8) return false;
+
+    // Verifye aksè abònman gym nan
+    final targetGymId = _ref.read(appRuntimeProvider).session?.gymId;
+    final access = await checkGymAccess(gymId: targetGymId);
+    if (!access.hasAccess) {
+      debugPrint('[WhatsApp] Resi bloke: ${access.message}');
+      return false;
+    }
 
     final effectiveGymPhone = (gymPhone != null && gymPhone.trim().isNotEmpty)
         ? gymPhone.trim()
@@ -129,6 +190,14 @@ class WhatsAppNotificationService {
     if (cleanTo.length < 8) return false;
 
     final targetGymId = gymId ?? _ref.read(appRuntimeProvider).session?.gymId ?? '';
+
+    // Verifye aksè abònman gym nan
+    final access = await checkGymAccess(gymId: targetGymId);
+    if (!access.hasAccess) {
+      debugPrint('[WhatsApp] Rapèl bloke: ${access.message}');
+      return false;
+    }
+
     final portalUrl = targetGymId.isNotEmpty
         ? 'https://securgym.com/m/$targetGymId'
         : 'https://securgym.com/espace-membre';
@@ -168,10 +237,18 @@ class WhatsAppNotificationService {
     final session = runtime.session;
     if (db == null || session == null) return 0;
 
+    final gymId = session.gymId ?? '';
+
+    // Verifye aksè abònman WhatsApp gym nan
+    final access = await checkGymAccess(gymId: gymId);
+    if (!access.hasAccess) {
+      debugPrint('[WhatsApp] Tcheke rapèl bloke: ${access.message}');
+      return 0;
+    }
+
     final gym = session.gym ?? const <String, dynamic>{};
     final gymName = gym['name'] as String? ?? 'SecurGYM';
     final gymPhone = gym['phone'] as String? ?? '';
-    final gymId = session.gymId ?? '';
 
     // Verifye si sèvis WhatsApp la pare
     final state = await _client.checkStatus();
@@ -183,7 +260,6 @@ class WhatsAppNotificationService {
     int sentCount = 0;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final targetDate = today.add(Duration(days: daysBefore));
 
     try {
       // 1. Chaje manm yo
@@ -244,8 +320,8 @@ class WhatsAppNotificationService {
             if (ok) {
               _sentReminderKeys.add(cacheKey);
               sentCount++;
-              // Ti poz pou pa voye twò rapid sou WhatsApp Web
-              await Future<void>.delayed(const Duration(milliseconds: 700));
+              // Delè sekirite anti-spam ant rapèl yo
+              await Future<void>.delayed(const Duration(milliseconds: 1500));
             }
           }
         } catch (_) {}
@@ -257,27 +333,33 @@ class WhatsAppNotificationService {
     return sentCount;
   }
 
-  /// 5. FOOTER OBLIGATWA POU KANPAY WHATSAPP
+  /// 5. FOOTER OBLIGATWA POU KANPAY WHATSAPP (Gen Non Gym nan, Kontak li, ak Lyen SecurGYM)
   static String buildCampaignFooter({
+    required String gymName,
     required String gymPhone,
     String lang = 'ht',
+    String securgymUrl = 'https://securgym.com',
   }) {
+    final effectiveGym = gymName.trim().isNotEmpty ? gymName.trim() : 'Gym';
     final effectivePhone = gymPhone.trim().isNotEmpty ? gymPhone.trim() : 'gym';
     if (lang == 'fr') {
       return '\n\n────────────────────────\n'
-          'ℹ️ Message envoyé via le système *SecurGYM*.\n'
-          '📌 Veuillez *enregistrer ce numéro* sous le nom *SecurGYM* pour activer les liens.\n'
-          '📞 *Ne répondez pas à ce message*. Pour toute question, contactez la salle directement au : *$effectivePhone*.';
+          '🏢 *$effectiveGym*\n'
+          'ℹ️ Message envoyé via le système *SecurGYM* ($securgymUrl).\n'
+          '📌 Veuillez *enregistrer ce numéro* sous le nom *SecurGYM* dans vos contacts pour activer les liens.\n'
+          '📞 *Ne répondez pas à ce message*. Pour toute question, contactez directement *$effectiveGym* au : *$effectivePhone*.';
     } else if (lang == 'en') {
       return '\n\n────────────────────────\n'
-          'ℹ️ Message sent via *SecurGYM* system.\n'
-          '📌 Please *save this number* as *SecurGYM* to enable links.\n'
-          '📞 *Do not reply to this message*. For any questions, contact the gym directly at: *$effectivePhone*.';
+          '🏢 *$effectiveGym*\n'
+          'ℹ️ Message sent via *SecurGYM* system ($securgymUrl).\n'
+          '📌 Please *save this number* as *SecurGYM* in your contacts to enable clickable links.\n'
+          '📞 *Do not reply to this message*. For any questions, contact *$effectiveGym* directly at: *$effectivePhone*.';
     }
     return '\n\n────────────────────────\n'
-        'ℹ️ Mesaj voye depi sistèm *SecurGYM*.\n'
+        '🏢 *$effectiveGym*\n'
+        'ℹ️ Mesaj voye depi sistèm *SecurGYM* ($securgymUrl).\n'
         '📌 Tanpri *anrejistre nimewo sa a* nan kontak ou sou non *SecurGYM* pou w ka klike sou lyen yo.\n'
-        '📞 *Pa reponn sou nimewo sa a*. Pou nenpòt kesyon, kontakte gym lan dirèkteman nan: *$effectivePhone*.';
+        '📞 *Pa reponn sou nimewo sa a*. Pou nenpòt kesyon, kontakte *$effectiveGym* dirèkteman nan: *$effectivePhone*.';
   }
 
   // --- MODEL TEKS (HT, FR, EN) ---
@@ -293,20 +375,20 @@ class WhatsAppNotificationService {
   }) {
     if (lang == 'fr') {
       return '🏋️ *Bienvenue chez $gymName !*\n'
-          '_Système SecurGYM_\n\n'
+          '_Système SecurGYM • https://securgym.com_\n\n'
           'Bonjour *$memberName*,\n'
           'Votre inscription a été validée avec succès (N° Membre : *$memberNumber*).\n\n'
           '📱 *Votre Espace Membre en Ligne :*\n'
           '👉 $portalUrl\n'
           '_Connectez-vous simplement avec votre numéro :_ *$phone*\n\n'
-          'Dans votre espace, vous pouvez consulter votre abonnement et soumettre vos demandes de renouvellement à tout moment.\n\n'
+          'Dans votre espace, vous pouvez consulter votre formule et soumettre vos demandes de renouvellement à tout moment.\n\n'
           '────────────────────────\n'
           '⚠️ *IMPORTANT :*\n'
           '1. Veuillez *enregistrer ce numéro* sous le nom *SecurGYM* dans vos contacts pour activer les liens et recevoir vos rappels.\n'
-          '2. *Ne répondez pas à ce numéro*. Pour toute question ou assistance, contactez directement l\'accueil au : *$gymPhone*.';
+          '2. *Ne répondez pas à ce numéro*. Pour toute question ou assistance, contactez directement l\'accueil de *$gymName* au : *$gymPhone*.';
     } else if (lang == 'en') {
       return '🏋️ *Welcome to $gymName!*\n'
-          '_SecurGYM System_\n\n'
+          '_SecurGYM System • https://securgym.com_\n\n'
           'Hello *$memberName*,\n'
           'Your membership registration has been approved (Member ID: *$memberNumber*).\n\n'
           '📱 *Your Online Member Portal:*\n'
@@ -316,57 +398,57 @@ class WhatsAppNotificationService {
           '────────────────────────\n'
           '⚠️ *IMPORTANT:*\n'
           '1. Please *save this number* as *SecurGYM* in your contacts to enable clickable links and updates.\n'
-          '2. *Do not reply to this number*. For any questions or support, contact the gym directly at: *$gymPhone*.';
+          '2. *Do not reply to this number*. For any questions or support, contact *$gymName* directly at: *$gymPhone*.';
     }
 
-    // Haitian Creole (pa defo)
+    // Haitian Creole
     return '🏋️ *Byenvini nan $gymName !*\n'
-        '_Sistèm SecurGYM_\n\n'
+        '_Sistèm SecurGYM • https://securgym.com_\n\n'
         'Bonjou *$memberName*,\n'
-        'Enskripsyon w lan konfime avèk siksè (Nimewo Manm : *$memberNumber*).\n\n'
+        'Enskripsyon w lan valide avèk siksè (N° Manm : *$memberNumber*).\n\n'
         '📱 *Espas Manm Ou sou Entènèt :*\n'
         '👉 $portalUrl\n'
-        '_Konekte ak nimewo telefòn ou :_ *$phone*\n\n'
-        'Nan espas sa a, ou ka wè estati abònman w lan nenpòt lè epi fè demand renouvèlman dirèkteman.\n\n'
+        '_Konekte fasilman ak nimewo telefòn ou :_ *$phone*\n\n'
+        'Nan espas sa a, w ap ka wè tout detay sou abònman w, epi fè demand renouvèlman dirèkteman.\n\n'
         '────────────────────────\n'
         '⚠️ *ENPÒTAN :*\n'
-        '1. Tanpri *anrejistre nimewo sa a* nan kontak ou sou non *SecurGYM* pou w ka klike sou lyen yo epi resevwa notifikasyon w yo.\n'
-        '2. *Pa reponn sou nimewo sa a*. Si w gen nenpòt kesyon oswa pwoblèm, kontakte gym lan dirèkteman nan: *$gymPhone*.';
+        '1. Li *obligatwa pou w anrejistre nimewo sa a* nan kontak ou sou non *SecurGYM* pou w ka klike sou lyen yo.\n'
+        '2. *Pa reponn sou nimewo sa a*. Pou nenpòt kesyon oswa asistans, kontakte resepsyon *$gymName* nan: *$gymPhone*.';
   }
 
   String _buildReceiptText({
     required ReceiptData data,
-    required String? pdfUrl,
+    String? pdfUrl,
     required String gymPhone,
     required String lang,
   }) {
     final day = DateFormat('dd/MM/yyyy');
-    final period = (data.periodStart != null && data.periodEnd != null)
-        ? '${day.format(data.periodStart!)} -> ${day.format(data.periodEnd!)}'
+    final period = (data.startDate != null && data.endDate != null)
+        ? '${day.format(data.startDate!)} → ${day.format(data.endDate!)}'
         : null;
 
     final linkSection = (pdfUrl != null && pdfUrl.isNotEmpty)
-        ? '\n📥 *Telechaje Resi PDF la :*\n$pdfUrl\n'
+        ? '\n\n📄 *Télécharger votre reçu complet :*\n👉 $pdfUrl'
         : '';
 
     if (lang == 'fr') {
-      return '🧾 *${data.gymName}* · _Système SecurGYM_\n'
+      return '🧾 *${data.gymName}* · _Système SecurGYM • https://securgym.com_\n'
           '*Reçu de Paiement #${data.receiptNo}* - Confirmé ✅\n\n'
           'Bonjour *${data.memberName}* (${data.memberNumber}),\n'
-          'Nous confirmons la bonne réception de votre paiement :\n\n'
+          'Nous vous confirmons la bonne réception de votre paiement :\n\n'
           '• Formule : *${data.planName}*\n'
           '• Montant : *${data.amount.toStringAsFixed(2)} ${data.currency}*\n'
           '${period != null ? "• Période : *$period*\n" : ""}'
           '$linkSection\n'
           '────────────────────────\n'
           '⚠️ *IMPORTANT :*\n'
-          '1. Veuillez enregistrer ce numéro sous le nom *SecurGYM*.\n'
-          '2. *Ne répondez pas à ce numéro*. Contactez la salle directement au : *$gymPhone*.';
+          '1. Veuillez enregistrer ce numéro sous le nom *SecurGYM* dans vos contacts.\n'
+          '2. *Ne répondez pas à ce message*. Contactez l\'accueil de *${data.gymName}* au : *$gymPhone*.';
     } else if (lang == 'en') {
-      return '🧾 *${data.gymName}* · _SecurGYM System_\n'
+      return '🧾 *${data.gymName}* · _SecurGYM System • https://securgym.com_\n'
           '*Payment Receipt #${data.receiptNo}* - Confirmed ✅\n\n'
           'Hello *${data.memberName}* (${data.memberNumber}),\n'
-          'We have received your payment:\n\n'
+          'We have successfully received your payment:\n\n'
           '• Plan: *${data.planName}*\n'
           '• Amount: *${data.amount.toStringAsFixed(2)} ${data.currency}*\n'
           '${period != null ? "• Period: *$period*\n" : ""}'
@@ -374,11 +456,11 @@ class WhatsAppNotificationService {
           '────────────────────────\n'
           '⚠️ *IMPORTANT:*\n'
           '1. Please save this number as *SecurGYM* in your contacts.\n'
-          '2. *Do not reply to this number*. Contact the gym at: *$gymPhone*.';
+          '2. *Do not reply to this message*. Contact *${data.gymName}* directly at: *$gymPhone*.';
     }
 
     // Haitian Creole
-    return '🧾 *${data.gymName}* · _Sistèm SecurGYM_\n'
+    return '🧾 *${data.gymName}* · _Sistèm SecurGYM • https://securgym.com_\n'
         '*Resi Peman #${data.receiptNo}* - Konfime ✅\n\n'
         'Bonjou *${data.memberName}* (${data.memberNumber}),\n'
         'Nou byen resevwa peman w lan :\n\n'
@@ -389,7 +471,7 @@ class WhatsAppNotificationService {
         '────────────────────────\n'
         '⚠️ *ENPÒTAN :*\n'
         '1. Tanpri anrejistre nimewo sa a nan kontak ou sou non *SecurGYM*.\n'
-        '2. *Pa reponn sou nimewo sa a*. Kontakte gym lan dirèkteman nan: *$gymPhone*.';
+        '2. *Pa reponn sou nimewo sa a*. Kontakte *${data.gymName}* dirèkteman nan: *$gymPhone*.';
   }
 
   String _buildReminderText({
@@ -414,11 +496,11 @@ class WhatsAppNotificationService {
               : 'dans $daysRemaining jours';
 
       return '⏳ *Rappel Fin d\'Abonnement - $gymName*\n'
-          '_Système SecurGYM_\n\n'
+          '_Système SecurGYM • https://securgym.com_\n\n'
           'Bonjour *$memberName*,\n'
           'Votre formule (*$planName*) arrive à expiration $daysText (*$formattedDate*).\n\n'
           'Pour conserver votre accès empreinte aux portes sans interruption :\n'
-          '1. Passez à l\'accueil du gym pour renouveler votre pass.\n'
+          '1. Passez à l\'accueil de *$gymName* pour renouveler votre pass.\n'
           '2. Ou faites votre demande de renouvellement en ligne :\n'
           '👉 $portalUrl\n'
           '_Connectez-vous avec votre numéro :_ *$phone*\n\n'
@@ -434,11 +516,11 @@ class WhatsAppNotificationService {
               : 'in $daysRemaining days';
 
       return '⏳ *Membership Expiration Reminder - $gymName*\n'
-          '_SecurGYM System_\n\n'
+          '_SecurGYM System • https://securgym.com_\n\n'
           'Hello *$memberName*,\n'
           'Your membership (*$planName*) will expire $daysText (*$formattedDate*).\n\n'
           'To keep your biometric door access without interruption:\n'
-          '1. Visit the gym reception to renew.\n'
+          '1. Visit *$gymName* reception to renew.\n'
           '2. Or submit your renewal request online:\n'
           '👉 $portalUrl\n'
           '_Log in with your phone number:_ *$phone*\n\n'
@@ -456,18 +538,18 @@ class WhatsAppNotificationService {
             : 'nan $daysRemaining jou';
 
     return '⏳ *Rapèl Fin Abònman - $gymName*\n'
-        '_Sistèm SecurGYM_\n\n'
+        '_Sistèm SecurGYM • https://securgym.com_\n\n'
         'Bonjou *$memberName*,\n'
         'Abònman w lan (*$planName*) ap fini $daysText (*$formattedDate*).\n\n'
         'Pou w pa pèdi aksè anprent ou devan pòt la epi pou w kontinye antrene san rete :\n'
-        '1. Pase nan resepsyon gym lan pou w renouvle l.\n'
+        '1. Pase nan resepsyon *$gymName* pou w renouvle l.\n'
         '2. Oswa fè demand renouvèlman an sou espas manm ou :\n'
         '👉 $portalUrl\n'
         '_Konekte ak nimewo telefòn ou :_ *$phone*\n\n'
         '────────────────────────\n'
         '⚠️ *ENPÒTAN :*\n'
         '1. Tanpri anrejistre nimewo sa a nan kontak ou sou non *SecurGYM*.\n'
-        '2. *Pa reponn sou nimewo sa a*. Kontakte gym lan dirèkteman nan: *$gymPhone*.';
+        '2. *Pa reponn sou nimewo sa a*. Kontakte *$gymName* dirèkteman nan: *$gymPhone*.';
   }
 }
 

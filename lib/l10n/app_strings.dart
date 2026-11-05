@@ -2494,6 +2494,47 @@ class AppStrings {
     'whatsapp_check_reminders_btn': ['Kouri Tcheke & Voye Rapèl 7 Jou Kounye a', 'Vérifier & Envoyer les Rappels 7 Jours Maintenant', 'Check & Send 7-Day Reminders Now'],
     'whatsapp_reminders_sent_count': ['rapèl fin voye sou WhatsApp bay manm ki pral ekspire yo !', 'rappels envoyés sur WhatsApp aux membres expirants !', 'reminders sent via WhatsApp to expiring members!'],
     'whatsapp_no_due_reminders': ['Pa gen okenn abònman ki prèt pou ekspire jodi a.', 'Aucun abonnement n\'arrive à échéance aujourd\'hui.', 'No memberships are expiring today.'],
+    'whatsapp_tab_settings': ['Konfigirasyon & Nimewo', 'Configuration & Numéros', 'Configuration & Numbers'],
+    'whatsapp_tab_super_admin': ['👑 Aksè WhatsApp Gym yo', '👑 Accès WhatsApp des Salles', '👑 Gym WhatsApp Access'],
+    'whatsapp_gym_access_title': ['Jesyon Aksè Abònman WhatsApp pou Gym yo', 'Gestion des Abonnements WhatsApp des Salles', 'Gym WhatsApp Subscription Management'],
+    'whatsapp_gym_access_desc': [
+      'Sèlman Super Admin SecurGYM ka bay aksè, mete peryòd valab, sispann oswa renouvle sèvis WhatsApp pou chak gym.',
+      'Seul le Super Admin SecurGYM peut accorder l\'accès, définir la période, suspendre ou renouveler le service WhatsApp pour chaque salle.',
+      'Only SecurGYM Super Admin can grant access, set valid periods, suspend, or renew WhatsApp service for each gym.',
+    ],
+    'whatsapp_status_active': ['Aktif', 'Actif', 'Active'],
+    'whatsapp_status_suspended': ['Sispann (An Poz)', 'Suspendu (En Pause)', 'Suspended (Paused)'],
+    'whatsapp_status_expired': ['Ekspire', 'Expiré', 'Expired'],
+    'whatsapp_status_inactive': ['Pa gen aksè', 'Aucun accès', 'No access'],
+    'whatsapp_grant_access_btn': ['Bay Aksè / Modifye', 'Accorder l\'accès / Modifier', 'Grant Access / Edit'],
+    'whatsapp_suspend_btn': ['Sispann Aksè', 'Suspendre l\'accès', 'Suspend Access'],
+    'whatsapp_resume_btn': ['Relanse Aksè', 'Relancer l\'accès', 'Resume Access'],
+    'whatsapp_renew_1m_btn': ['Renouvle (+1 Mwa)', 'Renouveler (+1 Mois)', 'Renew (+1 Month)'],
+    'whatsapp_backup_number_label': ['Nimewo de Sekou (Backup WhatsApp)', 'Numéro de secours (Backup WhatsApp)', 'Backup WhatsApp Number'],
+    'whatsapp_backup_number_helper': [
+      'Nimewo altènatif pou w voye mesaj si nimewo prensipal la ta gen pwoblèm oswa WhatsApp bloke l.',
+      'Numéro alternatif en cas de problème ou blocage du numéro principal.',
+      'Alternative number in case primary is blocked or unavailable.',
+    ],
+    'whatsapp_switch_account_btn': ['Dekonekte & Eskane Lòt Nimewo', 'Déconnecter & Scanner un autre numéro', 'Disconnect & Scan another number'],
+    'whatsapp_switch_account_title': ['Chanje oswa Dekonekte Nimewo WhatsApp ?', 'Changer ou Déconnecter le Numéro WhatsApp ?', 'Change or Disconnect WhatsApp Number ?'],
+    'whatsapp_switch_account_confirm': [
+      'Aksyon sa a ap dekonekte nimewo aktyèl la epi prepare yon nouvo Kòd QR touswit pou w ka eskane ak yon lòt telefòn (oswa nimewo de sekou w la). Èske w vle kontinye ?',
+      'Cette action déconnectera le numéro actuel et préparera un nouveau code QR immédiatement pour scanner avec un autre téléphone. Voulez-vous continuer ?',
+      'This will disconnect the current number and generate a new QR code to scan with a different phone. Do you want to proceed?',
+    ],
+    'whatsapp_subscription_active_banner': ['Abònman WhatsApp SecurGYM Aktif', 'Abonnement WhatsApp SecurGYM Actif', 'SecurGYM WhatsApp Subscription Active'],
+    'whatsapp_subscription_expired_banner': ['Abònman WhatsApp SecurGYM Ekspire oswa Sispann', 'Abonnement WhatsApp SecurGYM Expiré ou Suspendu', 'SecurGYM WhatsApp Subscription Expired or Suspended'],
+    'whatsapp_subscription_expired_msg': [
+      'Mesaj WhatsApp yo pap pati pou manm ou yo. Tanpri kontakte SecurGYM pou renouvle abònman sèvis WhatsApp gym ou a.',
+      'Les messages WhatsApp ne partiront pas pour vos membres. Veuillez contacter SecurGYM pour renouveler l\'abonnement WhatsApp.',
+      'WhatsApp messages will not be sent to members. Please contact SecurGYM to renew your WhatsApp subscription.',
+    ],
+    'whatsapp_anti_spam_pacing_note': [
+      '🛡️ Pwoteksyon Anti-Spam aktif: yon delè sekirite ant 2 a 4 segonn aplike otomatikman ant chak mesaj pou evite WhatsApp bloke kont ou.',
+      '🛡️ Protection Anti-Spam active : un délai de sécurité de 2 à 4 secondes est appliqué automatiquement entre chaque message pour éviter tout blocage WhatsApp.',
+      '🛡️ Anti-Spam protection active: a safety delay of 2 to 4 seconds is automatically applied between messages to prevent WhatsApp bans.',
+    ],
   };
 }
 

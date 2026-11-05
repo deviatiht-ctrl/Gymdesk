@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -12,8 +13,10 @@ import '../../../core/whatsapp/whatsapp_notification_service.dart';
 import '../../../l10n/app_strings.dart';
 
 /// Panèl Jesyon WhatsApp (whatsapp-web.js)
-/// Pèmèt admin nan konekte WhatsApp fasilman ak yon kòd QR,
-/// anrejistre nimewo valid la, epi teste voye mesaj.
+/// 1. Pèmèt admin nan konekte WhatsApp fasilman ak yon kòd QR
+/// 2. Chanje oswa mete nimewo de sekou si WhatsApp ta bloke
+/// 3. Pwoteksyon Anti-Spam ak delè sekirite ant mesaj yo
+/// 4. Pou Super Admin: bay aksè pou chak gym, mete peryòd (dat debi, dat fen, 1 mwa, plis mwa), sispann, oswa renouvle
 class WhatsAppSettingsPage extends ConsumerStatefulWidget {
   const WhatsAppSettingsPage({super.key});
 
@@ -25,21 +28,31 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   final _formKey = GlobalKey<FormState>();
   final _gatewayUrlController = TextEditingController(text: 'http://127.0.0.1:47812');
   final _validNumberController = TextEditingController(text: '50932986751');
+  final _backupNumberController = TextEditingController();
   final _countryCodeController = TextEditingController(text: '509');
   final _testNumberController = TextEditingController(text: '50932986751');
   final _testMessageController = TextEditingController(
-    text: '🏋️ Bonjou ! Sa a se yon tès mesaj WhatsApp depi sistèm jesyon GymDesk / SecurGYM nan.',
+    text: '🏋️ Bonjou ! Sa a se yon tès mesaj WhatsApp depi sistèm jesyon SecurGYM nan.',
   );
+  final _gymSearchController = TextEditingController();
+
+  int _selectedTabIndex = 0; // 0: Konfigirasyon & Nimewo, 1: Aksè Gym yo (Super Admin)
 
   bool _autoSendWelcome = true;
   bool _autoSendReceipts = true;
   bool _autoSendReminders = true;
 
   WhatsAppState _state = const WhatsAppState(status: WhatsAppStatus.initializing);
+  WhatsAppAccessCheckResult? _myGymAccess;
+
   bool _loading = true;
   bool _saving = false;
   bool _sendingTest = false;
   Timer? _pollTimer;
+
+  // Super Admin: Lis aksè WhatsApp pou chak gym
+  bool _loadingGyms = false;
+  List<GymWhatsAppAccess> _gymsAccessList = [];
 
   @override
   void initState() {
@@ -52,9 +65,11 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     _pollTimer?.cancel();
     _gatewayUrlController.dispose();
     _validNumberController.dispose();
+    _backupNumberController.dispose();
     _countryCodeController.dispose();
     _testNumberController.dispose();
     _testMessageController.dispose();
+    _gymSearchController.dispose();
     super.dispose();
   }
 
@@ -80,26 +95,52 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
         final cfg = Map<String, dynamic>.from(res);
         final gateway = cfg['gateway_url']?.toString();
         final valid = cfg['valid_number']?.toString();
+        final backup = cfg['backup_number']?.toString();
         final cc = cfg['default_country_code']?.toString();
         final receipts = cfg['auto_send_receipts'] as bool?;
         final reminders = cfg['auto_send_reminders'] as bool?;
+        final welcome = cfg['auto_send_welcome'] as bool?;
 
         if (gateway != null && gateway.isNotEmpty) _gatewayUrlController.text = gateway;
         if (valid != null && valid.isNotEmpty) {
           _validNumberController.text = valid;
           _testNumberController.text = valid;
         }
+        if (backup != null && backup.isNotEmpty) {
+          _backupNumberController.text = backup;
+        }
         if (cc != null && cc.isNotEmpty) _countryCodeController.text = cc;
         if (receipts != null) _autoSendReceipts = receipts;
         if (reminders != null) _autoSendReminders = reminders;
+        if (welcome != null) _autoSendWelcome = welcome;
       }
-    } catch (_) {
-      // Offline oswa RPC pa prezan ankò
+    } catch (_) {}
+
+    // 2. Tcheke aksè abònman gym aktyèl la
+    await _checkCurrentGymAccess();
+
+    // 3. Tcheke estati sèvis WhatsApp lokal la
+    await _checkStatus();
+
+    // 4. Si se Super Admin, chaje lis gym yo
+    final runtime = ref.read(appRuntimeProvider);
+    if (runtime.session?.isPlatformAdmin == true) {
+      await _loadGymsAccessList();
     }
 
-    // 2. Tcheke estati sèvis la
-    await _checkStatus();
     setState(() => _loading = false);
+  }
+
+  Future<void> _checkCurrentGymAccess() async {
+    try {
+      final gymId = ref.read(appRuntimeProvider).session?.gymId;
+      final access = await ref
+          .read(whatsAppNotificationServiceProvider)
+          .checkGymAccess(gymId: gymId);
+      if (mounted) {
+        setState(() => _myGymAccess = access);
+      }
+    } catch (_) {}
   }
 
   Future<void> _checkStatus() async {
@@ -112,6 +153,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       if (state.validNumber.isNotEmpty && _validNumberController.text.isEmpty) {
         _validNumberController.text = state.validNumber;
         _testNumberController.text = state.validNumber;
+      }
+      if (state.backupNumber.isNotEmpty && _backupNumberController.text.isEmpty) {
+        _backupNumberController.text = state.backupNumber;
       }
       if (state.defaultCountryCode.isNotEmpty) {
         _countryCodeController.text = state.defaultCountryCode;
@@ -152,6 +196,57 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     }
   }
 
+  Future<void> _loadGymsAccessList() async {
+    setState(() => _loadingGyms = true);
+    try {
+      final res = await Supabase.instance.client.rpc('platform_whatsapp_gym_access_list');
+      if (res != null && res is List) {
+        final list = (res as List)
+            .map((e) => GymWhatsAppAccess.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+        if (mounted) {
+          setState(() {
+            _gymsAccessList = list;
+            _loadingGyms = false;
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè chaje lis gym: $e');
+    }
+
+    // Fallback: Si RPC pa pare, chaje tab gyms dirèkteman
+    try {
+      final gymsRes = await Supabase.instance.client
+          .from('gyms')
+          .select('id, name, code, phone')
+          .isFilter('deleted_at', null)
+          .order('name');
+      final list = (gymsRes as List).map((g) {
+        final m = g as Map<String, dynamic>;
+        return GymWhatsAppAccess(
+          gymId: m['id']?.toString() ?? '',
+          gymName: m['name']?.toString() ?? 'Gym',
+          gymCode: m['code']?.toString() ?? '',
+          gymPhone: m['phone']?.toString() ?? '',
+          isEnabled: false,
+          status: 'inactive',
+          daysRemaining: 0,
+          isValid: false,
+        );
+      }).toList();
+      if (mounted) {
+        setState(() {
+          _gymsAccessList = list;
+          _loadingGyms = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingGyms = false);
+    }
+  }
+
   Future<void> _saveConfig() async {
     if (!_formKey.currentState!.validate()) return;
     final s = AppStrings.of(context);
@@ -159,6 +254,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
 
     final gateway = _gatewayUrlController.text.trim();
     final validNumber = _validNumberController.text.trim();
+    final backupNumber = _backupNumberController.text.trim();
     final cc = _countryCodeController.text.trim();
 
     try {
@@ -166,6 +262,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       final client = WhatsAppClient(baseUrl: gateway);
       await client.saveConfig(
         validNumber: validNumber,
+        backupNumber: backupNumber,
         defaultCountryCode: cc,
         autoSendWelcome: _autoSendWelcome,
         autoSendReceipts: _autoSendReceipts,
@@ -180,6 +277,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           'p_default_country_code': cc,
           'p_auto_send_receipts': _autoSendReceipts,
           'p_auto_send_reminders': _autoSendReminders,
+          'p_auto_send_welcome': _autoSendWelcome,
         });
       } catch (_) {}
 
@@ -200,10 +298,53 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     }
   }
 
+  Future<void> _switchAccount() async {
+    final s = AppStrings.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.text('whatsapp_switch_account_title')),
+        content: Text(s.text('whatsapp_switch_account_confirm')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.text('cancel'))),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade800),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.text('whatsapp_switch_account_btn')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _loading = true);
+    final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+    await client.switchAccount(
+      backupNumber: _backupNumberController.text.trim(),
+    );
+    await Future<void>.delayed(const Duration(seconds: 3));
+    await _checkStatus();
+    _startPolling();
+    if (mounted) setState(() => _loading = false);
+  }
+
   Future<void> _sendTestMessage() async {
     final s = AppStrings.of(context);
     final to = _testNumberController.text.trim();
     final msg = _testMessageController.text.trim();
+
+    // Verifye si gym nan gen aksè
+    final isSuper = ref.read(appRuntimeProvider).session?.isPlatformAdmin == true;
+    if (!isSuper && _myGymAccess != null && !_myGymAccess!.hasAccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ ${_myGymAccess!.message}'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
 
     if (to.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -341,10 +482,321 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     if (mounted) setState(() => _loading = false);
   }
 
+  // --- SUPER ADMIN: Aksyon sou Aksè WhatsApp Gym yo ---
+
+  Future<void> _showEditGymAccessDialog(GymWhatsAppAccess gym) async {
+    final s = AppStrings.of(context);
+    bool enabled = gym.isEnabled;
+    String status = gym.status == 'inactive' ? 'active' : gym.status;
+    DateTime startDate = gym.startDate ?? DateTime.now();
+    DateTime endDate = gym.endDate ?? DateTime.now().add(const Duration(days: 30));
+    final backupCtrl = TextEditingController(text: gym.backupPhone);
+    final notesCtrl = TextEditingController(text: gym.notes);
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          final df = DateFormat('dd/MM/yyyy');
+          final daysDiff = endDate.difference(DateTime.now()).inDays;
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(LucideIcons.shieldCheck, color: Color(0xFF0F766E), size: 22),
+                const SizedBox(width: 10),
+                Expanded(child: Text('${s.text('whatsapp_grant_access_btn')} : ${gym.gymName}')),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Aktive Sèvis WhatsApp pou gym sa a'),
+                    subtitle: Text(enabled ? 'Aksè ouvri' : 'Aksè fèmen'),
+                    value: enabled,
+                    onChanged: (val) => setDlgState(() => enabled = val),
+                  ),
+                  const Divider(),
+                  const SizedBox(height: 8),
+
+                  const Text('Chwazi yon peryòd rapid :', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ActionChip(
+                        label: const Text('+1 Mwa (30 jou)'),
+                        onPressed: () {
+                          setDlgState(() {
+                            enabled = true;
+                            status = 'active';
+                            startDate = DateTime.now();
+                            endDate = DateTime.now().add(const Duration(days: 30));
+                          });
+                        },
+                      ),
+                      ActionChip(
+                        label: const Text('+3 Mwa (90 jou)'),
+                        onPressed: () {
+                          setDlgState(() {
+                            enabled = true;
+                            status = 'active';
+                            startDate = DateTime.now();
+                            endDate = DateTime.now().add(const Duration(days: 90));
+                          });
+                        },
+                      ),
+                      ActionChip(
+                        label: const Text('+6 Mwa (180 jou)'),
+                        onPressed: () {
+                          setDlgState(() {
+                            enabled = true;
+                            status = 'active';
+                            startDate = DateTime.now();
+                            endDate = DateTime.now().add(const Duration(days: 180));
+                          });
+                        },
+                      ),
+                      ActionChip(
+                        label: const Text('+1 An (365 jou)'),
+                        onPressed: () {
+                          setDlgState(() {
+                            enabled = true;
+                            status = 'active';
+                            startDate = DateTime.now();
+                            endDate = DateTime.now().add(const Duration(days: 365));
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Dat Debi ak Dat Fen
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final pick = await showDatePicker(
+                              context: ctx,
+                              initialDate: startDate,
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime(2035),
+                            );
+                            if (pick != null) setDlgState(() => startDate = pick);
+                          },
+                          icon: const Icon(LucideIcons.calendar, size: 16),
+                          label: Text('Debi: ${df.format(startDate)}'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final pick = await showDatePicker(
+                              context: ctx,
+                              initialDate: endDate.isAfter(DateTime.now()) ? endDate : DateTime.now().add(const Duration(days: 30)),
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime(2035),
+                            );
+                            if (pick != null) setDlgState(() => endDate = pick);
+                          },
+                          icon: const Icon(LucideIcons.calendarCheck, size: 16),
+                          label: Text('Fen: ${df.format(endDate)}'),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Peryòd valab: $daysDiff jou ki rete',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: daysDiff > 0 ? Colors.green.shade800 : Colors.red,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Estati (Aktif vs Sispann)
+                  DropdownButtonFormField<String>(
+                    value: status,
+                    decoration: const InputDecoration(
+                      labelText: 'Estati Abònman',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'active', child: Text('🟢 Aktif (Ap mache)')),
+                      DropdownMenuItem(value: 'suspended', child: Text('🟠 Sispann (Mete an Poz)')),
+                      DropdownMenuItem(value: 'inactive', child: Text('⚪ Inaktif (Koupe)')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setDlgState(() => status = val);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Nimewo sekou pou gym sa a
+                  TextFormField(
+                    controller: backupCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Nimewo WhatsApp de Sekou (Opsyonèl)',
+                      hintText: '50937001122',
+                      prefixIcon: Icon(LucideIcons.phoneForwarded),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Nòt
+                  TextFormField(
+                    controller: notesCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Nòt / Kòmantè (Super Admin)',
+                      hintText: 'Peman pa MonCash resevwa...',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.text('cancel'))),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text(s.text('save')),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (updated != true) return;
+
+    setState(() => _loadingGyms = true);
+    try {
+      await Supabase.instance.client.rpc('platform_whatsapp_gym_access_set', params: {
+        'p_gym_id': gym.gymId,
+        'p_is_enabled': enabled,
+        'p_status': status,
+        'p_start_date': startDate.toIso8601String(),
+        'p_end_date': endDate.toIso8601String(),
+        'p_backup_phone': backupCtrl.text.trim(),
+        'p_notes': notesCtrl.text.trim(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Aksè WhatsApp pou ${gym.gymName} mete ajou avèk siksè !'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      await _loadGymsAccessList();
+      await _checkCurrentGymAccess();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erè: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingGyms = false);
+    }
+  }
+
+  Future<void> _quickToggleSuspend(GymWhatsAppAccess gym) async {
+    final newStatus = gym.status == 'suspended' ? 'active' : 'suspended';
+    final actionName = newStatus == 'suspended' ? 'sispann' : 'relanse';
+
+    setState(() => _loadingGyms = true);
+    try {
+      await Supabase.instance.client.rpc('platform_whatsapp_gym_access_set', params: {
+        'p_gym_id': gym.gymId,
+        'p_is_enabled': gym.isEnabled,
+        'p_status': newStatus,
+        'p_start_date': (gym.startDate ?? DateTime.now()).toIso8601String(),
+        'p_end_date': (gym.endDate ?? DateTime.now().add(const Duration(days: 30))).toIso8601String(),
+        'p_backup_phone': gym.backupPhone,
+        'p_notes': gym.notes,
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sèvis WhatsApp pou ${gym.gymName} $actionName avèk siksè !'),
+            backgroundColor: newStatus == 'active' ? Colors.green : Colors.orange.shade800,
+          ),
+        );
+      }
+      await _loadGymsAccessList();
+      await _checkCurrentGymAccess();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erè: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingGyms = false);
+    }
+  }
+
+  Future<void> _quickRenewMonth(GymWhatsAppAccess gym) async {
+    final now = DateTime.now();
+    final currentEnd = gym.endDate;
+    final baseDate = (currentEnd != null && currentEnd.isAfter(now)) ? currentEnd : now;
+    final newEndDate = baseDate.add(const Duration(days: 30));
+
+    setState(() => _loadingGyms = true);
+    try {
+      await Supabase.instance.client.rpc('platform_whatsapp_gym_access_set', params: {
+        'p_gym_id': gym.gymId,
+        'p_is_enabled': true,
+        'p_status': 'active',
+        'p_start_date': (gym.startDate ?? now).toIso8601String(),
+        'p_end_date': newEndDate.toIso8601String(),
+        'p_backup_phone': gym.backupPhone,
+        'p_notes': gym.notes,
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🎉 Abònman ${gym.gymName} renouvle pou 1 mwa anplis !'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      await _loadGymsAccessList();
+      await _checkCurrentGymAccess();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erè: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingGyms = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
     final theme = Theme.of(context);
+    final runtime = ref.watch(appRuntimeProvider);
+    final isSuperAdmin = runtime.session?.isPlatformAdmin == true;
 
     if (_loading) {
       return const Center(
@@ -368,30 +820,183 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           IconButton(
             tooltip: s.text('refresh'),
             icon: const Icon(LucideIcons.refreshCw),
-            onPressed: _loading ? null : _checkStatus,
+            onPressed: _loading ? null : () async {
+              await _checkStatus();
+              await _checkCurrentGymAccess();
+              if (isSuperAdmin) await _loadGymsAccessList();
+            },
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      body: Column(
         children: [
-          Text(
-            s.text('whatsapp_admin_subtitle'),
-            style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+          // Si se Super Admin, ofri chwa ant de onglet yo
+          if (isSuperAdmin) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
+              child: Row(
+                children: [
+                  ChoiceChip(
+                    label: Text(s.text('whatsapp_tab_settings')),
+                    selected: _selectedTabIndex == 0,
+                    onSelected: (val) => setState(() => _selectedTabIndex = 0),
+                  ),
+                  const SizedBox(width: 12),
+                  ChoiceChip(
+                    label: Text(s.text('whatsapp_tab_super_admin')),
+                    selected: _selectedTabIndex == 1,
+                    onSelected: (val) {
+                      setState(() => _selectedTabIndex = 1);
+                      _loadGymsAccessList();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          Expanded(
+            child: _selectedTabIndex == 1 && isSuperAdmin
+                ? _buildSuperAdminGymsView(s, theme)
+                : _buildSettingsView(s, theme),
           ),
-          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
 
-          // 1. KAT ESTATI AK ESKANE KÒD QR
-          _buildConnectionCard(s, theme),
-          const SizedBox(height: 24),
+  /// Onglet 1: Konfigirasyon, Koneksyon Kòd QR, Nimewo de Sekou, ak Tès
+  Widget _buildSettingsView(AppStrings s, ThemeData theme) {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      children: [
+        // 0. BANYÈ ESTATI ABÒNMAN GYM NAN
+        _buildGymSubscriptionBanner(s, theme),
+        const SizedBox(height: 16),
 
-          // 2. KAT KONFIGIRASYON (NIMEWO VALID AK KÒD PEYI)
-          _buildConfigurationCard(s, theme),
-          const SizedBox(height: 24),
+        // Nòt Pwoteksyon Anti-Spam
+        _buildAntiSpamProtectionCard(s, theme),
+        const SizedBox(height: 20),
 
-          // 3. KAT TÈS VOYE MESAJ
-          _buildTestMessageCard(s, theme),
-          const SizedBox(height: 40),
+        // 1. KAT ESTATI AK ESKANE KÒD QR
+        _buildConnectionCard(s, theme),
+        const SizedBox(height: 24),
+
+        // 2. KAT KONFIGIRASYON (NIMEWO PRENSIPAL, NIMEWO SEKOU, KÒD PEYI)
+        _buildConfigurationCard(s, theme),
+        const SizedBox(height: 24),
+
+        // 3. KAT TÈS VOYE MESAJ
+        _buildTestMessageCard(s, theme),
+        const SizedBox(height: 40),
+      ],
+    );
+  }
+
+  /// Banyè ki montre si abònman WhatsApp gym nan aktif oswa ekspire
+  Widget _buildGymSubscriptionBanner(AppStrings s, ThemeData theme) {
+    final access = _myGymAccess;
+    if (access == null) return const SizedBox.shrink();
+
+    final isSuper = ref.read(appRuntimeProvider).session?.isPlatformAdmin == true;
+    final hasAccess = isSuper || access.hasAccess;
+    final df = DateFormat('dd/MM/yyyy');
+
+    if (hasAccess) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.green.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.green.shade400),
+        ),
+        child: Row(
+          children: [
+            const Icon(LucideIcons.shieldCheck, color: Colors.green, size: 26),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    s.text('whatsapp_subscription_active_banner'),
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 15),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    access.endDate != null
+                        ? 'Aksè mesaj otomatik ak kanpay aktif jiska ${df.format(access.endDate!)} (${access.daysRemaining} jou ki rete).'
+                        : 'Sèvis WhatsApp SecurGYM pare epi aktif.',
+                    style: TextStyle(color: Colors.green.shade900, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red.shade400, width: 1.5),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(LucideIcons.shieldAlert, color: Colors.red, size: 28),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.text('whatsapp_subscription_expired_banner'),
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade800, fontSize: 15),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  access.message.isNotEmpty
+                      ? access.message
+                      : s.text('whatsapp_subscription_expired_msg'),
+                  style: TextStyle(color: Colors.red.shade900, fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  '📞 Pou renouvle oswa aktive aksè gym ou a, kontakte sipò SecurGYM.',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade900, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Kat Pwoteksyon Anti-Spam
+  Widget _buildAntiSpamProtectionCard(AppStrings s, ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F766E).withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(LucideIcons.shield, color: Color(0xFF0F766E), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              s.text('whatsapp_anti_spam_pacing_note'),
+              style: TextStyle(fontSize: 12, color: Colors.teal.shade900),
+            ),
+          ),
         ],
       ),
     );
@@ -475,14 +1080,21 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    if (isReady)
+                    if (isReady) ...[
+                      // Bouton Chanje / Dekonekte pou lòt nimewo
+                      FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(foregroundColor: Colors.orange.shade900),
+                        onPressed: _switchAccount,
+                        icon: const Icon(LucideIcons.phoneForwarded, size: 16),
+                        label: Text(s.text('whatsapp_switch_account_btn')),
+                      ),
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
                         onPressed: _logout,
                         icon: const Icon(LucideIcons.logOut, size: 16),
                         label: Text(s.text('whatsapp_disconnect_btn')),
-                      )
-                    else ...[
+                      ),
+                    ] else ...[
                       FilledButton.tonalIcon(
                         onPressed: _reconnect,
                         icon: const Icon(LucideIcons.refreshCw, size: 16),
@@ -672,7 +1284,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     );
   }
 
-  /// Kat pou mete nimewo valid la ak konfigirasyon
+  /// Kat pou mete nimewo prensipal, nimewo de sekou ak konfigirasyon
   Widget _buildConfigurationCard(AppStrings s, ThemeData theme) {
     return Card(
       elevation: 0,
@@ -704,7 +1316,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ),
               const SizedBox(height: 20),
 
-              // Chan Nimewo Valid (Admin / Tès)
+              // Chan Nimewo Prensipal Valid
               TextFormField(
                 controller: _validNumberController,
                 keyboardType: TextInputType.phone,
@@ -722,6 +1334,20 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   if (digits.length < 8) return s.text('whatsapp_invalid_number');
                   return null;
                 },
+              ),
+              const SizedBox(height: 16),
+
+              // Chan Nimewo de Sekou (Backup Phone)
+              TextFormField(
+                controller: _backupNumberController,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  labelText: s.text('whatsapp_backup_number_label'),
+                  helperText: s.text('whatsapp_backup_number_helper'),
+                  hintText: '50938002233',
+                  prefixIcon: const Icon(LucideIcons.phoneForwarded, color: Colors.orange),
+                  border: const OutlineInputBorder(),
+                ),
               ),
               const SizedBox(height: 16),
 
@@ -882,6 +1508,246 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     : const Icon(LucideIcons.send, size: 16),
                 label: Text(s.text('whatsapp_send_test_btn')),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- ONGLET 2: SUPER ADMIN - JESYON AKSÈ WHATSAPP POU GYM YO ---
+
+  Widget _buildSuperAdminGymsView(AppStrings s, ThemeData theme) {
+    final query = _gymSearchController.text.trim().toLowerCase();
+    final filteredGyms = _gymsAccessList.where((g) {
+      if (query.isEmpty) return true;
+      return g.gymName.toLowerCase().contains(query) ||
+          g.gymCode.toLowerCase().contains(query) ||
+          g.gymPhone.toLowerCase().contains(query);
+    }).toList();
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      children: [
+        Row(
+          children: [
+            const Icon(LucideIcons.crown, color: Colors.amber, size: 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    s.text('whatsapp_gym_access_title'),
+                    style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    s.text('whatsapp_gym_access_desc'),
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // Search Bar
+        TextField(
+          controller: _gymSearchController,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            labelText: 'Chèche yon gym pa non oswa kòd...',
+            prefixIcon: const Icon(LucideIcons.search),
+            suffixIcon: _gymSearchController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(LucideIcons.x),
+                    onPressed: () => setState(() => _gymSearchController.clear()),
+                  )
+                : null,
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        if (_loadingGyms)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(40),
+              child: CircularProgressIndicator(),
+            ),
+          )
+        else if (filteredGyms.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: Text(
+                'Pa gen okenn gym ki koresponn ak rechèch la.',
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+              ),
+            ),
+          )
+        else
+          ...filteredGyms.map((g) => _buildGymAccessCard(g, s, theme)),
+      ],
+    );
+  }
+
+  Widget _buildGymAccessCard(GymWhatsAppAccess gym, AppStrings s, ThemeData theme) {
+    final df = DateFormat('dd/MM/yyyy');
+    final isSuspended = gym.status == 'suspended';
+    final isActive = gym.status == 'active' && gym.isValid;
+    final isExpired = gym.status == 'expired';
+
+    Color badgeColor;
+    String badgeText;
+    IconData badgeIcon;
+
+    if (isActive) {
+      badgeColor = Colors.green;
+      badgeText = '${s.text('whatsapp_status_active')} (${gym.daysRemaining}j)';
+      badgeIcon = LucideIcons.circleCheck;
+    } else if (isSuspended) {
+      badgeColor = Colors.orange.shade800;
+      badgeText = s.text('whatsapp_status_suspended');
+      badgeIcon = LucideIcons.pauseCircle;
+    } else if (isExpired) {
+      badgeColor = Colors.red;
+      badgeText = s.text('whatsapp_status_expired');
+      badgeIcon = LucideIcons.clock;
+    } else {
+      badgeColor = Colors.grey;
+      badgeText = s.text('whatsapp_status_inactive');
+      badgeIcon = LucideIcons.circleOff;
+    }
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: isActive ? Colors.green.shade300 : (isSuspended ? Colors.orange.shade300 : theme.dividerColor),
+          width: isActive || isSuspended ? 1.5 : 1.0,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            gym.gymName,
+                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceVariant,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              gym.gymCode,
+                              style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (gym.gymPhone.isNotEmpty)
+                        Text(
+                          '📞 Kontak: ${gym.gymPhone}',
+                          style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                        ),
+                      if (gym.backupPhone.isNotEmpty)
+                        Text(
+                          '📱 Nimewo de Sekou: ${gym.backupPhone}',
+                          style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
+                        ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: badgeColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: badgeColor.withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(badgeIcon, color: badgeColor, size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        badgeText,
+                        style: TextStyle(color: badgeColor, fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Peryòd valab
+            if (gym.startDate != null && gym.endDate != null) ...[
+              Row(
+                children: [
+                  const Icon(LucideIcons.calendar, size: 14, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Peryòd: ${df.format(gym.startDate!)} → ${df.format(gym.endDate!)}',
+                    style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Aksyon sou gym nan
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                // Bouton Bay Aksè / Modifye
+                FilledButton.tonalIcon(
+                  onPressed: () => _showEditGymAccessDialog(gym),
+                  icon: const Icon(LucideIcons.edit3, size: 15),
+                  label: Text(s.text('whatsapp_grant_access_btn')),
+                ),
+
+                // Bouton Sispann / Relanse
+                if (gym.isEnabled) ...[
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: isSuspended ? Colors.green : Colors.orange.shade800,
+                      side: BorderSide(color: isSuspended ? Colors.green : Colors.orange.shade800),
+                    ),
+                    onPressed: () => _quickToggleSuspend(gym),
+                    icon: Icon(isSuspended ? LucideIcons.play : LucideIcons.pause, size: 15),
+                    label: Text(isSuspended ? s.text('whatsapp_resume_btn') : s.text('whatsapp_suspend_btn')),
+                  ),
+                ],
+
+                // Bouton Renouvle +1 Mwa
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                  onPressed: () => _quickRenewMonth(gym),
+                  icon: const Icon(LucideIcons.plusCircle, size: 15),
+                  label: Text(s.text('whatsapp_renew_1m_btn')),
+                ),
+              ],
             ),
           ],
         ),

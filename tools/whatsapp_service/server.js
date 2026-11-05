@@ -20,6 +20,7 @@ const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
 // 1. Chaje konfigirasyon lokal la
 let config = {
   validNumber: '50932986751',
+  backupNumber: '',
   defaultCountryCode: '509',
   autoSendWelcome: true,
   autoSendReceipts: true,
@@ -111,6 +112,41 @@ let connectedUser = null;
 let pushName = null;
 let lastError = null;
 let isInitializing = false;
+
+// Anti-Spam Message Queue pou evite WhatsApp bloke nimewo a
+const messageQueue = [];
+let isProcessingQueue = false;
+
+async function processMessageQueue() {
+  if (isProcessingQueue || messageQueue.length === 0) return;
+  isProcessingQueue = true;
+
+  while (messageQueue.length > 0) {
+    const task = messageQueue.shift();
+    try {
+      const result = await task.action();
+      task.resolve(result);
+    } catch (err) {
+      task.reject(err);
+    }
+
+    // Delè sekirite anti-spam ant chak mesaj (2000 a 3500 milisegonn)
+    if (messageQueue.length > 0) {
+      const delayMs = 2000 + Math.floor(Math.random() * 1500);
+      console.log(`[Anti-Spam] Delè sekirite: ${delayMs}ms ant mesaj...`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  isProcessingQueue = false;
+}
+
+function enqueueMessage(action) {
+  return new Promise((resolve, reject) => {
+    messageQueue.push({ action, resolve, reject });
+    processMessageQueue();
+  });
+}
 
 // Detwi kliyan an avèk sekirite
 async function destroyCurrentClient() {
@@ -280,12 +316,14 @@ app.get('/api/status', (req, res) => {
     lastError: lastError,
     config: {
       validNumber: config.validNumber,
+      backupNumber: config.backupNumber || '',
       defaultCountryCode: config.defaultCountryCode,
       autoSendWelcome: config.autoSendWelcome !== false,
       autoSendReceipts: config.autoSendReceipts !== false,
       autoSendReminders: config.autoSendReminders !== false,
       reminderDaysBefore: config.reminderDaysBefore || 7,
     },
+    queueLength: messageQueue.length,
     uptime: process.uptime(),
   });
 });
@@ -306,8 +344,18 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { validNumber, defaultCountryCode, autoSendWelcome, autoSendReceipts, autoSendReminders, reminderDaysBefore } = req.body;
+  const {
+    validNumber,
+    backupNumber,
+    defaultCountryCode,
+    autoSendWelcome,
+    autoSendReceipts,
+    autoSendReminders,
+    reminderDaysBefore
+  } = req.body;
+
   if (validNumber !== undefined) config.validNumber = String(validNumber).trim();
+  if (backupNumber !== undefined) config.backupNumber = String(backupNumber).trim();
   if (defaultCountryCode !== undefined) config.defaultCountryCode = String(defaultCountryCode).trim();
   if (autoSendWelcome !== undefined) config.autoSendWelcome = Boolean(autoSendWelcome);
   if (autoSendReceipts !== undefined) config.autoSendReceipts = Boolean(autoSendReceipts);
@@ -319,7 +367,7 @@ app.post('/api/config', (req, res) => {
   res.json({ ok: true, message: 'Konfigirasyon anrejistre avèk siksè', config });
 });
 
-// 4. Voye Mesaj WhatsApp (avèk sipò PDF dokiman si bay)
+// 4. Voye Mesaj WhatsApp (avèk Anti-Spam Queue ak sipò PDF dokiman)
 app.post('/api/send', async (req, res) => {
   try {
     const { to, message, pdfBase64, pdfFileName } = req.body;
@@ -341,25 +389,27 @@ app.post('/api/send', async (req, res) => {
     }
 
     const chatId = `${cleanPhone}@c.us`;
-    console.log(`[WhatsApp] N ap voye mesaj bay ${chatId}...`);
 
-    let result;
-    if (pdfBase64 && typeof pdfBase64 === 'string') {
-      try {
-        console.log(`[WhatsApp] N ap tache PDF dokiman (${pdfFileName || 'Recu.pdf'})...`);
-        const media = new MessageMedia('application/pdf', pdfBase64, pdfFileName || 'Recu.pdf');
-        result = await client.sendMessage(chatId, media, { caption: message.trim() });
-      } catch (mediaErr) {
-        console.warn('[WhatsApp] Erè voye PDF, n ap voye kòm tèks senp:', mediaErr.message);
-        result = await client.sendMessage(chatId, message.trim());
+    // Voye atravè Queue Anti-Spam pou kenbe entèval sekirite
+    const result = await enqueueMessage(async () => {
+      console.log(`[WhatsApp] N ap voye mesaj bay ${chatId}...`);
+      if (pdfBase64 && typeof pdfBase64 === 'string') {
+        try {
+          console.log(`[WhatsApp] N ap tache PDF dokiman (${pdfFileName || 'Recu.pdf'})...`);
+          const media = new MessageMedia('application/pdf', pdfBase64, pdfFileName || 'Recu.pdf');
+          return await client.sendMessage(chatId, media, { caption: message.trim() });
+        } catch (mediaErr) {
+          console.warn('[WhatsApp] Erè voye PDF, n ap voye kòm tèks senp:', mediaErr.message);
+          return await client.sendMessage(chatId, message.trim());
+        }
+      } else {
+        return await client.sendMessage(chatId, message.trim());
       }
-    } else {
-      result = await client.sendMessage(chatId, message.trim());
-    }
+    });
 
     res.json({
       ok: true,
-      messageId: result.id ? result.id._serialized : null,
+      messageId: (result && result.id) ? result.id._serialized : null,
       to: cleanPhone,
       timestamp: Date.now(),
     });
@@ -395,13 +445,15 @@ app.post('/api/test', async (req, res) => {
     }
 
     const chatId = `${cleanPhone}@c.us`;
-    const result = await client.sendMessage(chatId, testMsg);
+    const result = await enqueueMessage(async () => {
+      return await client.sendMessage(chatId, testMsg);
+    });
 
     res.json({
       ok: true,
       message: 'Mesaj tès la voye avèk siksè !',
       to: cleanPhone,
-      messageId: result.id ? result.id._serialized : null,
+      messageId: (result && result.id) ? result.id._serialized : null,
     });
   } catch (err) {
     console.error('[WhatsApp] Erè tès:', err);
@@ -409,7 +461,7 @@ app.post('/api/test', async (req, res) => {
   }
 });
 
-// 6. Rekonekte / Relanse Kliyan an (Asynchrone avèk netwayaj locks)
+// 6. Rekonekte / Relanse Kliyan an
 app.post('/api/initialize', async (req, res) => {
   console.log('[WhatsApp] Demann rekoneksyon / inisyalizasyon resevwa...');
   try {
@@ -443,6 +495,43 @@ app.post('/api/reset', async (req, res) => {
 
     initWhatsAppClient();
     res.json({ ok: true, message: 'Sesyon an reyinisyalize nèt. Nouvo Kòd QR ap prepare.' });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 7b. Chanje Nimewo WhatsApp (Switch / Add Backup WhatsApp Number)
+app.post('/api/switch-account', async (req, res) => {
+  console.log('[WhatsApp] Demann chanje nimewo / nouvo kont WhatsApp resevwa...');
+  try {
+    const { newNumber, backupNumber } = req.body || {};
+    if (newNumber) config.validNumber = String(newNumber).trim();
+    if (backupNumber) config.backupNumber = String(backupNumber).trim();
+    saveConfig();
+
+    await destroyCurrentClient();
+    try {
+      if (fs.existsSync(AUTH_DIR)) {
+        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+        console.log('[WhatsApp] Ansyen sesyon efase pou nouvo koneksyon.');
+      }
+    } catch (e) {
+      console.warn('[WhatsApp] Pa ka efase dosye auth nèt:', e.message);
+    }
+
+    clientStatus = 'DISCONNECTED';
+    connectedUser = null;
+    pushName = null;
+    rawQrCode = null;
+    qrDataUrl = null;
+    lastError = null;
+
+    initWhatsAppClient();
+    res.json({
+      ok: true,
+      message: 'Ansyen nimewo a dekonekte. Nouvo Kòd QR ap prepare pou w eskane ak lòt nimewo a.',
+      status: 'INITIALIZING',
+    });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

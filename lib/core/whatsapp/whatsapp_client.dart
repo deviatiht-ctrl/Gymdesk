@@ -24,11 +24,13 @@ class WhatsAppState {
     this.connectedPhone,
     this.pushName,
     this.validNumber = '',
+    this.backupNumber = '',
     this.defaultCountryCode = '509',
     this.autoSendWelcome = true,
     this.autoSendReceipts = true,
     this.autoSendReminders = true,
     this.reminderDaysBefore = 7,
+    this.queueLength = 0,
     this.lastError,
     this.lastChecked,
   });
@@ -39,11 +41,13 @@ class WhatsAppState {
   final String? connectedPhone;
   final String? pushName;
   final String validNumber;
+  final String backupNumber;
   final String defaultCountryCode;
   final bool autoSendWelcome;
   final bool autoSendReceipts;
   final bool autoSendReminders;
   final int reminderDaysBefore;
+  final int queueLength;
   final String? lastError;
   final DateTime? lastChecked;
 
@@ -60,11 +64,13 @@ class WhatsAppState {
     String? connectedPhone,
     String? pushName,
     String? validNumber,
+    String? backupNumber,
     String? defaultCountryCode,
     bool? autoSendWelcome,
     bool? autoSendReceipts,
     bool? autoSendReminders,
     int? reminderDaysBefore,
+    int? queueLength,
     String? lastError,
     DateTime? lastChecked,
   }) {
@@ -75,11 +81,13 @@ class WhatsAppState {
       connectedPhone: connectedPhone ?? this.connectedPhone,
       pushName: pushName ?? this.pushName,
       validNumber: validNumber ?? this.validNumber,
+      backupNumber: backupNumber ?? this.backupNumber,
       defaultCountryCode: defaultCountryCode ?? this.defaultCountryCode,
       autoSendWelcome: autoSendWelcome ?? this.autoSendWelcome,
       autoSendReceipts: autoSendReceipts ?? this.autoSendReceipts,
       autoSendReminders: autoSendReminders ?? this.autoSendReminders,
       reminderDaysBefore: reminderDaysBefore ?? this.reminderDaysBefore,
+      queueLength: queueLength ?? this.queueLength,
       lastError: lastError,
       lastChecked: lastChecked ?? this.lastChecked,
     );
@@ -99,6 +107,105 @@ class WhatsAppSendResult {
   final String? messageId;
   final String? to;
   final String? error;
+}
+
+/// Modèl pou jesyon aksè abònman WhatsApp yon Gym pa Super Admin
+class GymWhatsAppAccess {
+  const GymWhatsAppAccess({
+    required this.gymId,
+    required this.gymName,
+    required this.gymCode,
+    this.gymPhone = '',
+    required this.isEnabled,
+    required this.status,
+    this.startDate,
+    this.endDate,
+    this.backupPhone = '',
+    this.notes = '',
+    this.daysRemaining = 0,
+    this.isValid = false,
+  });
+
+  final String gymId;
+  final String gymName;
+  final String gymCode;
+  final String gymPhone;
+  final bool isEnabled;
+  final String status; // 'active', 'suspended', 'expired', 'inactive'
+  final DateTime? startDate;
+  final DateTime? endDate;
+  final String backupPhone;
+  final String notes;
+  final int daysRemaining;
+  final bool isValid;
+
+  factory GymWhatsAppAccess.fromJson(Map<String, dynamic> json) {
+    DateTime? parseDate(dynamic val) {
+      if (val == null) return null;
+      try {
+        return DateTime.parse(val.toString());
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return GymWhatsAppAccess(
+      gymId: json['gym_id']?.toString() ?? '',
+      gymName: json['gym_name']?.toString() ?? 'Gym',
+      gymCode: json['gym_code']?.toString() ?? '',
+      gymPhone: json['gym_phone']?.toString() ?? '',
+      isEnabled: json['is_enabled'] as bool? ?? false,
+      status: json['status']?.toString() ?? 'inactive',
+      startDate: parseDate(json['start_date']),
+      endDate: parseDate(json['end_date']),
+      backupPhone: json['backup_phone']?.toString() ?? '',
+      notes: json['notes']?.toString() ?? '',
+      daysRemaining: (json['days_remaining'] as num?)?.toInt() ?? 0,
+      isValid: json['is_valid'] as bool? ?? false,
+    );
+  }
+}
+
+/// Rezilta verifikasyon aksè abònman WhatsApp pou yon Gym
+class WhatsAppAccessCheckResult {
+  const WhatsAppAccessCheckResult({
+    required this.hasAccess,
+    required this.status,
+    this.daysRemaining = 0,
+    this.startDate,
+    this.endDate,
+    this.backupPhone = '',
+    this.message = '',
+  });
+
+  final bool hasAccess;
+  final String status; // 'active', 'suspended', 'expired', 'inactive'
+  final int daysRemaining;
+  final DateTime? startDate;
+  final DateTime? endDate;
+  final String backupPhone;
+  final String message;
+
+  factory WhatsAppAccessCheckResult.fromJson(Map<String, dynamic> json) {
+    DateTime? parseDate(dynamic val) {
+      if (val == null) return null;
+      try {
+        return DateTime.parse(val.toString());
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return WhatsAppAccessCheckResult(
+      hasAccess: json['has_access'] as bool? ?? false,
+      status: json['status']?.toString() ?? 'inactive',
+      daysRemaining: (json['days_remaining'] as num?)?.toInt() ?? 0,
+      startDate: parseDate(json['start_date']),
+      endDate: parseDate(json['end_date']),
+      backupPhone: json['backup_phone']?.toString() ?? '',
+      message: json['message']?.toString() ?? '',
+    );
+  }
 }
 
 /// Kliyan HTTP pou kominike ak sèvis Node.js whatsapp-web.js la
@@ -143,11 +250,13 @@ class WhatsAppClient {
           connectedPhone: data['phone'] as String?,
           pushName: data['pushname'] as String?,
           validNumber: (config['validNumber'] as String? ?? validNumberFallback ?? '').trim(),
+          backupNumber: (config['backupNumber'] as String? ?? '').trim(),
           defaultCountryCode: (config['defaultCountryCode'] as String? ?? '509').trim(),
           autoSendWelcome: config['autoSendWelcome'] as bool? ?? true,
           autoSendReceipts: config['autoSendReceipts'] as bool? ?? true,
           autoSendReminders: config['autoSendReminders'] as bool? ?? true,
           reminderDaysBefore: config['reminderDaysBefore'] as int? ?? 7,
+          queueLength: (data['queueLength'] as num?)?.toInt() ?? 0,
           lastError: data['lastError'] as String?,
           lastChecked: DateTime.now(),
         );
@@ -166,9 +275,10 @@ class WhatsAppClient {
     }
   }
 
-  /// Anrejistre konfigirasyon an nan sèvis la (nimewo valid, etc.)
+  /// Anrejistre konfigirasyon an nan sèvis la (nimewo valid, backup, etc.)
   Future<bool> saveConfig({
     required String validNumber,
+    String backupNumber = '',
     String defaultCountryCode = '509',
     bool autoSendWelcome = true,
     bool autoSendReceipts = true,
@@ -182,6 +292,7 @@ class WhatsAppClient {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'validNumber': validNumber.trim(),
+          'backupNumber': backupNumber.trim(),
           'defaultCountryCode': defaultCountryCode.trim(),
           'autoSendWelcome': autoSendWelcome,
           'autoSendReceipts': autoSendReceipts,
@@ -189,6 +300,24 @@ class WhatsAppClient {
           'reminderDaysBefore': reminderDaysBefore,
         }),
       ).timeout(const Duration(seconds: 5));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Chanje nimewo WhatsApp oswa konekte yon nouvo nimewo (Switch Account / Clear Auth)
+  Future<bool> switchAccount({String? newNumber, String? backupNumber}) async {
+    final uri = Uri.parse('$baseUrl/api/switch-account');
+    try {
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          if (newNumber != null && newNumber.isNotEmpty) 'newNumber': newNumber.trim(),
+          if (backupNumber != null) 'backupNumber': backupNumber.trim(),
+        }),
+      ).timeout(const Duration(seconds: 15));
       return response.statusCode == 200;
     } catch (_) {
       return false;

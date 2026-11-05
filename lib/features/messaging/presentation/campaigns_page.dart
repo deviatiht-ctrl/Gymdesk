@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -71,10 +72,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                 ? '🏋️ Your Gym pass awaits: special comeback offer!'
                 : '🏋️ Pwofite yon òf espesyal pou w retounen antrene !';
         _bodyController.text = isFr
-            ? 'Bonjour {nom},\n\nCela fait un moment que nous ne t\'avons pas vu à la salle ! Ta santé, ta forme et ton énergie se construisent chaque jour.\n\nReviens t\'entraîner dès cette semaine et bénéficie d\'une offre exclusive sur ton réabonnement. Toute l\'équipe et les coachs t\'attendent avec impatience pour t\'aider à atteindre tes objectifs.\n\nÀ très vite à la salle !'
+            ? 'Bonjour {nom},\n\nCela fait un moment que nous ne t\'avons pas vu chez {gym} ! Ta santé, ta forme et ton énergie se construisent chaque jour.\n\nReviens t\'entraîner dès cette semaine chez {gym} et bénéficie d\'une offre exclusive sur ton réabonnement. Toute l\'équipe et les coachs de {gym} t\'attendent avec impatience pour t\'aider à atteindre tes objectifs.\n\nÀ très vite chez {gym} !'
             : isEn
-                ? 'Hello {nom},\n\nIt\'s been a while since we saw you at the gym! Your fitness and energy matter every single day.\n\nCome back this week and enjoy an exclusive discount on your renewal. The whole coaching team is waiting for you.\n\nSee you soon at the gym!'
-                : 'Bonjou {nom},\n\nSa fè yon ti moman depi nou pa wè w nan gym lan ! Sante w, fòs ou ak enèji w se pi gwo richès ou.\n\nRetounen antrene semèn sa a epi pwofite yon rabè espesyal sou re-abònman w lan. Tout ekip la ak antrenè yo ap tann ou pou kontinye avanse ansanm.\n\nN ap tann ou !';
+                ? 'Hello {nom},\n\nIt\'s been a while since we saw you at {gym}! Your fitness and energy matter every single day.\n\nCome back to {gym} this week and enjoy an exclusive discount on your renewal. The whole coaching team at {gym} is waiting for you.\n\nSee you soon at {gym}!'
+                : 'Bonjou {nom},\n\nSa fè yon ti moman depi nou pa wè w nan {gym} ! Sante w, fòs ou ak enèji w se pi gwo richès ou.\n\nRetounen antrene semèn sa a nan {gym} epi pwofite yon rabè espesyal sou re-abònman w lan. Tout ekip la ak antrenè {gym} yo ap tann ou pou kontinye avanse ansanm.\n\nN ap tann ou nan {gym} !';
       } else if (val == 'expiring_reminder') {
         _titleController.text = isFr
             ? 'Rappel : Ton abonnement expire bientôt'
@@ -388,6 +389,27 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     String body,
     AppStrings s,
   ) async {
+    final runtime = ref.read(appRuntimeProvider);
+    final gymId = runtime.session?.gymId;
+    final notifService = ref.read(whatsAppNotificationServiceProvider);
+
+    // 1. Verifye si gym nan gen aksè abònman WhatsApp aktif (pa sispann, pa ekspire)
+    final access = await notifService.checkGymAccess(gymId: gymId);
+    if (!access.hasAccess) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ ${access.message}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 7),
+          ),
+        );
+        setState(() => _isSending = false);
+      }
+      return;
+    }
+
+    // 2. Verifye si sèvis WhatsApp la konekte sou aparèy la
     final waClient = ref.read(whatsAppClientProvider);
     final waState = await waClient.checkStatus();
 
@@ -404,15 +426,17 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       return;
     }
 
-    final runtime = ref.read(appRuntimeProvider);
     final gym = runtime.session?.gym ?? const <String, dynamic>{};
+    final gymName = gym['name'] as String? ?? 'SecurGYM';
     final gymPhone = gym['phone'] as String? ?? '';
     final footer = WhatsAppNotificationService.buildCampaignFooter(
+      gymName: gymName,
       gymPhone: gymPhone,
       lang: s.locale.languageCode,
     );
 
     int sentCount = 0;
+    final random = Random();
     for (int i = 0; i < recipients.length; i++) {
       if (!mounted) break;
       final m = recipients[i];
@@ -423,7 +447,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       if (phone.length < 8) continue;
 
       final memberName = m['name']?.toString() ?? '';
-      final personalizedBody = body.replaceAll('{nom}', memberName);
+      final personalizedBody = body
+          .replaceAll('{nom}', memberName)
+          .replaceAll('{gym}', gymName)
+          .replaceAll('{gym_name}', gymName);
       final fullMsg = '*$title*\n\n$personalizedBody$footer';
 
       final res = await waClient.sendMessage(to: phone, message: fullMsg);
@@ -431,7 +458,9 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
         sentCount++;
       }
       if (i < recipients.length - 1) {
-        await Future<void>.delayed(const Duration(milliseconds: 600));
+        // Delè sekirite anti-spam ant 2.5 a 4 segonn pou evite WhatsApp sispèk spam
+        final delayMs = 2500 + random.nextInt(1500);
+        await Future<void>.delayed(Duration(milliseconds: delayMs));
       }
     }
 
