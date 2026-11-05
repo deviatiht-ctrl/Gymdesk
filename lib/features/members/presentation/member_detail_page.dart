@@ -86,11 +86,20 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     try {
       await action();
       // Senkronizasyon rapid an arrye-plan (pa janm bloke UI a menm le internet la lent)
-      unawaited(ref.read(appRuntimeProvider).sync?.synchronize());
+      unawaited(
+        ref
+            .read(appRuntimeProvider)
+            .sync
+            ?.synchronize()
+            .catchError((_) {}),
+      );
     } on MemberFailure catch (e) {
       _error(e.code);
     } on SubscriptionFailure catch (e) {
       _error(e.code);
+    } catch (e, st) {
+      debugPrint('Member detail action error: $e\n$st');
+      _error('invalid_record');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -601,6 +610,15 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
       );
     });
     if (created != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Abònman renouvle avèk siksè !'),
+            backgroundColor: Color(0xFF0F766E),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
       _pushMemberToW2(member, startDate: created!.startDate, endDate: created!.endDate);
     }
     if (mounted && command != null) {
