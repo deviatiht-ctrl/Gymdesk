@@ -88,28 +88,30 @@ function killOrphanedEdgeProcesses() {
   } catch (_) {}
 }
 
-// 4. Netwaye fichye LOCK yo pou evite "The browser is already running"
+// 4. Netwaye fichye LOCK Chromium yo SÈLMAN nan rasin sesyon an pou evite "The browser is already running"
+// ATANSYON: Pa janm manyen fichye LOCK ki anndan sous-dosye LevelDB oswa IndexedDB paske sa detwi sesyon an!
 function cleanLockFiles(dirPath) {
   try {
     if (!fs.existsSync(dirPath)) return;
-    const items = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const item of items) {
-      const fullPath = path.join(dirPath, item.name);
-      if (item.isDirectory()) {
-        cleanLockFiles(fullPath);
-      } else {
-        const nameLower = item.name.toLowerCase();
-        if (
-          nameLower === 'singletonlock' ||
-          nameLower === 'singletoncookie' ||
-          nameLower === 'singletonsocket' ||
-          nameLower === 'devtoolsactiveport' ||
-          nameLower === 'lock'
-        ) {
-          try {
-            fs.unlinkSync(fullPath);
-            console.log(`[WhatsApp] Fichye lock retire: ${item.name}`);
-          } catch (_) {}
+    const candidates = [dirPath, path.join(dirPath, 'session')];
+    for (const d of candidates) {
+      if (!fs.existsSync(d)) continue;
+      const files = fs.readdirSync(d, { withFileTypes: true });
+      for (const f of files) {
+        if (f.isFile()) {
+          const nameLower = f.name.toLowerCase();
+          if (
+            nameLower === 'singletonlock' ||
+            nameLower === 'singletoncookie' ||
+            nameLower === 'singletonsocket' ||
+            nameLower === 'devtoolsactiveport' ||
+            nameLower === 'lockfile'
+          ) {
+            try {
+              fs.unlinkSync(path.join(d, f.name));
+              console.log(`[WhatsApp] Fichye lock Chromium retire: ${f.name}`);
+            } catch (_) {}
+          }
         }
       }
     }
@@ -332,6 +334,8 @@ async function initWhatsAppClient() {
         console.warn('[WhatsApp] Pa ka li info itilizatè a:', e.message);
       }
       sendSupabaseHeartbeat();
+      // Verifikasyon otomatik rapèl échéance yo lè WhatsApp fin konekte
+      setTimeout(() => runExpirationReminderCron(), 3000);
     });
 
     client.on('disconnected', (reason) => {
@@ -406,14 +410,48 @@ async function sendSupabaseHeartbeat() {
   }
 }
 
+// ============================================================================
+// CRON OTO: Chèche abònman k ap expire yo sou tout gym ki aktif
+// ============================================================================
+async function runExpirationReminderCron(targetGymId = null) {
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/rpc/cron_check_whatsapp_expiration_reminders`;
+    const body = targetGymId ? JSON.stringify({ p_target_gym_id: targetGymId }) : JSON.stringify({});
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+    if (res.ok) {
+      const result = await res.json();
+      console.log(`[Cron Expiration] ✅ Verifikasyon fèt: ${result.queued_count} nouvo rapèl mete nan outbox pou ${result.gyms_processed} gym aktif.`);
+      return result;
+    } else {
+      const txt = await res.text();
+      console.warn('[Cron Expiration] Erè RPC:', txt);
+    }
+  } catch (err) {
+    console.warn('[Cron Expiration] Erè rezo:', err.message);
+  }
+  return null;
+}
+
 let isPollingOutbox = false;
 async function pollSupabaseOutbox() {
   if (isPollingOutbox) return;
+  // SÈLMAN rale mesaj si kliyan WhatsApp la READY nèt e li konekte!
   if (clientStatus !== 'READY' || !client) return;
+  // Si ke anti-spam lan deja gen 3 mesaj k ap trete, tann li vide anvan nou rale plis
+  if (messageQueue.length >= 3) return;
   isPollingOutbox = true;
 
   try {
-    const url = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&order=created_at.asc&limit=5`;
+    const batchSize = Math.max(1, 3 - messageQueue.length);
+    const url = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&order=created_at.asc&limit=${batchSize}`;
     const res = await fetch(url, {
       method: 'GET',
       headers: {
@@ -427,6 +465,8 @@ async function pollSupabaseOutbox() {
       if (Array.isArray(messages) && messages.length > 0) {
         console.log(`[Cloud Bridge] Resevwa ${messages.length} nouvo mesaj soti nan Supabase (Tablet/Web)...`);
         for (const item of messages) {
+          if (clientStatus !== 'READY' || !client) break;
+
           // Mete status kòm processing pou evite lòt worker pran l
           await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
             method: 'PATCH',
@@ -470,7 +510,18 @@ async function pollSupabaseOutbox() {
             });
             console.log(`[Cloud Bridge] ✅ Mesaj ${item.id} voye bay ${item.to_phone} avèk siksè!`);
           }).catch(async (sendErr) => {
-            // Echèk voye
+            const errMsg = sendErr && sendErr.message ? sendErr.message : String(sendErr);
+            // Si se yon erè koneksyon tanporè, remete status kòm pending pou li ka voye pita lè WhatsApp pare
+            const isConnectionError =
+              clientStatus !== 'READY' ||
+              !client ||
+              errMsg.includes('pa konekte') ||
+              errMsg.includes('detached Frame') ||
+              errMsg.includes('Target closed') ||
+              errMsg.includes('Execution context was destroyed') ||
+              errMsg.includes('Session closed');
+
+            const newStatus = isConnectionError ? 'pending' : 'failed';
             await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
               method: 'PATCH',
               headers: {
@@ -478,9 +529,17 @@ async function pollSupabaseOutbox() {
                 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
                 'Content-Type': 'application/json',
               },
-              body: JSON.stringify({ status: 'failed', error_message: sendErr.message || String(sendErr) }),
+              body: JSON.stringify({
+                status: newStatus,
+                error_message: errMsg,
+                processed_at: null,
+              }),
             });
-            console.warn(`[Cloud Bridge] ❌ Mesaj ${item.id} echwe:`, sendErr.message);
+            if (isConnectionError) {
+              console.warn(`[Cloud Bridge] ⏳ Mesaj ${item.id} remete kòm PENDING paske WhatsApp ap rekonekte (${errMsg})`);
+            } else {
+              console.warn(`[Cloud Bridge] ❌ Mesaj ${item.id} echwe definitivman:`, errMsg);
+            }
           });
         }
       }
@@ -509,6 +568,7 @@ function watchdogAutoRecovery() {
 setInterval(sendSupabaseHeartbeat, 5000);
 setInterval(pollSupabaseOutbox, 3500);
 setInterval(watchdogAutoRecovery, 10000);
+setInterval(() => runExpirationReminderCron(), 60 * 60 * 1000); // Chak 1 èdtan otomatikman
 
 // Express App
 const app = express();
@@ -673,6 +733,17 @@ app.post('/api/test', async (req, res) => {
     });
   } catch (err) {
     console.error('[WhatsApp] Erè tès:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 5.5. Fòse verifikasyon rapèl échéance kounye a (Cron on-demand)
+app.post('/api/cron/check-expirations', async (req, res) => {
+  try {
+    const gymId = req.body && req.body.gymId ? req.body.gymId : null;
+    const result = await runExpirationReminderCron(gymId);
+    res.json({ ok: true, result });
+  } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });

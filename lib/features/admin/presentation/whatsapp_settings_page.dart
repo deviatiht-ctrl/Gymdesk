@@ -675,6 +675,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       }
       await _loadGymsAccessList();
       await _checkCurrentGymAccess();
+      if (enabled && status == 'active') {
+        _triggerExpirationCheckForGym(gym.gymId, gym.gymName);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -712,6 +715,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       }
       await _loadGymsAccessList();
       await _checkCurrentGymAccess();
+      if (newStatus == 'active') {
+        _triggerExpirationCheckForGym(gym.gymId, gym.gymName);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -752,6 +758,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       }
       await _loadGymsAccessList();
       await _checkCurrentGymAccess();
+      _triggerExpirationCheckForGym(gym.gymId, gym.gymName);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1784,12 +1791,75 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade800),
                   ),
                 ],
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: _checkingExpirations ? null : _runManualExpirationCheck,
+                  icon: _checkingExpirations
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(LucideIcons.refreshCw, size: 14),
+                  label: Text(_checkingExpirations ? 'V\u00e9rification en cours...' : 'V\u00e9rifier & Mettre en file d\'attente'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0F766E),
+                    side: const BorderSide(color: Color(0xFF0F766E)),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+
+  bool _checkingExpirations = false;
+  Future<void> _runManualExpirationCheck() async {
+    if (_checkingExpirations) return;
+    setState(() => _checkingExpirations = true);
+    final s = AppStrings.of(context);
+    try {
+      final res = await ref.read(whatsAppClientProvider).triggerExpirationCheck();
+      if (res != null && mounted) {
+        final queued = (res['queued_count'] as num?)?.toInt() ?? 0;
+        final gyms = (res['gyms_processed'] as num?)?.toInt() ?? 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Verifikasyon fini : ' + queued.toString() + ' rap\u00e8l anrejistre pou ' + gyms.toString() + ' gym.'),
+            backgroundColor: Colors.teal.shade800,
+          ),
+        );
+        await _checkStatus();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Er\u00e8: ' + e.toString()), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _checkingExpirations = false);
+    }
+  }
+
+  Future<void> _triggerExpirationCheckForGym(String gymId, String gymName) async {
+    try {
+      final res = await ref.read(whatsAppClientProvider).triggerExpirationCheck(targetGymId: gymId);
+      if (res != null && mounted) {
+        final queued = (res['queued_count'] as num?)?.toInt() ?? 0;
+        if (queued > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(queued.toString() + ' nouvo rap\u00e8l d\'\u00e9ch\u00e9ance prepare pou manm ' + gymName + ' yo!'),
+              backgroundColor: Colors.teal.shade700,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Er\u00e8 cron check: ' + e.toString());
+    }
   }
 
 }

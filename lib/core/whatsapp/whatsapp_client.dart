@@ -550,6 +550,41 @@ class WhatsAppClient {
       return false;
     }
   }
+
+  /// Lese verifikasyon otomatik rapèl échéance sou Supabase
+  Future<Map<String, dynamic>?> triggerExpirationCheck({String? targetGymId}) async {
+    // 1. Eseye lokalman si nou sou PC
+    if (!_lastUsedCloudBridge) {
+      try {
+        final uri = Uri.parse('$baseUrl/api/cron/check-expirations');
+        final response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(targetGymId != null ? {'gymId': targetGymId} : {}),
+        ).timeout(const Duration(seconds: 10));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['ok'] == true && data['result'] != null) {
+            return Map<String, dynamic>.from(data['result'] as Map);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Cloud Bridge Supabase RPC
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'cron_check_whatsapp_expiration_reminders',
+        params: targetGymId != null ? {'p_target_gym_id': targetGymId} : {},
+      );
+      if (res != null) {
+        return Map<String, dynamic>.from(res as Map);
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè triggerExpirationCheck: $e');
+    }
+    return null;
+  }
 }
 
 /// Riverpod provider pou kliyan WhatsApp la
