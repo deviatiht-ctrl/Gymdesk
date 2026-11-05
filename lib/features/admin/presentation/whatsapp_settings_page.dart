@@ -489,7 +489,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 decoration: BoxDecoration(
                   color: Colors.red.withOpacity(0.06),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.pad(BorderSide(color: Colors.red.withOpacity(0.3))),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
