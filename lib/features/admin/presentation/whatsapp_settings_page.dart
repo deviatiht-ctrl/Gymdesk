@@ -2201,9 +2201,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          '1. Louvri WhatsApp sou telefòn ou.
-2. Klike sou 3 pwen anlè a > "Aparèy Konekte".
-3. Klike "Konekte yon aparèy" epi vize kamera w sou kòd sa a.',
+                          '1. Louvri WhatsApp sou telefòn ou.\n2. Klike sou 3 pwen anlè a > "Aparèy Konekte".\n3. Klike "Konekte yon aparèy" epi vize kamera w sou kòd sa a.',
                           style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
                         ),
                         const SizedBox(height: 10),
