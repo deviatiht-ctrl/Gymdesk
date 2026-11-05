@@ -5,6 +5,14 @@ const fs = require('fs');
 const path = require('path');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
+// Pwoteje pwosesis la kont erè CDP / Network ki ka soti nan Puppeteer
+process.on('unhandledRejection', (reason) => {
+  console.warn('[WhatsApp] Intercepted unhandledRejection:', reason && reason.message ? reason.message : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.warn('[WhatsApp] Intercepted uncaughtException:', err && err.message ? err.message : err);
+});
+
 const PORT = process.env.PORT || 47812;
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
@@ -114,7 +122,6 @@ async function destroyCurrentClient() {
     client = null;
   }
   isInitializing = false;
-  // Netwaye lock files apre kliyan an fin fèmen
   cleanLockFiles(AUTH_DIR);
 }
 
@@ -132,7 +139,6 @@ async function initWhatsAppClient() {
   console.log('[WhatsApp] Demaraj kliyan WhatsApp Web...');
 
   try {
-    // Netwaye nenpòt lock ki te rete
     cleanLockFiles(AUTH_DIR);
 
     const execPath = getBrowserExecutablePath();
@@ -150,6 +156,7 @@ async function initWhatsAppClient() {
         '--no-first-run',
         '--no-zygote',
         '--disable-gpu',
+        '--disk-cache-size=0',
       ],
     };
     if (execPath) {
@@ -158,6 +165,7 @@ async function initWhatsAppClient() {
 
     client = new Client({
       authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
+      webVersionCache: { type: 'none' },
       puppeteer: puppeteerOptions,
     });
 
@@ -186,7 +194,6 @@ async function initWhatsAppClient() {
       clientStatus = 'ERROR';
       lastError = `Echèk otantifikasyon: ${msg}`;
       isInitializing = false;
-      // Si otantifikasyon echwe, siye sesyon an pou re-mande QR
       try {
         await destroyCurrentClient();
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
@@ -224,8 +231,6 @@ async function initWhatsAppClient() {
       clientStatus = 'ERROR';
       lastError = err.message;
       isInitializing = false;
-
-      // Si se te yon erè "browser already running", netwaye locks yo pou pwochen tantativ
       cleanLockFiles(AUTH_DIR);
     });
   } catch (err) {
