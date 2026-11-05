@@ -3,6 +3,7 @@ const cors = require('cors');
 const qrcode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 
 // Pwoteje pwosesis la kont erè CDP / Network ki ka soti nan Puppeteer
@@ -16,6 +17,10 @@ process.on('uncaughtException', (err) => {
 const PORT = process.env.PORT || 47812;
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
+
+// Supabase Cloud Bridge Config (pou Tablet, Telefòn, ak Web)
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jrhdegdvdqnxstpdzbya.supabase.co';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyaGRlZ2R2ZHFueHN0cGR6YnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyOTM2NDksImV4cCI6MjEwNjg2OTY0OX0.O8WMsF2z447mdWj6gNMyaJ9Q8eTFQwKZyLMMsxrfx5Y';
 
 // 1. Chaje konfigirasyon lokal la
 let config = {
@@ -73,7 +78,17 @@ function getBrowserExecutablePath() {
   return undefined;
 }
 
-// 3. Netwaye fichye LOCK yo pou evite "The browser is already running"
+// 3. Fèmen nenpòt pwosesis zonbi Edge / Chrome ki kenbe lock sou sesyon an
+function killOrphanedEdgeProcesses() {
+  try {
+    execSync(
+      'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'msedge.exe\'\\" | Where-Object { $_.CommandLine -like \'*whatsapp_service*\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"',
+      { stdio: 'ignore' }
+    );
+  } catch (_) {}
+}
+
+// 4. Netwaye fichye LOCK yo pou evite "The browser is already running"
 function cleanLockFiles(dirPath) {
   try {
     if (!fs.existsSync(dirPath)) return;
@@ -112,6 +127,7 @@ let connectedUser = null;
 let pushName = null;
 let lastError = null;
 let isInitializing = false;
+let disconnectedSince = null;
 
 // Anti-Spam Message Queue pou evite WhatsApp bloke nimewo a
 const messageQueue = [];
@@ -148,19 +164,69 @@ function enqueueMessage(action) {
   });
 }
 
-// Detwi kliyan an avèk sekirite
+// Detwi kliyan an avèk sekirite epi libere tout resous
 async function destroyCurrentClient() {
   if (client) {
     try {
       console.log('[WhatsApp] N ap fèmen ansyen kliyan Puppeteer...');
-      await client.destroy();
+      if (client.pupBrowser) {
+        const pid = client.pupBrowser.process()?.pid;
+        if (pid) {
+          try {
+            execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
+            console.log(`[WhatsApp] Pwosesis browser PID ${pid} fèmen.`);
+          } catch (_) {}
+        }
+      }
+      await client.destroy().catch(() => {});
     } catch (e) {
       console.warn('[WhatsApp] Erè pandan destroy():', e.message);
     }
     client = null;
   }
   isInitializing = false;
+  killOrphanedEdgeProcesses();
   cleanLockFiles(AUTH_DIR);
+}
+
+// Voye mesaj avèk rekiperasyon otomatik si gen "detached Frame" oswa CDP dekonekte
+async function safeSendMessage(chatId, content, options) {
+  if (!client || clientStatus !== 'READY') {
+    throw new Error(`WhatsApp pa konekte (Estati: ${clientStatus}). Eskane kòd QR la sou panèl admin nan.`);
+  }
+
+  try {
+    return await client.sendMessage(chatId, content, options);
+  } catch (err) {
+    const errMsg = err && err.message ? err.message : String(err);
+    console.warn(`[WhatsApp] Erè sendMessage: ${errMsg}`);
+
+    // Si erè a se detached Frame oswa context destroyed, repare li otomatikman
+    if (
+      errMsg.includes('detached Frame') ||
+      errMsg.includes('Execution context was destroyed') ||
+      errMsg.includes('Target closed') ||
+      errMsg.includes('Session closed')
+    ) {
+      console.warn('[WhatsApp] ⚠️ Detached Frame detekte! N ap rafrechi paj WhatsApp la otomatikman...');
+      try {
+        if (client && client.pupPage) {
+          await client.pupPage.reload({ waitUntil: 'networkidle0' }).catch(() => {});
+          console.log('[WhatsApp] Paj rafrechi, n ap tann 5s pou WhatsApp Web re-establi...');
+          await new Promise((r) => setTimeout(r, 5000));
+          console.log(`[WhatsApp] N ap re-eseye voye mesaj la bay ${chatId}...`);
+          return await client.sendMessage(chatId, content, options);
+        }
+      } catch (recoveryErr) {
+        console.error('[WhatsApp] Rafrechisman echwe, n ap rekonekte kliyan an:', recoveryErr.message);
+        setTimeout(() => {
+          destroyCurrentClient().then(() => initWhatsAppClient());
+        }, 1000);
+        throw new Error('Sistèm WhatsApp la te pèdi koneksyon an entèn; li fèk rekonekte otomatikman. Tanpri re-eseye nan kèk segonn.');
+      }
+    }
+    throw err;
+  }
 }
 
 async function initWhatsAppClient() {
@@ -173,10 +239,12 @@ async function initWhatsAppClient() {
   rawQrCode = null;
   qrDataUrl = null;
   lastError = null;
+  disconnectedSince = null;
 
   console.log('[WhatsApp] Demaraj kliyan WhatsApp Web...');
 
   try {
+    killOrphanedEdgeProcesses();
     cleanLockFiles(AUTH_DIR);
 
     const execPath = getBrowserExecutablePath();
@@ -194,7 +262,11 @@ async function initWhatsAppClient() {
         '--no-first-run',
         '--no-zygote',
         '--disable-gpu',
-        '--disk-cache-size=0',
+        '--disable-extensions',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=Translate,OptimizationHints,MediaRouter',
       ],
     };
     if (execPath) {
@@ -212,8 +284,10 @@ async function initWhatsAppClient() {
       clientStatus = 'SCAN_QR';
       rawQrCode = qr;
       isInitializing = false;
+      disconnectedSince = null;
       try {
         qrDataUrl = await qrcode.toDataURL(qr, { margin: 2, scale: 8 });
+        sendSupabaseHeartbeat();
       } catch (err) {
         console.error('[WhatsApp] Erè konvèsyon QR an DataURL:', err.message);
       }
@@ -225,6 +299,8 @@ async function initWhatsAppClient() {
       rawQrCode = null;
       qrDataUrl = null;
       lastError = null;
+      disconnectedSince = null;
+      sendSupabaseHeartbeat();
     });
 
     client.on('auth_failure', async (msg) => {
@@ -232,10 +308,12 @@ async function initWhatsAppClient() {
       clientStatus = 'ERROR';
       lastError = `Echèk otantifikasyon: ${msg}`;
       isInitializing = false;
+      disconnectedSince = Date.now();
       try {
         await destroyCurrentClient();
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
       } catch (_) {}
+      sendSupabaseHeartbeat();
     });
 
     client.on('ready', async () => {
@@ -243,6 +321,7 @@ async function initWhatsAppClient() {
       clientStatus = 'READY';
       isInitializing = false;
       lastError = null;
+      disconnectedSince = null;
       try {
         if (client && client.info) {
           connectedUser = client.info.wid ? client.info.wid.user : null;
@@ -252,6 +331,7 @@ async function initWhatsAppClient() {
       } catch (e) {
         console.warn('[WhatsApp] Pa ka li info itilizatè a:', e.message);
       }
+      sendSupabaseHeartbeat();
     });
 
     client.on('disconnected', (reason) => {
@@ -262,6 +342,8 @@ async function initWhatsAppClient() {
       rawQrCode = null;
       qrDataUrl = null;
       isInitializing = false;
+      disconnectedSince = Date.now();
+      sendSupabaseHeartbeat();
     });
 
     client.initialize().catch(async (err) => {
@@ -269,14 +351,18 @@ async function initWhatsAppClient() {
       clientStatus = 'ERROR';
       lastError = err.message;
       isInitializing = false;
+      disconnectedSince = Date.now();
       cleanLockFiles(AUTH_DIR);
+      sendSupabaseHeartbeat();
     });
   } catch (err) {
     console.error('[WhatsApp] Erè lansman:', err.message);
     clientStatus = 'ERROR';
     lastError = err.message;
     isInitializing = false;
+    disconnectedSince = Date.now();
     cleanLockFiles(AUTH_DIR);
+    sendSupabaseHeartbeat();
   }
 }
 
@@ -293,6 +379,136 @@ function cleanPhoneNumber(phone) {
   }
   return digits;
 }
+
+// ============================================================================
+// CLOUD BRIDGE SUPABASE: Pou Tablet, Telefòn, ak Web (Vercel)
+// ============================================================================
+async function sendSupabaseHeartbeat() {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_heartbeat`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        p_service_status: clientStatus,
+        p_connected_phone: connectedUser,
+        p_push_name: pushName,
+        p_qr_code: (clientStatus === 'SCAN_QR' ? qrDataUrl : null),
+        p_queue_length: messageQueue.length,
+        p_last_error: lastError,
+      }),
+    });
+  } catch (_) {
+    // ignor network hiccups
+  }
+}
+
+let isPollingOutbox = false;
+async function pollSupabaseOutbox() {
+  if (isPollingOutbox) return;
+  if (clientStatus !== 'READY' || !client) return;
+  isPollingOutbox = true;
+
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&order=created_at.asc&limit=5`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+    });
+
+    if (res.ok) {
+      const messages = await res.json();
+      if (Array.isArray(messages) && messages.length > 0) {
+        console.log(`[Cloud Bridge] Resevwa ${messages.length} nouvo mesaj soti nan Supabase (Tablet/Web)...`);
+        for (const item of messages) {
+          // Mete status kòm processing pou evite lòt worker pran l
+          await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ status: 'processing', processed_at: new Date().toISOString() }),
+          });
+
+          // Mete mesaj la nan ke anti-spam lan
+          enqueueMessage(async () => {
+            const cleanPhone = cleanPhoneNumber(item.to_phone);
+            if (!cleanPhone || cleanPhone.length < 8) {
+              throw new Error('Nimewo telefòn destinataire a pa valid.');
+            }
+            const chatId = `${cleanPhone}@c.us`;
+
+            if (item.pdf_base64 && typeof item.pdf_base64 === 'string') {
+              try {
+                const media = new MessageMedia('application/pdf', item.pdf_base64, item.pdf_file_name || 'Recu.pdf');
+                return await safeSendMessage(chatId, media, { caption: item.message.trim() });
+              } catch (mediaErr) {
+                console.warn('[Cloud Bridge] Erè voye PDF, n ap voye kòm tèks:', mediaErr.message);
+                return await safeSendMessage(chatId, item.message.trim());
+              }
+            } else {
+              return await safeSendMessage(chatId, item.message.trim());
+            }
+          }).then(async () => {
+            // Siksè voye
+            await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ status: 'sent', sent_at: new Date().toISOString() }),
+            });
+            console.log(`[Cloud Bridge] ✅ Mesaj ${item.id} voye bay ${item.to_phone} avèk siksè!`);
+          }).catch(async (sendErr) => {
+            // Echèk voye
+            await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ status: 'failed', error_message: sendErr.message || String(sendErr) }),
+            });
+            console.warn(`[Cloud Bridge] ❌ Mesaj ${item.id} echwe:`, sendErr.message);
+          });
+        }
+      }
+    }
+  } catch (_) {
+    // Ignor hiccups
+  } finally {
+    isPollingOutbox = false;
+  }
+}
+
+// Watchdog pou relanse WhatsApp otomatikman si li rete DISCONNECTED oswa ERROR plis pase 30 segonn
+function watchdogAutoRecovery() {
+  if (isInitializing) return;
+  if ((clientStatus === 'DISCONNECTED' || clientStatus === 'ERROR') && disconnectedSince) {
+    const elapsed = Date.now() - disconnectedSince;
+    if (elapsed > 30000) {
+      console.log('[Watchdog] WhatsApp rete dekonekte plis pase 30s. N ap relanse li otomatikman...');
+      disconnectedSince = Date.now();
+      destroyCurrentClient().then(() => initWhatsAppClient());
+    }
+  }
+}
+
+// Lanse entèval background yo
+setInterval(sendSupabaseHeartbeat, 5000);
+setInterval(pollSupabaseOutbox, 3500);
+setInterval(watchdogAutoRecovery, 10000);
 
 // Express App
 const app = express();
@@ -397,13 +613,13 @@ app.post('/api/send', async (req, res) => {
         try {
           console.log(`[WhatsApp] N ap tache PDF dokiman (${pdfFileName || 'Recu.pdf'})...`);
           const media = new MessageMedia('application/pdf', pdfBase64, pdfFileName || 'Recu.pdf');
-          return await client.sendMessage(chatId, media, { caption: message.trim() });
+          return await safeSendMessage(chatId, media, { caption: message.trim() });
         } catch (mediaErr) {
           console.warn('[WhatsApp] Erè voye PDF, n ap voye kòm tèks senp:', mediaErr.message);
-          return await client.sendMessage(chatId, message.trim());
+          return await safeSendMessage(chatId, message.trim());
         }
       } else {
-        return await client.sendMessage(chatId, message.trim());
+        return await safeSendMessage(chatId, message.trim());
       }
     });
 
@@ -446,7 +662,7 @@ app.post('/api/test', async (req, res) => {
 
     const chatId = `${cleanPhone}@c.us`;
     const result = await enqueueMessage(async () => {
-      return await client.sendMessage(chatId, testMsg);
+      return await safeSendMessage(chatId, testMsg);
     });
 
     res.json({
@@ -571,6 +787,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
   console.log(`  Sèvis WhatsApp SecurGYM ap kouri sou pò ${PORT}`);
   console.log(`  URL Sèvis: http://127.0.0.1:${PORT}`);
+  console.log(`  Cloud Bridge Supabase Aktif: ${SUPABASE_URL}`);
   console.log(`====================================================`);
 
   // Kòmanse WhatsApp otomatikman

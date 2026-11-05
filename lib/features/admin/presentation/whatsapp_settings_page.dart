@@ -1047,6 +1047,20 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                           '${s.text('whatsapp_connected_phone')} +${_state.connectedPhone} ${_state.pushName != null ? "(${_state.pushName})" : ""}',
                           style: theme.textTheme.bodySmall,
                         ),
+                      if (_state.isCloudBridge)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              const Icon(LucideIcons.cloud, size: 14, color: Colors.teal),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Cloud Bridge Aktif (Senkronize ak sèvis PC a)',
+                                style: TextStyle(color: Colors.teal.shade700, fontSize: 12, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
                     ],
                   ),
                 ),

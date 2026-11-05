@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Estati koneksyon WhatsApp
 enum WhatsAppStatus {
@@ -32,6 +34,7 @@ class WhatsAppState {
     this.queueLength = 0,
     this.lastError,
     this.lastChecked,
+    this.isCloudBridge = false,
   });
 
   final WhatsAppStatus status;
@@ -49,6 +52,7 @@ class WhatsAppState {
   final int queueLength;
   final String? lastError;
   final DateTime? lastChecked;
+  final bool isCloudBridge;
 
   bool get isReady => status == WhatsAppStatus.ready;
   bool get isWaitingForQr => status == WhatsAppStatus.scanQr;
@@ -72,6 +76,7 @@ class WhatsAppState {
     int? queueLength,
     String? lastError,
     DateTime? lastChecked,
+    bool? isCloudBridge,
   }) {
     return WhatsAppState(
       status: status ?? this.status,
@@ -89,6 +94,7 @@ class WhatsAppState {
       queueLength: queueLength ?? this.queueLength,
       lastError: lastError,
       lastChecked: lastChecked ?? this.lastChecked,
+      isCloudBridge: isCloudBridge ?? this.isCloudBridge,
     );
   }
 }
@@ -207,11 +213,12 @@ class WhatsAppAccessCheckResult {
   }
 }
 
-/// Kliyan HTTP pou kominike ak sèvis Node.js whatsapp-web.js la
+/// Kliyan HTTP ak Cloud Bridge pou kominike ak WhatsApp Web
 class WhatsAppClient {
   WhatsAppClient({this.baseUrl = 'http://127.0.0.1:47812'});
 
   final String baseUrl;
+  static bool _lastUsedCloudBridge = false;
 
   /// Netwaye epi mete nimewo nan bon fòma entènasyonal (egz: 50937001122)
   static String normalizePhone(String raw, {String defaultCountryCode = '509'}) {
@@ -223,11 +230,12 @@ class WhatsAppClient {
     return digits;
   }
 
-  /// Verifye estati sèvis WhatsApp la
+  /// Verifye estati sèvis WhatsApp la (Lokal premye, oswa Cloud Bridge Supabase si sou Web/Tablet)
   Future<WhatsAppState> checkStatus({String? validNumberFallback}) async {
-    final uri = Uri.parse('$baseUrl/api/status');
+    // 1. Eseye kominike dirèkteman ak sèvis lokal la (si nou sou PC)
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 4));
+      final uri = Uri.parse('$baseUrl/api/status');
+      final response = await http.get(uri).timeout(const Duration(milliseconds: 1800));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final rawStatus = data['status'] as String? ?? 'DISCONNECTED';
@@ -242,6 +250,7 @@ class WhatsAppClient {
           _ => WhatsAppStatus.disconnected,
         };
 
+        _lastUsedCloudBridge = false;
         return WhatsAppState(
           status: status,
           qrDataUrl: data['qr'] as String?,
@@ -258,20 +267,62 @@ class WhatsAppClient {
           queueLength: (data['queueLength'] as num?)?.toInt() ?? 0,
           lastError: data['lastError'] as String?,
           lastChecked: DateTime.now(),
+          isCloudBridge: false,
         );
       }
-      return WhatsAppState(
-        status: WhatsAppStatus.offline,
-        lastError: 'HTTP ${response.statusCode}',
-        lastChecked: DateTime.now(),
-      );
-    } catch (e) {
-      return WhatsAppState(
-        status: WhatsAppStatus.offline,
-        lastError: e.toString(),
-        lastChecked: DateTime.now(),
-      );
+    } catch (_) {
+      // Sèvis lokal la pa reponn (egz: nou sou yon Tablet, Telefòn, oswa Vercel Web)
     }
+
+    // 2. Cloud Bridge: Rale estati a depi Supabase kote sèvis background lan voye heartbeat
+    return await _checkStatusFromSupabase(validNumberFallback: validNumberFallback);
+  }
+
+  /// Rale estati sèvis la depi Supabase (Cloud Bridge)
+  Future<WhatsAppState> _checkStatusFromSupabase({String? validNumberFallback}) async {
+    try {
+      final res = await Supabase.instance.client.rpc('platform_whatsapp_config_get');
+      if (res != null) {
+        final data = Map<String, dynamic>.from(res as Map);
+        final isOnline = data['is_online'] as bool? ?? false;
+        final rawStatus = data['service_status'] as String? ?? 'OFFLINE';
+
+        final status = switch (rawStatus.toUpperCase()) {
+          'READY' => isOnline ? WhatsAppStatus.ready : WhatsAppStatus.offline,
+          'SCAN_QR' => isOnline ? WhatsAppStatus.scanQr : WhatsAppStatus.offline,
+          'AUTHENTICATED' => isOnline ? WhatsAppStatus.authenticated : WhatsAppStatus.offline,
+          'INITIALIZING' => isOnline ? WhatsAppStatus.initializing : WhatsAppStatus.offline,
+          'ERROR' => WhatsAppStatus.error,
+          _ => WhatsAppStatus.offline,
+        };
+
+        _lastUsedCloudBridge = true;
+        return WhatsAppState(
+          status: status,
+          qrDataUrl: data['qr_code'] as String?,
+          connectedPhone: data['connected_phone'] as String?,
+          pushName: data['push_name'] as String?,
+          validNumber: (data['valid_number'] as String? ?? validNumberFallback ?? '').trim(),
+          defaultCountryCode: (data['default_country_code'] as String? ?? '509').trim(),
+          autoSendWelcome: data['auto_send_welcome'] as bool? ?? true,
+          autoSendReceipts: data['auto_send_receipts'] as bool? ?? true,
+          autoSendReminders: data['auto_send_reminders'] as bool? ?? true,
+          reminderDaysBefore: data['reminder_days_before'] as int? ?? 7,
+          queueLength: (data['queue_length'] as num?)?.toInt() ?? 0,
+          lastError: data['last_error'] as String?,
+          lastChecked: DateTime.now(),
+          isCloudBridge: true,
+        );
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè lekti Supabase heartbeat: $e');
+    }
+
+    return WhatsAppState(
+      status: WhatsAppStatus.offline,
+      lastError: 'Sèvis WhatsApp la pa reponn',
+      lastChecked: DateTime.now(),
+    );
   }
 
   /// Anrejistre konfigirasyon an nan sèvis la (nimewo valid, backup, etc.)
@@ -284,9 +335,10 @@ class WhatsAppClient {
     bool autoSendReminders = true,
     int reminderDaysBefore = 7,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/config');
+    // 1. Sove lokal si sèvis la aksesib
     try {
-      final response = await http.post(
+      final uri = Uri.parse('$baseUrl/api/config');
+      await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -298,9 +350,23 @@ class WhatsAppClient {
           'autoSendReminders': autoSendReminders,
           'reminderDaysBefore': reminderDaysBefore,
         }),
-      ).timeout(const Duration(seconds: 5));
-      return response.statusCode == 200;
-    } catch (_) {
+      ).timeout(const Duration(seconds: 4));
+    } catch (_) {}
+
+    // 2. Sove nan Supabase (pou tout aparèy jwenn li)
+    try {
+      await Supabase.instance.client.rpc('platform_whatsapp_config_set', params: {
+        'p_gateway_url': baseUrl,
+        'p_valid_number': validNumber.trim(),
+        'p_default_country_code': defaultCountryCode.trim(),
+        'p_auto_send_receipts': autoSendReceipts,
+        'p_auto_send_reminders': autoSendReminders,
+        'p_auto_send_welcome': autoSendWelcome,
+        'p_reminder_days_before': reminderDaysBefore,
+      });
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè sovgad config nan Supabase: $e');
       return false;
     }
   }
@@ -329,37 +395,58 @@ class WhatsAppClient {
     required String message,
     String? pdfBase64,
     String? pdfFileName,
+    String kind = 'manual',
   }) async {
-    final uri = Uri.parse('$baseUrl/api/send');
-    try {
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'to': to.trim(),
-          'message': message.trim(),
-          if (pdfBase64 != null && pdfBase64.isNotEmpty) 'pdfBase64': pdfBase64,
-          if (pdfFileName != null && pdfFileName.isNotEmpty) 'pdfFileName': pdfFileName,
-        }),
-      ).timeout(const Duration(seconds: 40));
+    // 1. Eseye voye lokalman si nou sou PC epi CloudBridge pa t nesesè
+    if (!_lastUsedCloudBridge) {
+      try {
+        final uri = Uri.parse('$baseUrl/api/send');
+        final response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'to': to.trim(),
+            'message': message.trim(),
+            if (pdfBase64 != null && pdfBase64.isNotEmpty) 'pdfBase64': pdfBase64,
+            if (pdfFileName != null && pdfFileName.isNotEmpty) 'pdfFileName': pdfFileName,
+          }),
+        ).timeout(const Duration(seconds: 25));
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (response.statusCode == 200 && data['ok'] == true) {
-        return WhatsAppSendResult(
-          success: true,
-          messageId: data['messageId'] as String?,
-          to: data['to'] as String?,
-        );
-      } else {
-        return WhatsAppSendResult(
-          success: false,
-          error: data['error'] as String? ?? 'Echèk voye mesaj',
-        );
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (response.statusCode == 200 && data['ok'] == true) {
+          return WhatsAppSendResult(
+            success: true,
+            messageId: data['messageId'] as String?,
+            to: data['to'] as String?,
+          );
+        }
+      } catch (e) {
+        debugPrint('[WhatsApp] Voye lokal echwe, n ap pase pa Cloud Bridge: $e');
       }
-    } catch (e) {
+    }
+
+    // 2. Voye atravè Cloud Bridge Supabase (Pou Tablet, Telefòn, ak Web)
+    try {
+      final cleanPhone = normalizePhone(to);
+      final outboxId = await Supabase.instance.client.rpc(
+        'whatsapp_enqueue_message',
+        params: {
+          'p_to_phone': cleanPhone,
+          'p_message': message.trim(),
+          'p_kind': kind,
+          'p_pdf_base64': pdfBase64,
+          'p_pdf_file_name': pdfFileName,
+        },
+      );
+      return WhatsAppSendResult(
+        success: true,
+        messageId: outboxId?.toString(),
+        to: cleanPhone,
+      );
+    } catch (cloudErr) {
       return WhatsAppSendResult(
         success: false,
-        error: e.toString(),
+        error: cloudErr.toString(),
       );
     }
   }
@@ -369,30 +456,56 @@ class WhatsAppClient {
     String? to,
     String? message,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/test');
-    try {
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          if (to != null && to.isNotEmpty) 'to': to.trim(),
-          if (message != null && message.isNotEmpty) 'message': message.trim(),
-        }),
-      ).timeout(const Duration(seconds: 25));
+    final targetPhone = to?.trim() ?? '';
+    final msg = message?.trim() ?? '🏋️ *SecurGYM* - Tès mesaj koneksyon WhatsApp.';
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (response.statusCode == 200 && data['ok'] == true) {
-        return WhatsAppSendResult(
-          success: true,
-          messageId: data['messageId'] as String?,
-          to: data['to'] as String?,
-        );
-      } else {
-        return WhatsAppSendResult(
-          success: false,
-          error: data['error'] as String? ?? 'Echèk tès',
-        );
+    // 1. Eseye voye lokalman
+    if (!_lastUsedCloudBridge) {
+      try {
+        final uri = Uri.parse('$baseUrl/api/test');
+        final response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            if (targetPhone.isNotEmpty) 'to': targetPhone,
+            'message': msg,
+          }),
+        ).timeout(const Duration(seconds: 15));
+
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (response.statusCode == 200 && data['ok'] == true) {
+          return WhatsAppSendResult(
+            success: true,
+            messageId: data['messageId'] as String?,
+            to: data['to'] as String? ?? targetPhone,
+          );
+        } else if (data['error'] != null) {
+          return WhatsAppSendResult(
+            success: false,
+            error: data['error'] as String,
+          );
+        }
+      } catch (e) {
+        debugPrint('[WhatsApp] Tès lokal echwe, n ap pase pa Cloud Bridge: $e');
       }
+    }
+
+    // 2. Fallback Cloud Bridge Supabase
+    try {
+      final cleanPhone = normalizePhone(targetPhone);
+      final outboxId = await Supabase.instance.client.rpc(
+        'whatsapp_enqueue_message',
+        params: {
+          'p_to_phone': cleanPhone,
+          'p_message': msg,
+          'p_kind': 'test',
+        },
+      );
+      return WhatsAppSendResult(
+        success: true,
+        messageId: outboxId?.toString(),
+        to: cleanPhone,
+      );
     } catch (e) {
       return WhatsAppSendResult(
         success: false,
