@@ -1486,7 +1486,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: Colors.green),
-                onPressed: _sendingTest || !_state.isReady ? null : _sendTestMessage,
+                onPressed: _sendingTest || (!_state.isReady && !_accountsList.any((a) => a.isReady)) ? null : _sendTestMessage,
                 icon: _sendingTest
                     ? const SizedBox(
                         width: 16,

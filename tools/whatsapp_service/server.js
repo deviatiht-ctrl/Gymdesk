@@ -80,6 +80,16 @@ function getBrowserExecutablePath() {
 }
 
 // 3. Netwaye fichye lock Chromium sèlman nan rasin sesyon an (pa manyen LevelDB!)
+function killOrphanedBrowserForAccount(accountIndex) {
+  try {
+    const pattern = `account_${accountIndex}`;
+    execSync(
+      `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\\"Name = 'msedge.exe'\\\" | Where-Object { $_.CommandLine -like '*${pattern}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
+      { stdio: 'ignore' }
+    );
+  } catch (_) {}
+}
+
 function cleanSessionLockFiles(sessionDirPath) {
   try {
     if (!fs.existsSync(sessionDirPath)) return;
@@ -145,7 +155,15 @@ class WhatsAppAccountInstance {
   }
 
   get isReady() {
-    return this.status === 'READY' && this.client !== null && !this.isRestricted;
+    return (
+      this.status === 'READY' &&
+      this.client !== null &&
+      this.client.pupPage !== null &&
+      this.client.pupPage !== undefined &&
+      typeof this.client.pupPage.isClosed === 'function' &&
+      !this.client.pupPage.isClosed() &&
+      !this.isRestricted
+    );
   }
 
   get isRestricted() {
@@ -239,6 +257,14 @@ class WhatsAppAccountInstance {
     }
     if (this.isInitializing) return;
     this.isInitializing = true;
+
+    // Fèmen ansyen kliyan si l te egziste pou evite konfli sou menm sesyon
+    if (this.client) {
+      try {
+        await this.destroy();
+      } catch (_) {}
+    }
+
     this.status = 'INITIALIZING';
     this.lastError = null;
     this.sendHeartbeat();
@@ -246,6 +272,7 @@ class WhatsAppAccountInstance {
     console.log(`[Liy ${this.accountIndex} - ${this.label}] Demaraj sesyon WhatsApp...`);
 
     try {
+      killOrphanedBrowserForAccount(this.accountIndex);
       cleanSessionLockFiles(this.sessionDir);
       const execPath = getBrowserExecutablePath();
 
@@ -254,22 +281,23 @@ class WhatsAppAccountInstance {
           clientId: `account_${this.accountIndex}`,
           dataPath: AUTH_DIR,
         }),
-        webVersionCache: { type: 'none' },
+        webVersionCache: {
+          type: 'remote',
+          remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1053260417-alpha.html',
+        },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
         puppeteer: {
           headless: 'new',
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
             '--disable-gpu',
+            '--no-first-run',
+            '--no-default-browser-check',
             '--disable-extensions',
-            '--disable-background-timer-throttling',
-            '--disable-backgrounding-occluded-windows',
-            '--disable-renderer-backgrounding',
             '--disable-features=Translate,OptimizationHints,MediaRouter',
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
           ],
           executablePath: execPath,
         },
@@ -381,8 +409,12 @@ class WhatsAppAccountInstance {
         res = await this.client.sendMessage(chatId, content, options);
       } catch (sendErr) {
         const errMsg = String(sendErr && sendErr.message ? sendErr.message : sendErr);
-        // Si WhatsApp detekte restriksyon oswa frame detached
-        if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('rate-overlimit') || errMsg.includes('restricted')) {
+        if (errMsg.includes('evaluate') || errMsg.includes('Target closed') || errMsg.includes('Session closed')) {
+          console.warn(`[Liy ${this.accountIndex}] Navigatè a te kraze: ${errMsg}. N ap relanse l...`);
+          this.status = 'DISCONNECTED';
+          this.sendHeartbeat();
+          setTimeout(() => this.init(), 1500);
+        } else if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('rate-overlimit') || errMsg.includes('restricted')) {
           await this.markRestricted(24, errMsg);
           throw new Error(`Nimewo a fètke resevwa restriksyon pa WhatsApp: ${errMsg}`);
         }
@@ -679,15 +711,17 @@ app.get('/health', (req, res) => {
 app.get('/api/status', (req, res) => {
   const accounts = cluster.getAllAccounts();
   const readyCount = accounts.filter((a) => a.isReady).length;
+  const readyAccount = accounts.find((a) => a.isReady);
   const primary = accounts[0] || null;
+  const activeRep = readyAccount || primary;
 
   res.json({
     ok: true,
-    status: primary ? primary.status : 'DISCONNECTED',
-    phone: primary ? primary.phone : null,
-    pushname: primary ? primary.pushName : null,
-    qr: primary ? primary.qrCodeDataUrl : null,
-    rawQr: primary ? primary.rawQrCode : null,
+    status: readyCount > 0 ? 'READY' : (primary ? primary.status : 'DISCONNECTED'),
+    phone: activeRep ? activeRep.phone : null,
+    pushname: activeRep ? activeRep.pushName : null,
+    qr: activeRep ? activeRep.qrCodeDataUrl : null,
+    rawQr: activeRep ? activeRep.rawQrCode : null,
     cluster: {
       totalAccounts: accounts.length,
       readyAccounts: readyCount,

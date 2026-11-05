@@ -189,7 +189,8 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
       final waService = ref.read(whatsAppNotificationServiceProvider);
       final waClient = ref.read(whatsAppClientProvider);
       final waState = await waClient.checkStatus();
-      if (waState.isReady) {
+      final hasReadyLine = waState.isReady || (await waClient.fetchAccountsList()).any((a) => a.isReady);
+      if (hasReadyLine) {
         final ok = await waService.sendPaymentReceipt(
           to: phone,
           data: widget.data,
