@@ -53,6 +53,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   // Super Admin: Lis aksè WhatsApp pou chak gym
   bool _loadingGyms = false;
   List<GymWhatsAppAccess> _gymsAccessList = [];
+  List<WhatsAppAccountInfo> _accountsList = [];
 
   @override
   void initState() {
@@ -77,6 +78,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (mounted) _checkStatusSilently();
+      if (mounted) _loadAccountsList();
     });
   }
 
@@ -121,6 +123,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
 
     // 3. Tcheke estati sèvis WhatsApp lokal la
     await _checkStatus();
+    await _loadAccountsList();
 
     // 4. Si se Super Admin, chaje lis gym yo
     final runtime = ref.read(appRuntimeProvider);
@@ -859,7 +862,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
         const SizedBox(height: 20),
 
         // 1. KAT ESTATI AK ESKANE KÒD QR
-        _buildConnectionCard(s, theme),
+        _buildClusterAccountsCard(s, theme),
         const SizedBox(height: 24),
 
         // 2. KAT KONFIGIRASYON (NIMEWO PRENSIPAL, NIMEWO SEKOU, KÒD PEYI)
@@ -1860,6 +1863,509 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     } catch (e) {
       debugPrint('[WhatsApp] Er\u00e8 cron check: ' + e.toString());
     }
+  }
+
+
+  Future<void> _loadAccountsList() async {
+    try {
+      final list = await ref.read(whatsAppClientProvider).fetchAccountsList();
+      if (mounted) {
+        setState(() => _accountsList = list);
+      }
+    } catch (_) {}
+  }
+
+  Widget _buildStatItem(String label, String value, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          value,
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: Colors.grey),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClusterAccountsCard(AppStrings s, ThemeData theme) {
+    final totalLines = _accountsList.length;
+    final readyLines = _accountsList.where((a) => a.isReady).length;
+    final restrictedLines = _accountsList.where((a) => a.isRestricted).length;
+    final totalSentToday = _accountsList.fold<int>(0, (sum, a) => sum + a.sentToday);
+    final totalDailyCapacity = _accountsList.where((a) => a.isReady).fold<int>(0, (sum, a) => sum + a.dailyLimit);
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.outlineVariant.withOpacity(0.6)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header Row
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF25D366).withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(LucideIcons.network, color: Color(0xFF1EBE5D), size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Text(
+                            'Cluster WhatsApp Multi-Liy',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.blue.shade300),
+                            ),
+                            child: Text(
+                              'Anti-Bann & Distribisyon',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade800),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Distribye mesaj yo sou plizyè nimewo avèk delè sekirite (25s-50s) pou evite WhatsApp bloke nimewo.',
+                        style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _showAddAccountDialog,
+                  icon: const Icon(LucideIcons.plus, size: 16),
+                  label: const Text('Ajoute Liy WhatsApp'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0F766E),
+                    side: const BorderSide(color: Color(0xFF0F766E)),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 18),
+
+            // Summary Stats Bar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  _buildStatItem('Liy Aktif', ' / ', readyLines > 0 ? Colors.green.shade700 : Colors.orange.shade800),
+                  const SizedBox(width: 24),
+                  _buildStatItem('Liy Restreint (24h)', '', restrictedLines > 0 ? Colors.red.shade700 : Colors.grey.shade600),
+                  const SizedBox(width: 24),
+                  _buildStatItem('Mesaj Voye Jodi a', '', Colors.blue.shade700),
+                  const SizedBox(width: 24),
+                  _buildStatItem('Kapasite Sekirize / Jou', readyLines > 0 ? 'Jouk  msg' : '0 msg', Colors.teal.shade800),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Lis Chak Liy
+            if (_accountsList.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else
+              Column(
+                children: _accountsList.map((acc) => _buildSingleAccountCard(acc, s, theme)).toList(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSingleAccountCard(WhatsAppAccountInfo acc, AppStrings s, ThemeData theme) {
+    final isReady = acc.isReady;
+    final isWaitingQr = acc.isWaitingForQr;
+    final isRestricted = acc.isRestricted;
+
+    Color cardBorder;
+    Color badgeColor;
+    String badgeText;
+    IconData badgeIcon;
+
+    if (isRestricted) {
+      cardBorder = Colors.red.shade400;
+      badgeColor = Colors.red.shade700;
+      badgeText = '🔴 Restreint (24h)';
+      badgeIcon = LucideIcons.shieldAlert;
+    } else if (isReady) {
+      cardBorder = Colors.green.shade400;
+      badgeColor = Colors.green.shade700;
+      badgeText = '🟢 Konekte & Pare';
+      badgeIcon = LucideIcons.circleCheck;
+    } else if (isWaitingQr) {
+      cardBorder = Colors.amber.shade600;
+      badgeColor = Colors.amber.shade800;
+      badgeText = '📷 Eskane Kòd QR';
+      badgeIcon = LucideIcons.qrCode;
+    } else {
+      cardBorder = Colors.blue.shade300;
+      badgeColor = Colors.blue.shade700;
+      badgeText = '⏳ Ap inisyalize...';
+      badgeIcon = LucideIcons.loader;
+    }
+
+    String? remainingText;
+    if (isRestricted && acc.restrictedUntil != null) {
+      final diff = acc.restrictedUntil!.difference(DateTime.now());
+      if (diff.isNegative) {
+        remainingText = 'Restriksyon fini';
+      } else {
+        remainingText = 'h m k ap rete';
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isRestricted
+            ? Colors.red.shade50.withOpacity(0.4)
+            : isReady
+                ? Colors.green.shade50.withOpacity(0.3)
+                : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cardBorder, width: 1.3),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(badgeIcon, color: badgeColor, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Row(
+                  children: [
+                    Text(
+                      'Liy  : ',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
+                    if (acc.phoneNumber != null && acc.phoneNumber!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          acc.phoneNumber!,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: badgeColor.withOpacity(0.4)),
+                ),
+                child: Text(
+                  badgeText,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: badgeColor),
+                ),
+              ),
+            ],
+          ),
+
+          if (isRestricted) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade100.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.alertCircle, color: Colors.red, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'WhatsApp te limite nimewo sa a pou 24h. Sistèm nan mete l sou kote pou l pa voye mesaj sou li jiskaske peryòd la fini (). Tout rès mesaj yo ap voye sou lòt liy aktif yo.',
+                      style: TextStyle(fontSize: 12, color: Colors.red.shade900),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () async {
+                      final ok = await ref.read(whatsAppClientProvider).unrestrictAccount(acc.accountIndex);
+                      if (ok) {
+                        await _loadAccountsList();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Liy  debloke manyèlman.'), backgroundColor: Colors.teal),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Debloke Manyèlman', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 12),
+
+          // Action row
+          Row(
+            children: [
+              Text(
+                'Voye jodi a:  /  msg  •  Total istorik: ',
+                style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+              ),
+              const Spacer(),
+              if (isWaitingQr)
+                FilledButton.icon(
+                  onPressed: () => _showQrDialog(acc),
+                  icon: const Icon(LucideIcons.qrCode, size: 14),
+                  label: const Text('Eskane Kòd QR'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.amber.shade800,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              if (isReady) ...[
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final ok = await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                    if (ok) {
+                      await _loadAccountsList();
+                    }
+                  },
+                  icon: const Icon(LucideIcons.refreshCw, size: 12),
+                  label: const Text('Rekonekte'),
+                  style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (c) => AlertDialog(
+                        title: Text('Reyinisyalize Liy  ?'),
+                        content: const Text('Sa pral dekonekte nimewo sa a pou w ka eskane yon lòt nimewo ak yon nouvo kòd QR.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Anile')),
+                          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Wi, Reyinisyalize')),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      await ref.read(whatsAppClientProvider).resetAccountSession(acc.accountIndex);
+                      await _loadAccountsList();
+                    }
+                  },
+                  icon: const Icon(LucideIcons.power, size: 12, color: Colors.red),
+                  label: const Text('Chanje Nimewo', style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(color: Colors.red.shade300),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showQrDialog(WhatsAppAccountInfo account) {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final liveAcc = _accountsList.firstWhere(
+            (a) => a.accountIndex == account.accountIndex,
+            orElse: () => account,
+          );
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(LucideIcons.qrCode, color: Color(0xFF1EBE5D)),
+                const SizedBox(width: 10),
+                Text('Eskane Kòd QR - '),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Louvri WhatsApp sou telefòn ou > Klike sou 3 pwen anlè a > Aparèy Konekte > Konekte yon aparèy',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: liveAcc.qrCode != null && liveAcc.qrCode!.contains(',')
+                      ? Image.memory(
+                          base64Decode(liveAcc.qrCode!.split(',')[1]),
+                          width: 220,
+                          height: 220,
+                        )
+                      : (liveAcc.qrCode != null && liveAcc.qrCode!.isNotEmpty)
+                          ? QrImageView(
+                              data: liveAcc.qrCode!,
+                              version: QrVersions.auto,
+                              size: 220,
+                              gapless: false,
+                            )
+                          : const SizedBox(
+                              width: 220,
+                              height: 220,
+                              child: Center(child: CircularProgressIndicator()),
+                            ),
+                ),
+                const SizedBox(height: 12),
+                if (liveAcc.isReady) ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: const [
+                      Icon(LucideIcons.circleCheck, color: Colors.green, size: 18),
+                      SizedBox(width: 8),
+                      Text('Konekte avèk siksè !', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ] else ...[
+                  const Text('Kòd la ap rafrechi otomatikman si w pa eskane l.', style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic)),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Fèmen'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showAddAccountDialog() {
+    final labelCtrl = TextEditingController(text: 'Liy ' + (_accountsList.length + 1).toString());
+    final limitCtrl = TextEditingController(text: '40');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: const [
+            Icon(LucideIcons.plusCircle, color: Color(0xFF0F766E)),
+            SizedBox(width: 10),
+            Text('Ajoute yon Liy WhatsApp'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Chak nouvo liy WhatsApp pèmèt ou ogmante kapasite voye mesaj ou chak jou san risk pou nimewo w bloke.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: labelCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Non / Tit Liy la',
+                hintText: 'Egz: JL Telefòn Sekretè, Telefòn 2...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: limitCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Limit Mesaj Sekirite pa Jou',
+                hintText: '40',
+                helperText: '40 mesaj rekòmande pou evite restriksyon WhatsApp.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Anile'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final label = labelCtrl.text.trim();
+              final limit = int.tryParse(limitCtrl.text.trim()) ?? 40;
+              Navigator.pop(ctx);
+              final ok = await ref.read(whatsAppClientProvider).createAccountSlot(
+                    label: label.isNotEmpty ? label : 'Liy ' + (_accountsList.length + 1).toString(),
+                    dailyLimit: limit,
+                  );
+              if (ok) {
+                await _loadAccountsList();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Nouvo liy WhatsApp kreye! Sèvis la ap prepare kòd QR la.'),
+                    backgroundColor: Colors.teal,
+                  ),
+                );
+              }
+            },
+            child: const Text('Kreye Liy la'),
+          ),
+        ],
+      ),
+    );
   }
 
 }

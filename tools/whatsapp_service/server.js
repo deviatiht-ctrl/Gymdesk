@@ -6,12 +6,12 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 
-// Pwoteje pwosesis la kont erè CDP / Network ki ka soti nan Puppeteer
+// Pwoteje pwosesis la kont erè CDP / Rezo ki ka soti nan Puppeteer
 process.on('unhandledRejection', (reason) => {
-  console.warn('[WhatsApp] Intercepted unhandledRejection:', reason && reason.message ? reason.message : reason);
+  console.warn('[Cluster] Intercepted unhandledRejection:', reason && reason.message ? reason.message : reason);
 });
 process.on('uncaughtException', (err) => {
-  console.warn('[WhatsApp] Intercepted uncaughtException:', err && err.message ? err.message : err);
+  console.warn('[Cluster] Intercepted uncaughtException:', err && err.message ? err.message : err);
 });
 
 const PORT = process.env.PORT || 47812;
@@ -22,7 +22,18 @@ const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jrhdegdvdqnxstpdzbya.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyaGRlZ2R2ZHFueHN0cGR6YnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyOTM2NDksImV4cCI6MjEwNjg2OTY0OX0.O8WMsF2z447mdWj6gNMyaJ9Q8eTFQwKZyLMMsxrfx5Y';
 
-// 1. Chaje konfigirasyon lokal la
+// Paramèt Delè Sekirite Anti-Spam & Anti-Bann (Human Pacing)
+const PACING_CONFIG = {
+  minDelayMs: 25000,           // Omwen 25 segonn ant chak mesaj sou MENM nimewo a
+  maxJitterMs: 25000,          // + 0 a 25 segonn varyab (total 25s - 50s)
+  typingDelayMinMs: 3000,      // Similasyon moun k ap tape: 3 a 5 segonn
+  typingDelayMaxMs: 5500,
+  batchPauseAfterCount: 7,     // Apre chak 7 mesaj sou menm nimewo a, pran yon poz
+  batchPauseDurationMs: 180000,// Poz 3 minit (180s) pou repoze nimewo a
+  defaultDailyLimit: 40,       // Maksimòm 40 mesaj san danje pa nimewo chak jou
+};
+
+// 1. Chaje konfigirasyon lokal
 let config = {
   validNumber: '50932986751',
   backupNumber: '',
@@ -39,25 +50,17 @@ function loadConfig() {
     if (fs.existsSync(CONFIG_FILE)) {
       const data = fs.readFileSync(CONFIG_FILE, 'utf8');
       config = { ...config, ...JSON.parse(data) };
-    } else {
-      saveConfig();
     }
-  } catch (err) {
-    console.error('[Config] Erè lè n ap li config.json:', err.message);
-  }
+  } catch (_) {}
 }
-
 function saveConfig() {
   try {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
-  } catch (err) {
-    console.error('[Config] Erè lè n ap anrejistre config.json:', err.message);
-  }
+  } catch (_) {}
 }
-
 loadConfig();
 
-// 2. Chèche chemen Chrome oswa Edge sou Windows pou Puppeteer
+// 2. Jwenn chemen Chrome oswa Edge sou Windows pou Puppeteer
 function getBrowserExecutablePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
@@ -71,29 +74,16 @@ function getBrowserExecutablePath() {
     path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
   ];
   for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
+    if (fs.existsSync(p)) return p;
   }
   return undefined;
 }
 
-// 3. Fèmen nenpòt pwosesis zonbi Edge / Chrome ki kenbe lock sou sesyon an
-function killOrphanedEdgeProcesses() {
+// 3. Netwaye fichye lock Chromium sèlman nan rasin sesyon an (pa manyen LevelDB!)
+function cleanSessionLockFiles(sessionDirPath) {
   try {
-    execSync(
-      'powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'msedge.exe\'\\" | Where-Object { $_.CommandLine -like \'*whatsapp_service*\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"',
-      { stdio: 'ignore' }
-    );
-  } catch (_) {}
-}
-
-// 4. Netwaye fichye LOCK Chromium yo SÈLMAN nan rasin sesyon an pou evite "The browser is already running"
-// ATANSYON: Pa janm manyen fichye LOCK ki anndan sous-dosye LevelDB oswa IndexedDB paske sa detwi sesyon an!
-function cleanLockFiles(dirPath) {
-  try {
-    if (!fs.existsSync(dirPath)) return;
-    const candidates = [dirPath, path.join(dirPath, 'session')];
+    if (!fs.existsSync(sessionDirPath)) return;
+    const candidates = [sessionDirPath, path.join(sessionDirPath, 'Default')];
     for (const d of candidates) {
       if (!fs.existsSync(d)) continue;
       const files = fs.readdirSync(d, { withFileTypes: true });
@@ -109,274 +99,19 @@ function cleanLockFiles(dirPath) {
           ) {
             try {
               fs.unlinkSync(path.join(d, f.name));
-              console.log(`[WhatsApp] Fichye lock Chromium retire: ${f.name}`);
             } catch (_) {}
           }
         }
       }
     }
-  } catch (err) {
-    console.warn('[WhatsApp] Pa ka netwaye lock files:', err.message);
-  }
+  } catch (_) {}
 }
 
-// Eta sèvis WhatsApp la
-let client = null;
-let clientStatus = 'DISCONNECTED'; // DISCONNECTED | INITIALIZING | SCAN_QR | AUTHENTICATED | READY | ERROR
-let rawQrCode = null;
-let qrDataUrl = null;
-let connectedUser = null;
-let pushName = null;
-let lastError = null;
-let isInitializing = false;
-let disconnectedSince = null;
-
-// Anti-Spam Message Queue pou evite WhatsApp bloke nimewo a
-const messageQueue = [];
-let isProcessingQueue = false;
-
-async function processMessageQueue() {
-  if (isProcessingQueue || messageQueue.length === 0) return;
-  isProcessingQueue = true;
-
-  while (messageQueue.length > 0) {
-    const task = messageQueue.shift();
-    try {
-      const result = await task.action();
-      task.resolve(result);
-    } catch (err) {
-      task.reject(err);
-    }
-
-    // Delè sekirite anti-spam ant chak mesaj (2000 a 3500 milisegonn)
-    if (messageQueue.length > 0) {
-      const delayMs = 2000 + Math.floor(Math.random() * 1500);
-      console.log(`[Anti-Spam] Delè sekirite: ${delayMs}ms ant mesaj...`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-
-  isProcessingQueue = false;
-}
-
-function enqueueMessage(action) {
-  return new Promise((resolve, reject) => {
-    messageQueue.push({ action, resolve, reject });
-    processMessageQueue();
-  });
-}
-
-// Detwi kliyan an avèk sekirite epi libere tout resous
-async function destroyCurrentClient() {
-  if (client) {
-    try {
-      console.log('[WhatsApp] N ap fèmen ansyen kliyan Puppeteer...');
-      if (client.pupBrowser) {
-        const pid = client.pupBrowser.process()?.pid;
-        if (pid) {
-          try {
-            execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
-            console.log(`[WhatsApp] Pwosesis browser PID ${pid} fèmen.`);
-          } catch (_) {}
-        }
-      }
-      await client.destroy().catch(() => {});
-    } catch (e) {
-      console.warn('[WhatsApp] Erè pandan destroy():', e.message);
-    }
-    client = null;
-  }
-  isInitializing = false;
-  killOrphanedEdgeProcesses();
-  cleanLockFiles(AUTH_DIR);
-}
-
-// Voye mesaj avèk rekiperasyon otomatik si gen "detached Frame" oswa CDP dekonekte
-async function safeSendMessage(chatId, content, options) {
-  if (!client || clientStatus !== 'READY') {
-    throw new Error(`WhatsApp pa konekte (Estati: ${clientStatus}). Eskane kòd QR la sou panèl admin nan.`);
-  }
-
-  try {
-    return await client.sendMessage(chatId, content, options);
-  } catch (err) {
-    const errMsg = err && err.message ? err.message : String(err);
-    console.warn(`[WhatsApp] Erè sendMessage: ${errMsg}`);
-
-    // Si erè a se detached Frame oswa context destroyed, repare li otomatikman
-    if (
-      errMsg.includes('detached Frame') ||
-      errMsg.includes('Execution context was destroyed') ||
-      errMsg.includes('Target closed') ||
-      errMsg.includes('Session closed')
-    ) {
-      console.warn('[WhatsApp] ⚠️ Detached Frame detekte! N ap rafrechi paj WhatsApp la otomatikman...');
-      try {
-        if (client && client.pupPage) {
-          await client.pupPage.reload({ waitUntil: 'networkidle0' }).catch(() => {});
-          console.log('[WhatsApp] Paj rafrechi, n ap tann 5s pou WhatsApp Web re-establi...');
-          await new Promise((r) => setTimeout(r, 5000));
-          console.log(`[WhatsApp] N ap re-eseye voye mesaj la bay ${chatId}...`);
-          return await client.sendMessage(chatId, content, options);
-        }
-      } catch (recoveryErr) {
-        console.error('[WhatsApp] Rafrechisman echwe, n ap rekonekte kliyan an:', recoveryErr.message);
-        setTimeout(() => {
-          destroyCurrentClient().then(() => initWhatsAppClient());
-        }, 1000);
-        throw new Error('Sistèm WhatsApp la te pèdi koneksyon an entèn; li fèk rekonekte otomatikman. Tanpri re-eseye nan kèk segonn.');
-      }
-    }
-    throw err;
-  }
-}
-
-async function initWhatsAppClient() {
-  if (isInitializing) {
-    console.log('[WhatsApp] Inisyalizasyon deja an kou...');
-    return;
-  }
-  isInitializing = true;
-  clientStatus = 'INITIALIZING';
-  rawQrCode = null;
-  qrDataUrl = null;
-  lastError = null;
-  disconnectedSince = null;
-
-  console.log('[WhatsApp] Demaraj kliyan WhatsApp Web...');
-
-  try {
-    killOrphanedEdgeProcesses();
-    cleanLockFiles(AUTH_DIR);
-
-    const execPath = getBrowserExecutablePath();
-    if (execPath) {
-      console.log(`[Puppeteer] Sèvi ak navigatè: ${execPath}`);
-    }
-
-    const puppeteerOptions = {
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--disable-extensions',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=Translate,OptimizationHints,MediaRouter',
-      ],
-    };
-    if (execPath) {
-      puppeteerOptions.executablePath = execPath;
-    }
-
-    client = new Client({
-      authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
-      webVersionCache: { type: 'none' },
-      puppeteer: puppeteerOptions,
-    });
-
-    client.on('qr', async (qr) => {
-      console.log('[WhatsApp] Nouvo Kòd QR resevwa. Pare pou eskanè!');
-      clientStatus = 'SCAN_QR';
-      rawQrCode = qr;
-      isInitializing = false;
-      disconnectedSince = null;
-      try {
-        qrDataUrl = await qrcode.toDataURL(qr, { margin: 2, scale: 8 });
-        sendSupabaseHeartbeat();
-      } catch (err) {
-        console.error('[WhatsApp] Erè konvèsyon QR an DataURL:', err.message);
-      }
-    });
-
-    client.on('authenticated', () => {
-      console.log('[WhatsApp] Otantifikasyon reyisi!');
-      clientStatus = 'AUTHENTICATED';
-      rawQrCode = null;
-      qrDataUrl = null;
-      lastError = null;
-      disconnectedSince = null;
-      sendSupabaseHeartbeat();
-    });
-
-    client.on('auth_failure', async (msg) => {
-      console.error('[WhatsApp] Echèk otantifikasyon:', msg);
-      clientStatus = 'ERROR';
-      lastError = `Echèk otantifikasyon: ${msg}`;
-      isInitializing = false;
-      disconnectedSince = Date.now();
-      try {
-        await destroyCurrentClient();
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-      } catch (_) {}
-      sendSupabaseHeartbeat();
-    });
-
-    client.on('ready', async () => {
-      console.log('[WhatsApp] Kliyan WhatsApp pare nèt pou voye mesaj!');
-      clientStatus = 'READY';
-      isInitializing = false;
-      lastError = null;
-      disconnectedSince = null;
-      try {
-        if (client && client.info) {
-          connectedUser = client.info.wid ? client.info.wid.user : null;
-          pushName = client.info.pushname || null;
-          console.log(`[WhatsApp] Konekte kòm: ${pushName || 'Enkoni'} (${connectedUser})`);
-        }
-      } catch (e) {
-        console.warn('[WhatsApp] Pa ka li info itilizatè a:', e.message);
-      }
-      sendSupabaseHeartbeat();
-      // Verifikasyon otomatik rapèl échéance yo lè WhatsApp fin konekte
-      setTimeout(() => runExpirationReminderCron(), 3000);
-    });
-
-    client.on('disconnected', (reason) => {
-      console.warn('[WhatsApp] Kliyan dekonekte:', reason);
-      clientStatus = 'DISCONNECTED';
-      connectedUser = null;
-      pushName = null;
-      rawQrCode = null;
-      qrDataUrl = null;
-      isInitializing = false;
-      disconnectedSince = Date.now();
-      sendSupabaseHeartbeat();
-    });
-
-    client.initialize().catch(async (err) => {
-      console.error('[WhatsApp] Erè inisyalizasyon:', err.message);
-      clientStatus = 'ERROR';
-      lastError = err.message;
-      isInitializing = false;
-      disconnectedSince = Date.now();
-      cleanLockFiles(AUTH_DIR);
-      sendSupabaseHeartbeat();
-    });
-  } catch (err) {
-    console.error('[WhatsApp] Erè lansman:', err.message);
-    clientStatus = 'ERROR';
-    lastError = err.message;
-    isInitializing = false;
-    disconnectedSince = Date.now();
-    cleanLockFiles(AUTH_DIR);
-    sendSupabaseHeartbeat();
-  }
-}
-
-// Netwaye epi mete nimewo a nan fòma WhatsApp entènasyonal (egz: 50937001122)
+// 4. Netwaye epi mete nimewo a nan bon fòma entènasyonal (egz: 50937001122)
 function cleanPhoneNumber(phone) {
   if (!phone) return null;
   let digits = String(phone).replace(/\D/g, '');
   if (!digits) return null;
-
-  // Si nimewo an gen 8 chif (tankou 37001122), ajoute kòd peyi pa defo a (509)
   const defaultCode = (config.defaultCountryCode || '509').replace(/\D/g, '');
   if (digits.length === 8 && defaultCode) {
     digits = defaultCode + digits;
@@ -385,482 +120,757 @@ function cleanPhoneNumber(phone) {
 }
 
 // ============================================================================
-// CLOUD BRIDGE SUPABASE: Pou Tablet, Telefòn, ak Web (Vercel)
+// KLAZ INSTANS KONT WHATSAPP (WhatsAppAccountInstance)
 // ============================================================================
-async function sendSupabaseHeartbeat() {
-  try {
-    await fetch(`${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_heartbeat`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        p_service_status: clientStatus,
-        p_connected_phone: connectedUser,
-        p_push_name: pushName,
-        p_qr_code: (clientStatus === 'SCAN_QR' ? qrDataUrl : null),
-        p_queue_length: messageQueue.length,
-        p_last_error: lastError,
-      }),
-    });
-  } catch (_) {
-    // ignor network hiccups
+class WhatsAppAccountInstance {
+  constructor(accountIndex, label = `Liy ${accountIndex}`, dailyLimit = 40) {
+    this.accountIndex = accountIndex;
+    this.label = label;
+    this.dailyLimit = dailyLimit || 40;
+    this.client = null;
+    this.status = 'DISCONNECTED'; // DISCONNECTED, INITIALIZING, SCAN_QR, AUTHENTICATED, READY, RESTRICTED, ERROR
+    this.rawQrCode = null;
+    this.qrCodeDataUrl = null;
+    this.phone = null;
+    this.pushName = null;
+    this.lastError = null;
+    this.isInitializing = false;
+    this.isBusy = false;
+    this.lastSentAt = 0;
+    this.sentToday = 0;
+    this.consecutiveSentCount = 0;
+    this.restrictedUntil = null;
+    this.restrictionReason = null;
+    this.sessionDir = path.join(AUTH_DIR, `session-account_${accountIndex}`);
   }
-}
 
-// ============================================================================
-// CRON OTO: Chèche abònman k ap expire yo sou tout gym ki aktif
-// ============================================================================
-async function runExpirationReminderCron(targetGymId = null) {
-  try {
-    const url = `${SUPABASE_URL}/rest/v1/rpc/cron_check_whatsapp_expiration_reminders`;
-    const body = targetGymId ? JSON.stringify({ p_target_gym_id: targetGymId }) : JSON.stringify({});
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body,
-    });
-    if (res.ok) {
-      const result = await res.json();
-      console.log(`[Cron Expiration] ✅ Verifikasyon fèt: ${result.queued_count} nouvo rapèl mete nan outbox pou ${result.gyms_processed} gym aktif.`);
-      return result;
-    } else {
-      const txt = await res.text();
-      console.warn('[Cron Expiration] Erè RPC:', txt);
+  get isReady() {
+    return this.status === 'READY' && this.client !== null && !this.isRestricted;
+  }
+
+  get isRestricted() {
+    if (this.status === 'RESTRICTED') {
+      if (this.restrictedUntil && new Date(this.restrictedUntil).getTime() > Date.now()) {
+        return true;
+      }
+      // Restriksyon fin pase
+      this.status = 'DISCONNECTED';
+      this.restrictedUntil = null;
+      this.restrictionReason = null;
     }
-  } catch (err) {
-    console.warn('[Cron Expiration] Erè rezo:', err.message);
+    return false;
   }
-  return null;
-}
 
-let isPollingOutbox = false;
-async function pollSupabaseOutbox() {
-  if (isPollingOutbox) return;
-  // SÈLMAN rale mesaj si kliyan WhatsApp la READY nèt e li konekte!
-  if (clientStatus !== 'READY' || !client) return;
-  // Si ke anti-spam lan deja gen 3 mesaj k ap trete, tann li vide anvan nou rale plis
-  if (messageQueue.length >= 3) return;
-  isPollingOutbox = true;
+  // Tcheke si kont sa a ka pran yon nouvo mesaj kounye a (Human Pacing)
+  canSendNow() {
+    if (!this.isReady) return false;
+    if (this.isBusy) return false;
+    if (this.sentToday >= this.dailyLimit) return false;
 
-  try {
-    const batchSize = Math.max(1, 3 - messageQueue.length);
-    const url = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&order=created_at.asc&limit=${batchSize}`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-    });
-
-    if (res.ok) {
-      const messages = await res.json();
-      if (Array.isArray(messages) && messages.length > 0) {
-        console.log(`[Cloud Bridge] Resevwa ${messages.length} nouvo mesaj soti nan Supabase (Tablet/Web)...`);
-        for (const item of messages) {
-          if (clientStatus !== 'READY' || !client) break;
-
-          // Mete status kòm processing pou evite lòt worker pran l
-          await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
-            method: 'PATCH',
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ status: 'processing', processed_at: new Date().toISOString() }),
-          });
-
-          // Mete mesaj la nan ke anti-spam lan
-          enqueueMessage(async () => {
-            const cleanPhone = cleanPhoneNumber(item.to_phone);
-            if (!cleanPhone || cleanPhone.length < 8) {
-              throw new Error('Nimewo telefòn destinataire a pa valid.');
-            }
-            const chatId = `${cleanPhone}@c.us`;
-
-            if (item.pdf_base64 && typeof item.pdf_base64 === 'string') {
-              try {
-                const media = new MessageMedia('application/pdf', item.pdf_base64, item.pdf_file_name || 'Recu.pdf');
-                return await safeSendMessage(chatId, media, { caption: item.message.trim() });
-              } catch (mediaErr) {
-                console.warn('[Cloud Bridge] Erè voye PDF, n ap voye kòm tèks:', mediaErr.message);
-                return await safeSendMessage(chatId, item.message.trim());
-              }
-            } else {
-              return await safeSendMessage(chatId, item.message.trim());
-            }
-          }).then(async () => {
-            // Siksè voye
-            await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ status: 'sent', sent_at: new Date().toISOString() }),
-            });
-            console.log(`[Cloud Bridge] ✅ Mesaj ${item.id} voye bay ${item.to_phone} avèk siksè!`);
-          }).catch(async (sendErr) => {
-            const errMsg = sendErr && sendErr.message ? sendErr.message : String(sendErr);
-            // Si se yon erè koneksyon tanporè, remete status kòm pending pou li ka voye pita lè WhatsApp pare
-            const isConnectionError =
-              clientStatus !== 'READY' ||
-              !client ||
-              errMsg.includes('pa konekte') ||
-              errMsg.includes('detached Frame') ||
-              errMsg.includes('Target closed') ||
-              errMsg.includes('Execution context was destroyed') ||
-              errMsg.includes('Session closed');
-
-            const newStatus = isConnectionError ? 'pending' : 'failed';
-            await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
-              method: 'PATCH',
-              headers: {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                status: newStatus,
-                error_message: errMsg,
-                processed_at: null,
-              }),
-            });
-            if (isConnectionError) {
-              console.warn(`[Cloud Bridge] ⏳ Mesaj ${item.id} remete kòm PENDING paske WhatsApp ap rekonekte (${errMsg})`);
-            } else {
-              console.warn(`[Cloud Bridge] ❌ Mesaj ${item.id} echwe definitivman:`, errMsg);
-            }
-          });
-        }
+    const now = Date.now();
+    // 1. Tcheke si l nan poz repo apre 7 mesaj
+    if (this.consecutiveSentCount >= PACING_CONFIG.batchPauseAfterCount) {
+      if (now - this.lastSentAt < PACING_CONFIG.batchPauseDurationMs) {
+        return false; // Ap repoze pou evite bot ban
+      } else {
+        this.consecutiveSentCount = 0; // Fin repoze, rekòmanse
       }
     }
-  } catch (_) {
-    // Ignor hiccups
-  } finally {
-    isPollingOutbox = false;
-  }
-}
 
-// Watchdog pou relanse WhatsApp otomatikman si li rete DISCONNECTED oswa ERROR plis pase 30 segonn
-function watchdogAutoRecovery() {
-  if (isInitializing) return;
-  if ((clientStatus === 'DISCONNECTED' || clientStatus === 'ERROR') && disconnectedSince) {
-    const elapsed = Date.now() - disconnectedSince;
-    if (elapsed > 30000) {
-      console.log('[Watchdog] WhatsApp rete dekonekte plis pase 30s. N ap relanse li otomatikman...');
-      disconnectedSince = Date.now();
-      destroyCurrentClient().then(() => initWhatsAppClient());
+    // 2. Tcheke delè minimòm ant chak mesaj (25s - 50s)
+    const requiredDelay = PACING_CONFIG.minDelayMs + Math.floor(Math.random() * PACING_CONFIG.maxJitterMs);
+    if (now - this.lastSentAt < requiredDelay) {
+      return false;
+    }
+
+    return true;
+  }
+
+  async sendHeartbeat() {
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_account_heartbeat`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          p_account_index: this.accountIndex,
+          p_service_status: this.status,
+          p_phone_number: this.phone,
+          p_push_name: this.pushName,
+          p_qr_code: this.status === 'SCAN_QR' ? (this.qrCodeDataUrl || this.rawQrCode) : null,
+          p_last_error: this.lastError,
+        }),
+      });
+    } catch (_) {}
+  }
+
+  async markRestricted(hours = 24, reason = 'Restriksyon sekirite WhatsApp') {
+    this.status = 'RESTRICTED';
+    this.restrictedUntil = new Date(Date.now() + hours * 3600 * 1000).toISOString();
+    this.restrictionReason = reason;
+    this.qrCodeDataUrl = null;
+    this.rawQrCode = null;
+    console.warn(`[Liy ${this.accountIndex}] 🔴 Restreint pou ${hours}h: ${reason}`);
+    try {
+      await fetch(`${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_account_report_restricted`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          p_account_index: this.accountIndex,
+          p_hours: hours,
+          p_reason: reason,
+        }),
+      });
+    } catch (_) {}
+    await this.destroy();
+  }
+
+  async init() {
+    if (this.isRestricted) {
+      console.log(`[Liy ${this.accountIndex}] Nan poz restriksyon jouk: ${this.restrictedUntil}`);
+      return;
+    }
+    if (this.isInitializing) return;
+    this.isInitializing = true;
+    this.status = 'INITIALIZING';
+    this.lastError = null;
+    this.sendHeartbeat();
+
+    console.log(`[Liy ${this.accountIndex} - ${this.label}] Demaraj sesyon WhatsApp...`);
+
+    try {
+      cleanSessionLockFiles(this.sessionDir);
+      const execPath = getBrowserExecutablePath();
+
+      this.client = new Client({
+        authStrategy: new LocalAuth({
+          clientId: `account_${this.accountIndex}`,
+          dataPath: AUTH_DIR,
+        }),
+        webVersionCache: { type: 'none' },
+        puppeteer: {
+          headless: 'new',
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=Translate,OptimizationHints,MediaRouter',
+          ],
+          executablePath: execPath,
+        },
+      });
+
+      this.client.on('qr', async (qr) => {
+        console.log(`[Liy ${this.accountIndex}] 📷 Nouvo Kòd QR resevwa. Pare pou eskanè!`);
+        this.status = 'SCAN_QR';
+        this.rawQrCode = qr;
+        this.isInitializing = false;
+        try {
+          this.qrCodeDataUrl = await qrcode.toDataURL(qr, { margin: 2, scale: 8 });
+        } catch (_) {}
+        this.sendHeartbeat();
+      });
+
+      this.client.on('authenticated', () => {
+        console.log(`[Liy ${this.accountIndex}] Otantifikasyon reyisi!`);
+        this.status = 'AUTHENTICATED';
+        this.rawQrCode = null;
+        this.qrCodeDataUrl = null;
+        this.sendHeartbeat();
+      });
+
+      this.client.on('ready', async () => {
+        console.log(`[Liy ${this.accountIndex}] ✅ Kliyan WhatsApp pare nèt pou voye mesaj!`);
+        this.status = 'READY';
+        this.isInitializing = false;
+        this.lastError = null;
+        try {
+          if (this.client && this.client.info) {
+            this.phone = this.client.info.wid ? this.client.info.wid.user : null;
+            this.pushName = this.client.info.pushname || null;
+            console.log(`[Liy ${this.accountIndex}] Konekte kòm: ${this.pushName || 'Enkoni'} (${this.phone})`);
+          }
+        } catch (_) {}
+        this.sendHeartbeat();
+      });
+
+      this.client.on('disconnected', (reason) => {
+        console.warn(`[Liy ${this.accountIndex}] Kliyan dekonekte:`, reason);
+        const reasonStr = String(reason || '').toUpperCase();
+        if (reasonStr.includes('LOGOUT') || reasonStr.includes('RESTRICT') || reasonStr.includes('BAN')) {
+          this.markRestricted(24, `Dekoneksyon fòse pa WhatsApp (${reason})`);
+        } else {
+          this.status = 'DISCONNECTED';
+          this.phone = null;
+          this.pushName = null;
+          this.isInitializing = false;
+          this.sendHeartbeat();
+        }
+      });
+
+      this.client.on('auth_failure', (msg) => {
+        console.error(`[Liy ${this.accountIndex}] Echèk otantifikasyon:`, msg);
+        this.status = 'ERROR';
+        this.lastError = msg;
+        this.isInitializing = false;
+        this.sendHeartbeat();
+      });
+
+      await this.client.initialize();
+    } catch (err) {
+      console.error(`[Liy ${this.accountIndex}] Erè inisyalizasyon:`, err.message);
+      this.status = 'ERROR';
+      this.lastError = err.message;
+      this.isInitializing = false;
+      this.sendHeartbeat();
+    }
+  }
+
+  async destroy() {
+    try {
+      if (this.client) {
+        if (this.client.pupBrowser) {
+          const pid = this.client.pupBrowser.process() ? this.client.pupBrowser.process().pid : null;
+          if (pid) {
+            try { execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' }); } catch (_) {}
+          }
+        }
+        await this.client.destroy().catch(() => {});
+      }
+    } catch (_) {}
+    this.client = null;
+    this.isInitializing = false;
+    this.isBusy = false;
+    cleanSessionLockFiles(this.sessionDir);
+  }
+
+  // Voye mesaj ak similasyon moun k ap tape (Human Presence Simulation)
+  async sendWithHumanPresence(chatId, content, options = {}, outboxId = null) {
+    if (!this.isReady) {
+      throw new Error(`Liy ${this.accountIndex} pa pare oswa li restreint.`);
+    }
+
+    this.isBusy = true;
+    try {
+      // 1. Voye siyal prezans "Online"
+      try { await this.client.sendPresenceAvailable(); } catch (_) {}
+
+      // 2. Simile yon moun k ap tape tèks la
+      try { await this.client.sendPresenceTyping(chatId); } catch (_) {}
+      const typingMs = PACING_CONFIG.typingDelayMinMs + Math.floor(Math.random() * (PACING_CONFIG.typingDelayMaxMs - PACING_CONFIG.typingDelayMinMs));
+      await new Promise((r) => setTimeout(r, typingMs));
+
+      // 3. Voye mesaj la
+      let res;
+      try {
+        res = await this.client.sendMessage(chatId, content, options);
+      } catch (sendErr) {
+        const errMsg = String(sendErr && sendErr.message ? sendErr.message : sendErr);
+        // Si WhatsApp detekte restriksyon oswa frame detached
+        if (errMsg.includes('401') || errMsg.includes('403') || errMsg.includes('rate-overlimit') || errMsg.includes('restricted')) {
+          await this.markRestricted(24, errMsg);
+          throw new Error(`Nimewo a fètke resevwa restriksyon pa WhatsApp: ${errMsg}`);
+        }
+        throw sendErr;
+      }
+
+      // 4. Remete siyal prezans nòmal
+      try { await this.client.sendPresenceAvailable(); } catch (_) {}
+
+      // 5. Mete ajou statistik lokal ak Supabase
+      this.lastSentAt = Date.now();
+      this.sentToday += 1;
+      this.consecutiveSentCount += 1;
+
+      try {
+        await fetch(`${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_account_record_send`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            p_account_index: this.accountIndex,
+            p_message_id: outboxId,
+          }),
+        });
+      } catch (_) {}
+
+      console.log(`[Liy ${this.accountIndex} - ${this.phone || this.label}] ✅ Mesaj voye bay ${chatId} (${this.sentToday}/${this.dailyLimit} jodi a).`);
+      return res;
+    } finally {
+      this.isBusy = false;
     }
   }
 }
 
-// Lanse entèval background yo
-setInterval(sendSupabaseHeartbeat, 5000);
-setInterval(pollSupabaseOutbox, 3500);
-setInterval(watchdogAutoRecovery, 10000);
-setInterval(() => runExpirationReminderCron(), 60 * 60 * 1000); // Chak 1 èdtan otomatikman
+// ============================================================================
+// CLUSTER MANAGER (Kowòdone tout kont yo ak Distribisyon Mesaj)
+// ============================================================================
+class AccountCluster {
+  constructor() {
+    this.accounts = new Map(); // accountIndex -> WhatsAppAccountInstance
+    this.isDispatching = false;
+    this.isSyncing = false;
+  }
 
-// Express App
+  getAccount(index) {
+    return this.accounts.get(Number(index));
+  }
+
+  getAllAccounts() {
+    return Array.from(this.accounts.values()).sort((a, b) => a.accountIndex - b.accountIndex);
+  }
+
+  // Rale lis kont yo depi Supabase epi inisyalize sa ki manke yo
+  async syncAccountsFromSupabase() {
+    if (this.isSyncing) return;
+    this.isSyncing = true;
+    try {
+      const url = `${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_accounts_list`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (res.ok) {
+        const rows = await res.json();
+        if (Array.isArray(rows)) {
+          for (const row of rows) {
+            const idx = row.account_index;
+            let instance = this.accounts.get(idx);
+
+            if (!instance) {
+              instance = new WhatsAppAccountInstance(idx, row.label, row.daily_limit);
+              this.accounts.set(idx, instance);
+            }
+
+            instance.label = row.label;
+            instance.dailyLimit = row.daily_limit || 40;
+            instance.sentToday = row.sent_today || 0;
+
+            // Si kont lan make RESTREINT nan baz done a
+            if (row.service_status === 'RESTRICTED' && row.restricted_until) {
+              instance.status = 'RESTRICTED';
+              instance.restrictedUntil = row.restricted_until;
+              instance.restrictionReason = row.restriction_reason;
+            }
+
+            // Si kont lan make aktif men li poko lanse epi li pa restreint
+            if (row.is_enabled && !instance.isRestricted && instance.status === 'DISCONNECTED' && !instance.isInitializing) {
+              // Lanse kont lan ak yon ti entèval ant chak pou pa chaje CPU a
+              setTimeout(() => instance.init(), idx * 4000);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Cluster] Erè senkronizasyon kont:', e.message);
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  // Jwenn pwochen kont ki kalifye e ki pare pou voye (Round-Robin & Least Recently Used)
+  getNextAvailableAccount() {
+    const readyAccounts = this.getAllAccounts().filter((acc) => acc.canSendNow());
+    if (readyAccounts.length === 0) return null;
+
+    // Chwazi kont ki gen pi lontan depi l voye yon mesaj (Least Recently Used)
+    readyAccounts.sort((a, b) => a.lastSentAt - b.lastSentAt);
+    return readyAccounts[0];
+  }
+
+  // Distribiye mesaj k ap tann nan outbox la sou kont ki disponib yo
+  async dispatchPendingOutboxMessages() {
+    if (this.isDispatching) return;
+    this.isDispatching = true;
+
+    try {
+      const assignedAccount = this.getNextAvailableAccount();
+      if (!assignedAccount) {
+        // Okenn liy pa lib kounye a (swa y ap respekte delè moun 30s la, swa nan poz repo, oswa okenn liy poko konekte)
+        return;
+      }
+
+      // Rale 1 mesaj ki nan pending
+      const url = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&order=created_at.asc&limit=1`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+      });
+
+      if (!res.ok) return;
+      const messages = await res.json();
+      if (!Array.isArray(messages) || messages.length === 0) return;
+
+      const item = messages[0];
+
+      // Mete l kòm processing touswit
+      await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: 'processing',
+          assigned_account_index: assignedAccount.accountIndex,
+          processed_at: new Date().toISOString(),
+        }),
+      });
+
+      const cleanPhone = cleanPhoneNumber(item.to_phone);
+      if (!cleanPhone || cleanPhone.length < 8) {
+        await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ status: 'failed', error_message: 'Nimewo telefòn destinataire pa valid' }),
+        });
+        return;
+      }
+
+      const chatId = `${cleanPhone}@c.us`;
+
+      try {
+        let sendResult;
+        if (item.pdf_base64 && typeof item.pdf_base64 === 'string') {
+          try {
+            const media = new MessageMedia('application/pdf', item.pdf_base64, item.pdf_file_name || 'Recu.pdf');
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, media, { caption: item.message.trim() }, item.id);
+          } catch (_) {
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id);
+          }
+        } else {
+          sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id);
+        }
+
+        // Siksè voye
+        await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            status: 'sent',
+            sent_by_phone: assignedAccount.phone,
+            sent_at: new Date().toISOString(),
+          }),
+        });
+      } catch (sendErr) {
+        console.warn(`[Cluster] Echèk voye mesaj sou Liy ${assignedAccount.accountIndex}:`, sendErr.message);
+        // Remete mesaj la kòm pending pou yon lòt liy nan cluster a ka pran l!
+        await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            status: 'pending',
+            error_message: `Echwe sou Liy ${assignedAccount.accountIndex} (${sendErr.message}); ap re-eseye sou yon lòt liy.`,
+            processed_at: null,
+          }),
+        });
+      }
+    } catch (_) {
+    } finally {
+      this.isDispatching = false;
+    }
+  }
+
+  // Voye yon mesaj manyèl / tès sou cluster a
+  async sendMessageAnywhere(to, message, mediaBase64 = null, mediaName = null) {
+    const cleanPhone = cleanPhoneNumber(to);
+    if (!cleanPhone || cleanPhone.length < 8) {
+      throw new Error('Nimewo destinataire a pa valid.');
+    }
+    const chatId = `${cleanPhone}@c.us`;
+
+    // Jwenn nenpòt kont ki pare kounye a
+    const available = this.getAllAccounts().filter((a) => a.isReady && !a.isBusy);
+    if (available.length === 0) {
+      throw new Error('Okenn liy WhatsApp pa pare oswa konekte pou voye mesaj kounye a.');
+    }
+    available.sort((a, b) => a.lastSentAt - b.lastSentAt);
+    const chosen = available[0];
+
+    if (mediaBase64) {
+      const media = new MessageMedia('application/pdf', mediaBase64, mediaName || 'Document.pdf');
+      return await chosen.sendWithHumanPresence(chatId, media, { caption: message.trim() });
+    } else {
+      return await chosen.sendWithHumanPresence(chatId, message.trim());
+    }
+  }
+
+  // Verifikasyon rapèl échéance pou tout gym
+  async runCronExpirationReminders(targetGymId = null) {
+    try {
+      const url = `${SUPABASE_URL}/rest/v1/rpc/cron_check_whatsapp_expiration_reminders`;
+      const body = targetGymId ? JSON.stringify({ p_target_gym_id: targetGymId }) : JSON.stringify({});
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body,
+      });
+      if (res.ok) {
+        const result = await res.json();
+        console.log(`[Cron Expiration] ✅ Verifikasyon fèt: ${result.queued_count} nouvo rapèl mete nan outbox.`);
+        return result;
+      }
+    } catch (err) {
+      console.warn('[Cron Expiration] Erè rezo:', err.message);
+    }
+    return null;
+  }
+}
+
+const cluster = new AccountCluster();
+
+// ============================================================================
+// EXPRESS API ROUTES
+// ============================================================================
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-// 1. Health check & Estati jeneral
 app.get('/health', (req, res) => {
-  res.json({ ok: true, service: 'securgym-whatsapp', status: clientStatus });
+  res.json({ ok: true, service: 'securgym-whatsapp-cluster', accounts: cluster.accounts.size });
 });
 
+// 1. Estati jeneral cluster la ak premye kont la (Backwards compatibility)
 app.get('/api/status', (req, res) => {
+  const accounts = cluster.getAllAccounts();
+  const readyCount = accounts.filter((a) => a.isReady).length;
+  const primary = accounts[0] || null;
+
   res.json({
     ok: true,
-    status: clientStatus,
-    qr: qrDataUrl,
-    rawQr: rawQrCode,
-    phone: connectedUser,
-    pushname: pushName,
-    lastError: lastError,
-    config: {
-      validNumber: config.validNumber,
-      backupNumber: config.backupNumber || '',
-      defaultCountryCode: config.defaultCountryCode,
-      autoSendWelcome: config.autoSendWelcome !== false,
-      autoSendReceipts: config.autoSendReceipts !== false,
-      autoSendReminders: config.autoSendReminders !== false,
-      reminderDaysBefore: config.reminderDaysBefore || 7,
+    status: primary ? primary.status : 'DISCONNECTED',
+    phone: primary ? primary.phone : null,
+    pushname: primary ? primary.pushName : null,
+    qr: primary ? primary.qrCodeDataUrl : null,
+    rawQr: primary ? primary.rawQrCode : null,
+    cluster: {
+      totalAccounts: accounts.length,
+      readyAccounts: readyCount,
+      accounts: accounts.map((a) => ({
+        index: a.accountIndex,
+        label: a.label,
+        status: a.status,
+        phone: a.phone,
+        pushName: a.pushName,
+        sentToday: a.sentToday,
+        dailyLimit: a.dailyLimit,
+        isRestricted: a.isRestricted,
+        restrictedUntil: a.restrictedUntil,
+        hasQr: !!a.qrCodeDataUrl,
+      })),
     },
-    queueLength: messageQueue.length,
-    uptime: process.uptime(),
+    config,
   });
 });
 
-// 2. Imaj QR Code dirèk
-app.get('/api/qr.png', async (req, res) => {
-  if (clientStatus === 'SCAN_QR' && rawQrCode) {
-    res.setHeader('Content-Type', 'image/png');
-    qrcode.toFileStream(res, rawQrCode, { margin: 2, scale: 8 });
-  } else {
-    res.status(404).send('Pa gen okenn kòd QR disponib pou kounye a');
-  }
+// 2. Lis konplè tout liy WhatsApp yo nan cluster a
+app.get('/api/accounts', (req, res) => {
+  const accounts = cluster.getAllAccounts().map((a) => ({
+    index: a.accountIndex,
+    label: a.label,
+    status: a.status,
+    phone: a.phone,
+    pushName: a.pushName,
+    qr: a.qrCodeDataUrl,
+    rawQr: a.rawQrCode,
+    sentToday: a.sentToday,
+    dailyLimit: a.dailyLimit,
+    lastSentAt: a.lastSentAt ? new Date(a.lastSentAt).toISOString() : null,
+    isRestricted: a.isRestricted,
+    restrictedUntil: a.restrictedUntil,
+    restrictionReason: a.restrictionReason,
+    lastError: a.lastError,
+  }));
+  res.json({ ok: true, accounts });
 });
 
-// 3. Konfigirasyon (Li / Chanje)
-app.get('/api/config', (req, res) => {
-  res.json({ ok: true, config });
-});
+// 3. Rekonekte / Rafrechi QR yon kont espesifik
+app.post('/api/accounts/:index/initialize', async (req, res) => {
+  const idx = Number(req.params.index);
+  const acc = cluster.getAccount(idx);
+  if (!acc) return res.status(404).json({ ok: false, error: 'Kont pa jwenn.' });
 
-app.post('/api/config', (req, res) => {
-  const {
-    validNumber,
-    backupNumber,
-    defaultCountryCode,
-    autoSendWelcome,
-    autoSendReceipts,
-    autoSendReminders,
-    reminderDaysBefore
-  } = req.body;
-
-  if (validNumber !== undefined) config.validNumber = String(validNumber).trim();
-  if (backupNumber !== undefined) config.backupNumber = String(backupNumber).trim();
-  if (defaultCountryCode !== undefined) config.defaultCountryCode = String(defaultCountryCode).trim();
-  if (autoSendWelcome !== undefined) config.autoSendWelcome = Boolean(autoSendWelcome);
-  if (autoSendReceipts !== undefined) config.autoSendReceipts = Boolean(autoSendReceipts);
-  if (autoSendReminders !== undefined) config.autoSendReminders = Boolean(autoSendReminders);
-  if (reminderDaysBefore !== undefined) config.reminderDaysBefore = parseInt(reminderDaysBefore) || 7;
-
-  saveConfig();
-  console.log('[Config] Konfigirasyon mete ajou:', config);
-  res.json({ ok: true, message: 'Konfigirasyon anrejistre avèk siksè', config });
-});
-
-// 4. Voye Mesaj WhatsApp (avèk Anti-Spam Queue ak sipò PDF dokiman)
-app.post('/api/send', async (req, res) => {
   try {
-    const { to, message, pdfBase64, pdfFileName } = req.body;
-
-    if (!message || typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({ ok: false, error: 'Mesaj la pa dwe vid.' });
-    }
-
-    const cleanPhone = cleanPhoneNumber(to);
-    if (!cleanPhone || cleanPhone.length < 8) {
-      return res.status(400).json({ ok: false, error: 'Nimewo telefòn destinataire a pa valid.' });
-    }
-
-    if (clientStatus !== 'READY' || !client) {
-      return res.status(503).json({
-        ok: false,
-        error: `WhatsApp pa konekte kounye a (Estati: ${clientStatus}). Eskane kòd QR la sou panèl admin nan.`,
-      });
-    }
-
-    const chatId = `${cleanPhone}@c.us`;
-
-    // Voye atravè Queue Anti-Spam pou kenbe entèval sekirite
-    const result = await enqueueMessage(async () => {
-      console.log(`[WhatsApp] N ap voye mesaj bay ${chatId}...`);
-      if (pdfBase64 && typeof pdfBase64 === 'string') {
-        try {
-          console.log(`[WhatsApp] N ap tache PDF dokiman (${pdfFileName || 'Recu.pdf'})...`);
-          const media = new MessageMedia('application/pdf', pdfBase64, pdfFileName || 'Recu.pdf');
-          return await safeSendMessage(chatId, media, { caption: message.trim() });
-        } catch (mediaErr) {
-          console.warn('[WhatsApp] Erè voye PDF, n ap voye kòm tèks senp:', mediaErr.message);
-          return await safeSendMessage(chatId, message.trim());
-        }
-      } else {
-        return await safeSendMessage(chatId, message.trim());
-      }
-    });
-
-    res.json({
-      ok: true,
-      messageId: (result && result.id) ? result.id._serialized : null,
-      to: cleanPhone,
-      timestamp: Date.now(),
-    });
+    await acc.destroy();
+    acc.status = 'DISCONNECTED';
+    acc.restrictedUntil = null;
+    acc.restrictionReason = null;
+    acc.init();
+    res.json({ ok: true, message: `Liy ${idx} ap re-inisyalize...` });
   } catch (err) {
-    console.error('[WhatsApp] Erè voye mesaj:', err);
-    res.status(500).json({ ok: false, error: err.message || 'Echèk voye mesaj' });
-  }
-});
-
-// 5. Tès Voye Mesaj
-app.post('/api/test', async (req, res) => {
-  try {
-    const target = req.body.to || config.validNumber;
-    const testMsg = req.body.message || `🏋️ *SecurGYM / GymDesk*\nSa a se yon mesaj tès WhatsApp voye avèk siksè depi sistèm jesyon gym nan !\nDat: ${new Date().toLocaleString()}`;
-
-    if (!target) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Tanpri antre yon nimewo valid oswa anrejistre li nan panèl admin nan anvan.',
-      });
-    }
-
-    const cleanPhone = cleanPhoneNumber(target);
-    if (!cleanPhone) {
-      return res.status(400).json({ ok: false, error: 'Nimewo tès la pa valid.' });
-    }
-
-    if (clientStatus !== 'READY' || !client) {
-      return res.status(503).json({
-        ok: false,
-        error: `WhatsApp pa pare (Estati: ${clientStatus}). Tanpri konekte li avèk kòd QR la anvan.`,
-      });
-    }
-
-    const chatId = `${cleanPhone}@c.us`;
-    const result = await enqueueMessage(async () => {
-      return await safeSendMessage(chatId, testMsg);
-    });
-
-    res.json({
-      ok: true,
-      message: 'Mesaj tès la voye avèk siksè !',
-      to: cleanPhone,
-      messageId: (result && result.id) ? result.id._serialized : null,
-    });
-  } catch (err) {
-    console.error('[WhatsApp] Erè tès:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// 5.5. Fòse verifikasyon rapèl échéance kounye a (Cron on-demand)
+// 4. Reyinisyalize (Wipe sesyon) yon kont espesifik
+app.post('/api/accounts/:index/reset', async (req, res) => {
+  const idx = Number(req.params.index);
+  const acc = cluster.getAccount(idx);
+  if (!acc) return res.status(404).json({ ok: false, error: 'Kont pa jwenn.' });
+
+  try {
+    await acc.destroy();
+    try {
+      if (fs.existsSync(acc.sessionDir)) {
+        fs.rmSync(acc.sessionDir, { recursive: true, force: true });
+      }
+    } catch (_) {}
+    acc.status = 'DISCONNECTED';
+    acc.phone = null;
+    acc.pushName = null;
+    acc.restrictedUntil = null;
+    acc.init();
+    res.json({ ok: true, message: `Sesyon Liy ${idx} efase nèt. Nouvo QR ap prepare.` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 5. Debloke manyèlman yon liy ki te an 24h restriksyon
+app.post('/api/accounts/:index/unrestrict', async (req, res) => {
+  const idx = Number(req.params.index);
+  const acc = cluster.getAccount(idx);
+  if (!acc) return res.status(404).json({ ok: false, error: 'Kont pa jwenn.' });
+
+  acc.status = 'DISCONNECTED';
+  acc.restrictedUntil = null;
+  acc.restrictionReason = null;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_account_unrestrict`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_account_index: idx }),
+    });
+  } catch (_) {}
+  acc.init();
+  res.json({ ok: true, message: `Liy ${idx} debloke.` });
+});
+
+// 6. Voye mesaj (Backwards compatibility)
+app.post('/api/send', async (req, res) => {
+  try {
+    const { to, message, pdf_base64, pdf_file_name } = req.body;
+    const result = await cluster.sendMessageAnywhere(to, message, pdf_base64, pdf_file_name);
+    res.json({ ok: true, messageId: result && result.id ? result.id._serialized : null, to });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 7. Tès voye mesaj
+app.post('/api/test', async (req, res) => {
+  try {
+    const target = req.body.to || config.validNumber;
+    const testMsg = req.body.message || `🏋️ *SecurGYM Multi-Kont Cluster*\nMesaj tès distribye avèk siksè !\nDat: ${new Date().toLocaleString()}`;
+    const result = await cluster.sendMessageAnywhere(target, testMsg);
+    res.json({ ok: true, message: 'Mesaj tès voye avèk siksè !', to: target, messageId: result && result.id ? result.id._serialized : null });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 8. Cron vérification échéances on-demand
 app.post('/api/cron/check-expirations', async (req, res) => {
   try {
-    const gymId = req.body && req.body.gymId ? req.body.gymId : null;
-    const result = await runExpirationReminderCron(gymId);
+    const result = await cluster.runCronExpirationReminders(req.body.gymId || null);
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// 6. Rekonekte / Relanse Kliyan an
+// 9. Backwards compatibility: `/api/initialize` ak `/api/reset` pou ansyen UI
 app.post('/api/initialize', async (req, res) => {
-  console.log('[WhatsApp] Demann rekoneksyon / inisyalizasyon resevwa...');
-  try {
-    await destroyCurrentClient();
-    initWhatsAppClient();
-    res.json({ ok: true, message: 'Demaraj kliyan WhatsApp lanse...', status: clientStatus });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
+  const primary = cluster.getAccount(1);
+  if (primary) primary.init();
+  res.json({ ok: true, message: 'Inisyalizasyon liy prensipal lanse.' });
 });
-
-// 7. Reyinisyalizasyon Konplè (Wipe .wwebjs_auth ak relanse a zewo)
 app.post('/api/reset', async (req, res) => {
-  console.log('[WhatsApp] Demann reset konplè sesyon resevwa...');
-  try {
-    await destroyCurrentClient();
-    try {
-      if (fs.existsSync(AUTH_DIR)) {
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-        console.log('[WhatsApp] Dosye .wwebjs_auth efase nèt.');
-      }
-    } catch (e) {
-      console.warn('[WhatsApp] Pa ka efase dosye auth nèt:', e.message);
-    }
-    clientStatus = 'DISCONNECTED';
-    connectedUser = null;
-    pushName = null;
-    rawQrCode = null;
-    qrDataUrl = null;
-    lastError = null;
-
-    initWhatsAppClient();
-    res.json({ ok: true, message: 'Sesyon an reyinisyalize nèt. Nouvo Kòd QR ap prepare.' });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
+  const primary = cluster.getAccount(1);
+  if (primary) await primary.destroy();
+  res.json({ ok: true, message: 'Liy prensipal reyinisyalize.' });
 });
 
-// 7b. Chanje Nimewo WhatsApp (Switch / Add Backup WhatsApp Number)
-app.post('/api/switch-account', async (req, res) => {
-  console.log('[WhatsApp] Demann chanje nimewo / nouvo kont WhatsApp resevwa...');
-  try {
-    const { newNumber, backupNumber } = req.body || {};
-    if (newNumber) config.validNumber = String(newNumber).trim();
-    if (backupNumber) config.backupNumber = String(backupNumber).trim();
-    saveConfig();
+// ============================================================================
+// LANSE ENTÈVAL BACKGROUND YO
+// ============================================================================
+// 1. Senkronize lis kont yo soti nan Supabase chak 10s
+setInterval(() => cluster.syncAccountsFromSupabase(), 10000);
 
-    await destroyCurrentClient();
-    try {
-      if (fs.existsSync(AUTH_DIR)) {
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-        console.log('[WhatsApp] Ansyen sesyon efase pou nouvo koneksyon.');
-      }
-    } catch (e) {
-      console.warn('[WhatsApp] Pa ka efase dosye auth nèt:', e.message);
-    }
-
-    clientStatus = 'DISCONNECTED';
-    connectedUser = null;
-    pushName = null;
-    rawQrCode = null;
-    qrDataUrl = null;
-    lastError = null;
-
-    initWhatsAppClient();
-    res.json({
-      ok: true,
-      message: 'Ansyen nimewo a dekonekte. Nouvo Kòd QR ap prepare pou w eskane ak lòt nimewo a.',
-      status: 'INITIALIZING',
-    });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+// 2. Voye heartbeat pou tout kont yo chak 5s
+setInterval(() => {
+  for (const acc of cluster.accounts.values()) {
+    acc.sendHeartbeat();
   }
-});
+}, 5000);
 
-// 8. Dekonekte (Logout)
-app.post('/api/logout', async (req, res) => {
-  try {
-    if (client) {
-      await client.logout().catch(() => {});
-      await destroyCurrentClient();
-    }
-    clientStatus = 'DISCONNECTED';
-    connectedUser = null;
-    pushName = null;
-    rawQrCode = null;
-    qrDataUrl = null;
-    isInitializing = false;
+// 3. Distribiye mesaj k ap tann nan outbox la chak 3.5s (ak delè moun 25s-50s)
+setInterval(() => cluster.dispatchPendingOutboxMessages(), 3500);
 
-    if (req.body && req.body.clearSession) {
-      try {
-        if (fs.existsSync(AUTH_DIR)) {
-          fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-        }
-      } catch (_) {}
-    }
+// 4. Verifikasyon otomatik rapèl échéance chak 1 èdtan
+setInterval(() => cluster.runCronExpirationReminders(), 60 * 60 * 1000);
 
-    console.log('[WhatsApp] Sesyon WhatsApp dekonekte.');
-    res.json({ ok: true, message: 'WhatsApp dekonekte avèk siksè.' });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Kòmanse sèvè Express la epi inisyalize WhatsApp
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`====================================================`);
-  console.log(`  Sèvis WhatsApp SecurGYM ap kouri sou pò ${PORT}`);
+// Kòmanse sèvè a
+app.listen(PORT, '0.0.0.0', async () => {
+  console.log('====================================================');
+  console.log(`  Sèvis WhatsApp SecurGYM Multi-Kont sou pò ${PORT}`);
   console.log(`  URL Sèvis: http://127.0.0.1:${PORT}`);
   console.log(`  Cloud Bridge Supabase Aktif: ${SUPABASE_URL}`);
-  console.log(`====================================================`);
+  console.log(`  Pwoteksyon Anti-Bann: Delè varyab 25s - 50s + Poz Repo 3 min`);
+  console.log('====================================================');
 
-  // Kòmanse WhatsApp otomatikman
-  initWhatsAppClient();
+  // Chaje kont yo touswit depi Supabase
+  await cluster.syncAccountsFromSupabase();
+
+  // Premye verifikasyon rapèl échéance
+  setTimeout(() => cluster.runCronExpirationReminders(), 5000);
 });

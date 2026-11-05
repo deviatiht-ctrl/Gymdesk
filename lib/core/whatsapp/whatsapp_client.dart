@@ -214,6 +214,89 @@ class WhatsAppAccessCheckResult {
 }
 
 /// Kliyan HTTP ak Cloud Bridge pou kominike ak WhatsApp Web
+
+/// Modèl pou yon kont nan Cluster Multi-Kont WhatsApp la
+class WhatsAppAccountInfo {
+  const WhatsAppAccountInfo({
+    required this.id,
+    required this.accountIndex,
+    required this.label,
+    this.phoneNumber,
+    this.pushName,
+    required this.serviceStatus,
+    this.qrCode,
+    this.isEnabled = true,
+    this.dailyLimit = 40,
+    this.sentToday = 0,
+    this.totalSent = 0,
+    this.lastSentAt,
+    this.lastHeartbeat,
+    this.isOnline = false,
+    this.restrictedUntil,
+    this.restrictionReason,
+    this.lastError,
+  });
+
+  final String id;
+  final int accountIndex;
+  final String label;
+  final String? phoneNumber;
+  final String? pushName;
+  final String serviceStatus;
+  final String? qrCode;
+  final bool isEnabled;
+  final int dailyLimit;
+  final int sentToday;
+  final int totalSent;
+  final DateTime? lastSentAt;
+  final DateTime? lastHeartbeat;
+  final bool isOnline;
+  final DateTime? restrictedUntil;
+  final String? restrictionReason;
+  final String? lastError;
+
+  bool get isReady => serviceStatus.toUpperCase() == 'READY';
+  bool get isWaitingForQr => serviceStatus.toUpperCase() == 'SCAN_QR' && qrCode != null && qrCode!.isNotEmpty;
+  bool get isRestricted {
+    if (serviceStatus.toUpperCase() == 'RESTRICTED') {
+      if (restrictedUntil == null) return true;
+      return restrictedUntil!.isAfter(DateTime.now());
+    }
+    return false;
+  }
+
+  factory WhatsAppAccountInfo.fromJson(Map<String, dynamic> json) {
+    DateTime? parseDate(dynamic val) {
+      if (val == null) return null;
+      try {
+        return DateTime.parse(val.toString());
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return WhatsAppAccountInfo(
+      id: json['id']?.toString() ?? '',
+      accountIndex: (json['account_index'] as num?)?.toInt() ?? 1,
+      label: json['label']?.toString() ?? 'Liy',
+      phoneNumber: json['phone_number']?.toString(),
+      pushName: json['push_name']?.toString(),
+      serviceStatus: json['service_status']?.toString() ?? 'DISCONNECTED',
+      qrCode: json['qr_code']?.toString(),
+      isEnabled: json['is_enabled'] as bool? ?? true,
+      dailyLimit: (json['daily_limit'] as num?)?.toInt() ?? 40,
+      sentToday: (json['sent_today'] as num?)?.toInt() ?? 0,
+      totalSent: (json['total_sent'] as num?)?.toInt() ?? 0,
+      lastSentAt: parseDate(json['last_sent_at']),
+      lastHeartbeat: parseDate(json['last_heartbeat']),
+      isOnline: json['is_online'] as bool? ?? false,
+      restrictedUntil: parseDate(json['restricted_until']),
+      restrictionReason: json['restriction_reason']?.toString(),
+      lastError: json['last_error']?.toString(),
+    );
+  }
+}
+
 class WhatsAppClient {
   WhatsAppClient({this.baseUrl = 'http://127.0.0.1:47812'});
 
@@ -585,6 +668,121 @@ class WhatsAppClient {
     }
     return null;
   }
+
+  /// Rale lis tout liy WhatsApp nan Cluster a depi Supabase oswa sèvis lokal
+  Future<List<WhatsAppAccountInfo>> fetchAccountsList() async {
+    // 1. Eseye lokal si posib
+    if (!_lastUsedCloudBridge) {
+      try {
+        final uri = Uri.parse('$baseUrl/api/accounts');
+        final response = await http.get(uri).timeout(const Duration(milliseconds: 1800));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['ok'] == true && data['accounts'] is List) {
+            return (data['accounts'] as List)
+                .map((a) => WhatsAppAccountInfo.fromJson(Map<String, dynamic>.from(a as Map)))
+                .toList();
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Cloud Bridge Supabase RPC
+    try {
+      final res = await Supabase.instance.client.rpc('platform_whatsapp_accounts_list');
+      if (res != null && res is List) {
+        return res
+            .map((a) => WhatsAppAccountInfo.fromJson(Map<String, dynamic>.from(a as Map)))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè fetchAccountsList: $e');
+    }
+    return [];
+  }
+
+  /// Kreye yon nouvo plas liy WhatsApp nan cluster a
+  Future<bool> createAccountSlot({required String label, int dailyLimit = 40}) async {
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'platform_whatsapp_account_create',
+        params: {'p_label': label, 'p_daily_limit': dailyLimit},
+      );
+      return res != null;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè createAccountSlot: $e');
+      return false;
+    }
+  }
+
+  /// Rekonekte / Rafrechi kòd QR yon liy espesifik
+  Future<bool> restartAccount(int accountIndex) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/initialize');
+      final res = await http.post(uri).timeout(const Duration(seconds: 10));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Efase sesyon yon liy (Wipe) pou eskane yon lòt nimewo
+  Future<bool> resetAccountSession(int accountIndex) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/reset');
+      final res = await http.post(uri).timeout(const Duration(seconds: 10));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Debloke manyèlman yon liy ki te an restriksyon 24h
+  Future<bool> unrestrictAccount(int accountIndex) async {
+    try {
+      await Supabase.instance.client.rpc(
+        'platform_whatsapp_account_unrestrict',
+        params: {'p_account_index': accountIndex},
+      );
+      try {
+        final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/unrestrict');
+        await http.post(uri).timeout(const Duration(seconds: 5));
+      } catch (_) {}
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè unrestrictAccount: $e');
+      return false;
+    }
+  }
+
+  /// Aktive oswa dezaktive yon liy
+  Future<bool> toggleAccount(int accountIndex, bool isEnabled) async {
+    try {
+      await Supabase.instance.client.rpc(
+        'platform_whatsapp_account_toggle',
+        params: {'p_account_index': accountIndex, 'p_is_enabled': isEnabled},
+      );
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè toggleAccount: $e');
+      return false;
+    }
+  }
+
+  /// Efase yon liy nan cluster a
+  Future<bool> deleteAccountSlot(int accountIndex) async {
+    try {
+      await Supabase.instance.client.rpc(
+        'platform_whatsapp_account_delete',
+        params: {'p_account_index': accountIndex},
+      );
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè deleteAccountSlot: $e');
+      return false;
+    }
+  }
+
 }
 
 /// Riverpod provider pou kliyan WhatsApp la
