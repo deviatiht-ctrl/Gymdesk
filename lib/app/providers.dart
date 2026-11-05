@@ -51,6 +51,49 @@ class AppLanguage extends _$AppLanguage {
   }
 }
 
+class AppThemeModeNotifier extends Notifier<ThemeMode> {
+  static const _storage = FlutterSecureStorage();
+
+  @override
+  ThemeMode build() {
+    _load();
+    return ThemeMode.dark;
+  }
+
+  Future<void> _load() async {
+    try {
+      final saved = await _storage.read(key: 'gymdesk:theme_mode');
+      if (saved != null) {
+        state = saved == 'light' ? ThemeMode.light : ThemeMode.dark;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> toggle() async {
+    final next = state == ThemeMode.dark ? ThemeMode.light : ThemeMode.dark;
+    state = next;
+    try {
+      await _storage.write(
+        key: 'gymdesk:theme_mode',
+        value: next == ThemeMode.light ? 'light' : 'dark',
+      );
+    } catch (_) {}
+  }
+
+  Future<void> setMode(ThemeMode mode) async {
+    state = mode;
+    try {
+      await _storage.write(
+        key: 'gymdesk:theme_mode',
+        value: mode == ThemeMode.light ? 'light' : 'dark',
+      );
+    } catch (_) {}
+  }
+}
+
+final appThemeModeProvider =
+    NotifierProvider<AppThemeModeNotifier, ThemeMode>(() => AppThemeModeNotifier());
+
 final biometricServiceProvider = Provider<BiometricService>((ref) {
   final service = BiometricService();
   ref.onDispose(service.dispose);

@@ -56,6 +56,8 @@ class _GymDeskAppState extends ConsumerState<GymDeskApp> {
   @override
   Widget build(BuildContext context) {
     final locale = ref.watch(appLanguageProvider);
+    final themeMode = ref.watch(appThemeModeProvider);
+    final accent = _runtime.session?.gym?['accent_color'] as String?;
     return ListenableBuilder(
       listenable: _runtime,
       builder: (context, _) => MaterialApp.router(
@@ -65,7 +67,9 @@ class _GymDeskAppState extends ConsumerState<GymDeskApp> {
         locale: locale,
         supportedLocales: AppStrings.locales,
         localizationsDelegates: appLocalizationDelegates,
-        theme: gymTheme(_runtime.session?.gym?['accent_color'] as String?),
+        theme: gymLightTheme(accent),
+        darkTheme: gymDarkTheme(accent),
+        themeMode: themeMode,
       ),
     );
   }

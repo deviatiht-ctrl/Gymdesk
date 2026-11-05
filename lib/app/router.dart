@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'providers.dart';
 import '../core/access_control/access_popup_overlay.dart';
 import '../core/access_control/display_bridge.dart';
 import '../core/sync/sync_models.dart';
@@ -627,7 +629,45 @@ class _AppShell extends StatelessWidget {
             final platform = runtime.session?.isPlatformAdmin == true;
             final scaffold = Theme.of(context).colorScheme.surface;
             return Scaffold(
+              drawer: wide ? null : Drawer(
+                child: SafeArea(
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        child: platform
+                            ? Image.asset('assets/brand/logo_horizontal.png', width: 150)
+                            : _GymLogo(runtime: runtime, extended: true),
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: _paths.length,
+                          itemBuilder: (context, i) {
+                            final isSel = selected == i;
+                            return ListTile(
+                              leading: Icon(_icons[i], color: isSel ? Theme.of(context).colorScheme.primary : null),
+                              title: Text(s.text(_keys[i]), style: TextStyle(fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                              selected: isSel,
+                              onTap: () {
+                                Navigator.pop(context);
+                                context.go(_paths[i]);
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
               appBar: AppBar(
+                leading: wide ? null : Builder(
+                  builder: (context) => IconButton(
+                    icon: const Icon(LucideIcons.menu),
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  ),
+                ),
                 title: Row(
                   children: [
                     if (platform)
@@ -684,81 +724,108 @@ class _AppShell extends StatelessWidget {
                         );
                       },
                     ),
+                  Consumer(
+                    builder: (context, ref, _) {
+                      final themeMode = ref.watch(appThemeModeProvider);
+                      final isDark = themeMode == ThemeMode.dark;
+                      return IconButton(
+                        tooltip: isDark ? 'Passer au thème clair' : 'Passer au thème sombre',
+                        icon: Icon(
+                          isDark ? LucideIcons.sun : LucideIcons.moon,
+                          size: 19,
+                        ),
+                        onPressed: () => ref.read(appThemeModeProvider.notifier).toggle(),
+                      );
+                    },
+                  ),
                   const SizedBox(width: 12),
                 ],
               ),
               body: Row(
                 children: [
                   if (wide) ...[
-                    NavigationRail(
-                      selectedIndex: selected,
-                      extended: isExtended,
-                      minExtendedWidth: 220,
-                      leading: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: platform
-                            ? (isExtended
-                                  ? Image.asset(
-                                      'assets/brand/logo_horizontal.png',
-                                      width: 150,
-                                      fit: BoxFit.contain,
-                                    )
-                                  : Image.asset(
-                                      'assets/brand/icon_securgym.png',
-                                      width: 34,
-                                      height: 34,
-                                      fit: BoxFit.contain,
-                                    ))
-                            : _GymLogo(
-                                runtime: runtime,
-                                extended: isExtended,
-                              ),
-                      ),
-                      trailing: Expanded(
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: isExtended
-                                ? Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Image.asset(
-                                        'assets/brand/icon_securgym.png',
-                                        width: 16,
-                                        height: 16,
+                    SizedBox(
+                      width: isExtended ? 220 : 72,
+                      child: LayoutBuilder(
+                        builder: (context, railConstraints) {
+                          return ScrollConfiguration(
+                            behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                            child: SingleChildScrollView(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(minHeight: railConstraints.maxHeight),
+                                child: IntrinsicHeight(
+                                  child: NavigationRail(
+                                    selectedIndex: selected,
+                                    extended: isExtended,
+                                    minExtendedWidth: 220,
+                                    minWidth: 72,
+                                    leading: Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      child: platform
+                                          ? (isExtended
+                                                ? Image.asset(
+                                                    'assets/brand/logo_horizontal.png',
+                                                    width: 150,
+                                                    fit: BoxFit.contain,
+                                                  )
+                                                : Image.asset(
+                                                    'assets/brand/icon_securgym.png',
+                                                    width: 34,
+                                                    height: 34,
+                                                    fit: BoxFit.contain,
+                                                  ))
+                                          : _GymLogo(
+                                              runtime: runtime,
+                                              extended: isExtended,
+                                            ),
+                                    ),
+                                    trailing: Padding(
+                                      padding: const EdgeInsets.only(top: 16, bottom: 20),
+                                      child: isExtended
+                                          ? Row(
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Image.asset(
+                                                  'assets/brand/icon_securgym.png',
+                                                  width: 16,
+                                                  height: 16,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                const Text(
+                                                  'SecurGYM',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Color(0xff9ca3af),
+                                                  ),
+                                                ),
+                                              ],
+                                            )
+                                          : Image.asset(
+                                              'assets/brand/icon_securgym.png',
+                                              width: 16,
+                                              height: 16,
+                                            ),
+                                    ),
+                                    labelType: isExtended
+                                        ? NavigationRailLabelType.none
+                                        : NavigationRailLabelType.all,
+                                    onDestinationSelected: (index) =>
+                                        context.go(_paths[index]),
+                                    destinations: List.generate(
+                                      _paths.length,
+                                      (i) => NavigationRailDestination(
+                                        icon: Icon(_icons[i]),
+                                        label: Text(s.text(_keys[i])),
                                       ),
-                                      const SizedBox(width: 6),
-                                      const Text(
-                                        'SecurGYM',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xff9ca3af),
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                : Image.asset(
-                                    'assets/brand/icon_securgym.png',
-                                    width: 16,
-                                    height: 16,
+                                    ),
                                   ),
-                          ),
-                        ),
-                      ),
-                      labelType: isExtended
-                          ? NavigationRailLabelType.none
-                          : NavigationRailLabelType.all,
-                      onDestinationSelected: (index) =>
-                          context.go(_paths[index]),
-                      destinations: List.generate(
-                        _paths.length,
-                        (i) => NavigationRailDestination(
-                          icon: Icon(_icons[i]),
-                          label: Text(s.text(_keys[i])),
-                        ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ),
                     const VerticalDivider(width: 1),
@@ -767,7 +834,7 @@ class _AppShell extends StatelessWidget {
                     child: platform
                         ? SecurGymBackground(
                             overlayColor: scaffold,
-                            overlayOpacity: 0.6,
+                            overlayOpacity: Theme.of(context).brightness == Brightness.dark ? 0.92 : 0.6,
                             useSafeArea: false,
                             child: child,
                           )

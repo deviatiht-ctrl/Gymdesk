@@ -62,6 +62,43 @@ class SyncPage extends ConsumerWidget {
                   onPressed: () => engine.synchronize(full: true),
                   child: Text(s.text('sync_full')),
                 ),
+                OutlinedButton.icon(
+                  icon: const Icon(LucideIcons.sparkles, size: 16),
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Nettoyer et resynchroniser la base locale'),
+                        content: const Text(
+                          'Cette action va effacer les membres et données supprimés en cache et télécharger une copie fraîche depuis le serveur. Vos opérations en attente ne seront pas perdues.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(ctx, false),
+                            child: Text(s.text('cancel')),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(ctx, true),
+                            child: const Text('Nettoyer & Resynchroniser'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      await db.purgeSyncedRecords();
+                      await engine.synchronize(full: true);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Base locale nettoyée et resynchronisée avec succès !'),
+                            backgroundColor: Color(0xFF059669),
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  label: const Text('Nettoyer le cache local'),
+                ),
                 if (state.failed > 0)
                   OutlinedButton.icon(
                     icon: const Icon(LucideIcons.trash2, size: 16),
@@ -218,9 +255,22 @@ class SyncPage extends ConsumerWidget {
               },
             ),
             const SizedBox(height: 32),
-            Text(
-              s.text('conflicts'),
-              style: Theme.of(context).textTheme.titleLarge,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  s.text('conflicts'),
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                TextButton.icon(
+                  icon: const Icon(LucideIcons.checkCheck, size: 16),
+                  onPressed: () async {
+                    await (db.update(db.syncConflicts)..where((t) => t.reviewed.equals(0)))
+                        .write(const SyncConflictsCompanion(reviewed: Value(1)));
+                  },
+                  label: const Text('Tout marquer comme vérifié'),
+                ),
+              ],
             ),
             StreamBuilder<List<SyncConflict>>(
               stream: db.watchConflicts(),

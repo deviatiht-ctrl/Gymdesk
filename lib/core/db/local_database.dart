@@ -579,6 +579,38 @@ class LocalDatabase extends _$LocalDatabase {
     );
   }
 
+  /// Netwaye tout fichye lokal ki te fin senkronize deja men ki pa nan outbox,
+  /// pou si yo te efase sou Supabase yo pa ret bloke nan memwa SQLite lokal la.
+  Future<void> purgeSyncedRecords({List<SyncEntity>? entities}) async {
+    final entityFilter = entities != null && entities.isNotEmpty
+        ? "AND entity IN (${entities.map((e) => "'${e.table}'").join(',')})"
+        : "";
+    // 1. Efase sa ki pa nan outbox ankò
+    await customUpdate(
+      "DELETE FROM records WHERE gym_id = '$gymId' $entityFilter AND NOT EXISTS ("
+      "  SELECT 1 FROM outbox WHERE outbox.entity = records.entity "
+      "  AND outbox.entity_id = records.id "
+      "  AND outbox.status != 'synced'"
+      ")",
+      updates: {records},
+      updateKind: UpdateKind.delete,
+    );
+    // 2. Efase nenpòt lòt gym ki te nan baz lokal la pa erè
+    await customUpdate(
+      "DELETE FROM records WHERE gym_id != '$gymId'",
+      updates: {records},
+      updateKind: UpdateKind.delete,
+    );
+    // 3. Reset curseur yo
+    if (entities == null) {
+      await customUpdate("DELETE FROM metadata WHERE key LIKE 'cursor:%'", updates: {syncMetadata});
+    } else {
+      for (final e in entities) {
+        await customUpdate("DELETE FROM metadata WHERE key = 'cursor:${e.table}'", updates: {syncMetadata});
+      }
+    }
+  }
+
   /// Activation atomique complète d'un membre et de sa carte en une seule transaction Drift
   Future<void> activateMemberCard({
     required Json member,

@@ -182,6 +182,9 @@ class SyncEngine {
           full ||
           lastFull == null ||
           serverTime.difference(lastFull) > const Duration(days: 1);
+      if (full) {
+        await db.purgeSyncedRecords();
+      }
       final entities = SyncEntity.values
           .where(
             (e) =>
