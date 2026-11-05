@@ -286,21 +286,26 @@
     })();
   </script>
     <script>
-    var BUILD_VERSION = "20261105_0655";
+    var BUILD_VERSION = "20261105_0820";
     if (localStorage.getItem("securgym_build_version") !== BUILD_VERSION) {
+      var hadOld = !!localStorage.getItem("securgym_build_version");
       localStorage.setItem("securgym_build_version", BUILD_VERSION);
-      if ('serviceWorker' in navigator) {
+      var p1 = ('serviceWorker' in navigator) ?
         navigator.serviceWorker.getRegistrations().then(function(regs) {
-          for (var r of regs) { r.unregister(); }
-        });
-      }
-      if ('caches' in window) {
+          return Promise.all(regs.map(function(r) { return r.unregister(); }));
+        }) : Promise.resolve();
+      var p2 = ('caches' in window) ?
         caches.keys().then(function(names) {
-          for (var name of names) { caches.delete(name); }
-        });
-      }
+          return Promise.all(names.map(function(n) { return caches.delete(n); }));
+        }) : Promise.resolve();
+      Promise.all([p1, p2]).then(function() {
+        if (hadOld && !sessionStorage.getItem("securgym_v_reload")) {
+          sessionStorage.setItem("securgym_v_reload", "1");
+          window.location.reload(true);
+        }
+      });
     }
   </script>
-  <script src="flutter_bootstrap.js?v=20261105_0655" async></script>
+  <script src="flutter_bootstrap.js?v=20261105_0820" async></script>
 </body>
 </html>

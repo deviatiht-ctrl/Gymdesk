@@ -1,4 +1,4 @@
-﻿{{flutter_js}}
+{{flutter_js}}
 {{flutter_build_config}}
 
 const userConfig = {
@@ -8,9 +8,7 @@ const userConfig = {
 
 _flutter.loader.load({
   config: userConfig,
-  serviceWorkerSettings: {
-    serviceWorkerVersion: {{flutter_service_worker_version}}
-  },
+  serviceWorkerSettings: null,
   onEntrypointLoaded: async function(engineInitializer) {
     const appRunner = await engineInitializer.initializeEngine(userConfig);
     await appRunner.runApp();
