@@ -423,8 +423,8 @@ class WhatsAppNotificationService {
     required String lang,
   }) {
     final day = DateFormat('dd/MM/yyyy');
-    final period = (data.startDate != null && data.endDate != null)
-        ? '${day.format(data.startDate!)} → ${day.format(data.endDate!)}'
+    final period = (data.periodStart != null && data.periodEnd != null)
+        ? '${day.format(data.periodStart!)} → ${day.format(data.periodEnd!)}'
         : null;
 
     final linkSection = (pdfUrl != null && pdfUrl.isNotEmpty)
