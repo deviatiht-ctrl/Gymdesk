@@ -47,9 +47,15 @@ class LocalDatabase extends _$LocalDatabase {
       }
     },
     beforeOpen: (details) async {
-      await customStatement('CREATE INDEX IF NOT EXISTS records_tenant_id ON records(gym_id, entity, deleted_at, id);');
-      await customStatement('CREATE INDEX IF NOT EXISTS subscriptions_member ON records(entity, gym_id, json_extract(payload, \'\$.member_id\'), json_extract(payload, \'\$.end_date\'));');
-      await customStatement('CREATE INDEX IF NOT EXISTS members_number ON records(entity, gym_id, json_extract(payload, \'\$.member_number\'));');
+      try {
+        await customStatement('CREATE INDEX IF NOT EXISTS records_tenant_id ON records(gym_id, entity, deleted_at, id);');
+      } catch (_) {}
+      try {
+        await customStatement('CREATE INDEX IF NOT EXISTS subscriptions_member ON records(entity, gym_id, json_extract(payload, \'\$.member_id\'), json_extract(payload, \'\$.end_date\'));');
+      } catch (_) {}
+      try {
+        await customStatement('CREATE INDEX IF NOT EXISTS members_number ON records(entity, gym_id, json_extract(payload, \'\$.member_number\'));');
+      } catch (_) {}
     },
   );
 
@@ -235,7 +241,7 @@ class LocalDatabase extends _$LocalDatabase {
     Json data, {
     required DateTime changedAt,
     bool deleting = false,
-  }) => transaction(() async {
+  }) async {
     if (!entity.writable || data['gym_id'] != gymId || data['id'] is! String) {
       throw const SyncRejected('invalid_record');
     }
@@ -279,7 +285,7 @@ class LocalDatabase extends _$LocalDatabase {
         createdAt: DateTime.now().toUtc().toIso8601String(),
       ),
     );
-  });
+  }
 
   Future<List<OutboxData>> pending({int limit = 50}) =>
       (select(outbox)
