@@ -49,7 +49,7 @@ const userConfig = {
 _flutter.loader.load({
   config: userConfig,
   serviceWorkerSettings: {
-    serviceWorkerVersion: "3360979326" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
+    serviceWorkerVersion: "2745444474" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
   },
   onEntrypointLoaded: async function(engineInitializer) {
     const appRunner = await engineInitializer.initializeEngine(userConfig);
