@@ -13,6 +13,7 @@ import '../../../l10n/app_strings.dart';
 import '../data/receipt_pdf.dart';
 import '../data/receipt_service.dart';
 import '../../../core/whatsapp/whatsapp_client.dart';
+import '../../../core/whatsapp/whatsapp_notification_service.dart';
 
 /// Dyalòg resi apre peman: telechaje / enprime / email / WhatsApp.
 /// PDF la jenere yon fwa epi upload la fèt sèlman si itilizatè a
@@ -61,6 +62,12 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
     final email = widget.data.memberEmail ?? '';
     if (email.contains('@') && mounted) {
       unawaited(_sendEmail());
+    }
+
+    // Resi a voye OTOMATIK sou WhatsApp ak dokiman PDF la
+    final phone = widget.data.memberPhone ?? '';
+    if (phone.isNotEmpty && mounted) {
+      unawaited(_sendWhatsapp(auto: true));
     }
   }
 
@@ -141,7 +148,7 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
     }
   }
 
-  Future<void> _sendWhatsapp() async {
+  Future<void> _sendWhatsapp({bool auto = false}) async {
     final s = AppStrings.of(context);
     final phone = (widget.data.memberPhone ?? '').replaceAll(RegExp(r'\D'), '');
     if (phone.isEmpty) {
@@ -178,16 +185,26 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
         '${s.text('receipt_download')} (PDF):',
         url,
       ].join('\n');
-      // 1. Eseye voye dirèk ak whatsapp-web.js si sèvis la konekte
+      // 1. Eseye voye dirèk ak whatsapp-web.js (ak dokiman PDF tache)
+      final waService = ref.read(whatsAppNotificationServiceProvider);
       final waClient = ref.read(whatsAppClientProvider);
       final waState = await waClient.checkStatus();
       if (waState.isReady) {
-        final sendResult = await waClient.sendMessage(to: phone, message: message);
-        if (sendResult.success) {
+        final ok = await waService.sendPaymentReceipt(
+          to: phone,
+          data: widget.data,
+          pdfBytes: _pdf,
+          pdfUrl: url,
+          gymPhone: widget.data.gymPhone,
+          languageCode: s.locale.languageCode,
+        );
+        if (ok) {
           if (mounted) setState(() => _status = s.text('whatsapp_receipt_sent'));
           return;
         }
       }
+
+      if (auto) return; // Si se te voye otomatik, pa louvri wa.me deyò
 
       // 2. Solisyon sekou: louvri wa.me si sèvis la pa limen
       final ok = await launchUrl(

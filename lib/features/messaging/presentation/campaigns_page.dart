@@ -7,6 +7,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../app/providers.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
+import '../../../core/whatsapp/whatsapp_client.dart';
+import '../../../core/whatsapp/whatsapp_notification_service.dart';
 
 class CampaignsPage extends ConsumerStatefulWidget {
   const CampaignsPage({super.key});
@@ -24,6 +26,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   final _bodyController = TextEditingController();
   final _searchController = TextEditingController();
 
+  String _channel = 'email'; // 'email' | 'whatsapp'
   String _templateKey = 'inactive_winback';
   String _filterStatus = 'all'; // Tout manm parètTous les membres s'affichent par défaut
 
@@ -218,8 +221,19 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
         for (final m in filtered) {
           final id = m['member_id']?.toString() ?? '';
           final email = m['email']?.toString() ?? '';
-          if (id.isNotEmpty && email.contains('@')) {
-            _selectedMemberIds.add(id);
+          final phone = (m['whatsapp']?.toString().isNotEmpty ?? false)
+              ? m['whatsapp'].toString()
+              : m['phone']?.toString() ?? '';
+          final cleanPhone = phone.replaceAll(RegExp(r'\D'), '');
+
+          if (_channel == 'whatsapp') {
+            if (id.isNotEmpty && cleanPhone.length >= 8) {
+              _selectedMemberIds.add(id);
+            }
+          } else {
+            if (id.isNotEmpty && email.contains('@')) {
+              _selectedMemberIds.add(id);
+            }
           }
         }
         _loadingPreview = false;
@@ -303,7 +317,13 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     final subject = _subjectController.text.trim();
     final body = _bodyController.text.trim();
 
-    if (title.isEmpty || subject.isEmpty || body.isEmpty) {
+    if (title.isEmpty || body.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(s.text('fill_required_fields'))),
+      );
+      return;
+    }
+    if (_channel == 'email' && subject.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(s.text('fill_required_fields'))),
       );
@@ -321,6 +341,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       return;
     }
 
+    final channelName = _channel == 'whatsapp' ? 'WhatsApp (SecurGYM)' : 'Email';
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -329,16 +350,20 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Êtes-vous sûr de vouloir envoyer cette campagne à ${targetRecipients.length} membre(s) sélectionné(s) ?'),
+            Text('Êtes-vous sûr de vouloir envoyer cette campagne ($channelName) à ${targetRecipients.length} membre(s) sélectionné(s) ?'),
             const SizedBox(height: 12),
-            Text('• Objet : $subject', style: const TextStyle(fontWeight: FontWeight.bold)),
-            Text('• ${s.text('campaign_reply_to_gym')}'),
+            if (subject.isNotEmpty)
+              Text('• Objet : $subject', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('• Canal : $channelName'),
           ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.text('cancel'))),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _channel == 'whatsapp' ? Colors.green : const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(s.text('send_campaign_btn')),
           ),
@@ -349,6 +374,102 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     if (confirmed != true) return;
 
     setState(() => _isSending = true);
+
+    if (_channel == 'whatsapp') {
+      await _sendWhatsAppCampaign(targetRecipients, title, body, s);
+    } else {
+      await _sendEmailCampaign(targetRecipients, title, subject, body, s);
+    }
+  }
+
+  Future<void> _sendWhatsAppCampaign(
+    List<Map<String, dynamic>> recipients,
+    String title,
+    String body,
+    AppStrings s,
+  ) async {
+    final waClient = ref.read(whatsAppClientProvider);
+    final waState = await waClient.checkStatus();
+
+    if (!waState.isReady) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ WhatsApp pa konekte. Tanpri ale nan Panèl Admin > WhatsApp pou konekte li anvan.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isSending = false);
+      }
+      return;
+    }
+
+    final runtime = ref.read(appRuntimeProvider);
+    final gym = runtime.session?.gym ?? const <String, dynamic>{};
+    final gymPhone = gym['phone'] as String? ?? '';
+    final footer = WhatsAppNotificationService.buildCampaignFooter(
+      gymPhone: gymPhone,
+      lang: s.locale.languageCode,
+    );
+
+    int sentCount = 0;
+    for (int i = 0; i < recipients.length; i++) {
+      if (!mounted) break;
+      final m = recipients[i];
+      final rawPhone = (m['whatsapp']?.toString().isNotEmpty ?? false)
+          ? m['whatsapp'].toString()
+          : m['phone']?.toString() ?? '';
+      final phone = WhatsAppClient.normalizePhone(rawPhone);
+      if (phone.length < 8) continue;
+
+      final memberName = m['name']?.toString() ?? '';
+      final personalizedBody = body.replaceAll('{nom}', memberName);
+      final fullMsg = '*$title*\n\n$personalizedBody$footer';
+
+      final res = await waClient.sendMessage(to: phone, message: fullMsg);
+      if (res.success) {
+        sentCount++;
+      }
+      if (i < recipients.length - 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
+    }
+
+    try {
+      final gymId = runtime.session?.gymId;
+      if (gymId != null) {
+        await Supabase.instance.client.from('campaigns').insert({
+          'gym_id': gymId,
+          'title': title,
+          'subject': title,
+          'body': body,
+          'template_key': _templateKey,
+          'channel': 'whatsapp',
+          'recipients_count': sentCount,
+          'status': 'sent',
+        });
+      }
+    } catch (_) {}
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$sentCount / ${recipients.length} ${s.text('campaign_whatsapp_sent_summary')}'),
+          backgroundColor: const Color(0xFF059669),
+        ),
+      );
+      _loadHistory();
+      setState(() => _isSending = false);
+    }
+  }
+
+  Future<void> _sendEmailCampaign(
+    List<Map<String, dynamic>> targetRecipients,
+    String title,
+    String subject,
+    String body,
+    AppStrings s,
+  ) async {
     try {
       final count = await Supabase.instance.client.rpc('campaign_send_members', params: {
         'p_title': title,
@@ -421,6 +542,34 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 0. Chwa Kanal la (Email vs WhatsApp)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: SegmentedButton<String>(
+                  segments: [
+                    ButtonSegment(
+                      value: 'email',
+                      icon: const Icon(LucideIcons.mail, size: 18),
+                      label: Text(s.text('campaign_channel_email')),
+                    ),
+                    ButtonSegment(
+                      value: 'whatsapp',
+                      icon: const Icon(LucideIcons.messageSquare, size: 18, color: Colors.green),
+                      label: Text(s.text('campaign_channel_whatsapp')),
+                    ),
+                  ],
+                  selected: {_channel},
+                  onSelectionChanged: (set) {
+                    setState(() {
+                      _channel = set.first;
+                      _runPreview();
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+
               // 1. Barre de choix du Modèle Gym
               Card(
                 elevation: 0,

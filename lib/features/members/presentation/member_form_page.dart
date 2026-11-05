@@ -23,6 +23,7 @@ import '../../subscriptions/domain/subscription_rules.dart';
 import '../data/member_photo_codec.dart';
 import '../data/members_repository.dart';
 import '../domain/member.dart';
+import '../../../core/whatsapp/whatsapp_notification_service.dart';
 
 class MemberFormPage extends ConsumerStatefulWidget {
   const MemberFormPage({super.key, this.memberId});
@@ -325,6 +326,23 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
       );
       await runtime.sync?.synchronize();
       await HapticFeedback.lightImpact();
+
+      // Voye mesaj byenvini WhatsApp otomatikman ak lyen espas manm nan
+      final waPhone = draft.whatsapp.isNotEmpty ? draft.whatsapp : draft.phone;
+      if (waPhone.isNotEmpty) {
+        final gymData = runtime.session?.gym ?? const <String, dynamic>{};
+        unawaited(
+          ref.read(whatsAppNotificationServiceProvider).sendWelcomeMessage(
+            to: waPhone,
+            memberName: '${draft.firstName.trim()} ${draft.lastName.trim()}'.trim(),
+            memberNumber: result.memberNumber,
+            gymName: gymData['name'] as String? ?? 'SecurGYM',
+            gymPhone: gymData['phone'] as String?,
+            gymId: runtime.session?.gymId,
+            languageCode: s.locale.languageCode,
+          ),
+        );
+      }
       if (mounted && payment != null && subscription != null) {
         final gym = runtime.session?.gym ?? const <String, dynamic>{};
         final data = ReceiptData(

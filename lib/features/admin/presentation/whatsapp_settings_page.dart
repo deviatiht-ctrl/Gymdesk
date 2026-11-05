@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/whatsapp/whatsapp_client.dart';
+import '../../../core/whatsapp/whatsapp_notification_service.dart';
 import '../../../l10n/app_strings.dart';
 
 /// Panèl Jesyon WhatsApp (whatsapp-web.js)
@@ -30,6 +31,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     text: '🏋️ Bonjou ! Sa a se yon tès mesaj WhatsApp depi sistèm jesyon GymDesk / SecurGYM nan.',
   );
 
+  bool _autoSendWelcome = true;
   bool _autoSendReceipts = true;
   bool _autoSendReminders = true;
 
@@ -114,6 +116,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       if (state.defaultCountryCode.isNotEmpty) {
         _countryCodeController.text = state.defaultCountryCode;
       }
+      _autoSendWelcome = state.autoSendWelcome;
       _autoSendReceipts = state.autoSendReceipts;
       _autoSendReminders = state.autoSendReminders;
     });
@@ -164,6 +167,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       await client.saveConfig(
         validNumber: validNumber,
         defaultCountryCode: cc,
+        autoSendWelcome: _autoSendWelcome,
         autoSendReceipts: _autoSendReceipts,
         autoSendReminders: _autoSendReminders,
       );
@@ -276,6 +280,38 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     await _checkStatus();
     _startPolling();
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _runExpirationCheck() async {
+    final s = AppStrings.of(context);
+    setState(() => _loading = true);
+    try {
+      final count = await ref
+          .read(whatsAppNotificationServiceProvider)
+          .checkAndSendPendingExpirationReminders(daysBefore: 7, languageCode: s.locale.languageCode);
+      if (mounted) {
+        if (count > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$count ${s.text('whatsapp_reminders_sent_count')}'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(s.text('whatsapp_no_due_reminders'))),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erè: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _logout() async {
@@ -732,11 +768,30 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
+                title: Text(s.text('whatsapp_auto_welcome_title')),
+                subtitle: Text(s.text('whatsapp_auto_welcome_desc')),
+                value: _autoSendWelcome,
+                onChanged: (val) => setState(() => _autoSendWelcome = val),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
                 title: Text(s.text('whatsapp_auto_reminders_title')),
                 subtitle: Text(s.text('whatsapp_auto_reminders_desc')),
                 value: _autoSendReminders,
                 onChanged: (val) => setState(() => _autoSendReminders = val),
               ),
+              if (_state.isReady) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF0F766E),
+                    side: const BorderSide(color: Color(0xFF0F766E)),
+                  ),
+                  onPressed: _loading ? null : _runExpirationCheck,
+                  icon: const Icon(LucideIcons.bellRing, size: 16),
+                  label: Text(s.text('whatsapp_check_reminders_btn')),
+                ),
+              ],
 
               const SizedBox(height: 16),
               Align(

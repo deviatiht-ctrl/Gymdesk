@@ -3,7 +3,7 @@ const cors = require('cors');
 const qrcode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 
 // Pwoteje pwosesis la kont erè CDP / Network ki ka soti nan Puppeteer
 process.on('unhandledRejection', (reason) => {
@@ -21,8 +21,10 @@ const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
 let config = {
   validNumber: '50932986751',
   defaultCountryCode: '509',
+  autoSendWelcome: true,
   autoSendReceipts: true,
   autoSendReminders: true,
+  reminderDaysBefore: 7,
   port: PORT
 };
 
@@ -259,7 +261,8 @@ function cleanPhoneNumber(phone) {
 // Express App
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // 1. Health check & Estati jeneral
 app.get('/health', (req, res) => {
@@ -278,8 +281,10 @@ app.get('/api/status', (req, res) => {
     config: {
       validNumber: config.validNumber,
       defaultCountryCode: config.defaultCountryCode,
-      autoSendReceipts: config.autoSendReceipts,
-      autoSendReminders: config.autoSendReminders,
+      autoSendWelcome: config.autoSendWelcome !== false,
+      autoSendReceipts: config.autoSendReceipts !== false,
+      autoSendReminders: config.autoSendReminders !== false,
+      reminderDaysBefore: config.reminderDaysBefore || 7,
     },
     uptime: process.uptime(),
   });
@@ -301,21 +306,23 @@ app.get('/api/config', (req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { validNumber, defaultCountryCode, autoSendReceipts, autoSendReminders } = req.body;
+  const { validNumber, defaultCountryCode, autoSendWelcome, autoSendReceipts, autoSendReminders, reminderDaysBefore } = req.body;
   if (validNumber !== undefined) config.validNumber = String(validNumber).trim();
   if (defaultCountryCode !== undefined) config.defaultCountryCode = String(defaultCountryCode).trim();
+  if (autoSendWelcome !== undefined) config.autoSendWelcome = Boolean(autoSendWelcome);
   if (autoSendReceipts !== undefined) config.autoSendReceipts = Boolean(autoSendReceipts);
   if (autoSendReminders !== undefined) config.autoSendReminders = Boolean(autoSendReminders);
+  if (reminderDaysBefore !== undefined) config.reminderDaysBefore = parseInt(reminderDaysBefore) || 7;
 
   saveConfig();
   console.log('[Config] Konfigirasyon mete ajou:', config);
   res.json({ ok: true, message: 'Konfigirasyon anrejistre avèk siksè', config });
 });
 
-// 4. Voye Mesaj WhatsApp
+// 4. Voye Mesaj WhatsApp (avèk sipò PDF dokiman si bay)
 app.post('/api/send', async (req, res) => {
   try {
-    const { to, message } = req.body;
+    const { to, message, pdfBase64, pdfFileName } = req.body;
 
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ ok: false, error: 'Mesaj la pa dwe vid.' });
@@ -336,7 +343,19 @@ app.post('/api/send', async (req, res) => {
     const chatId = `${cleanPhone}@c.us`;
     console.log(`[WhatsApp] N ap voye mesaj bay ${chatId}...`);
 
-    const result = await client.sendMessage(chatId, message.trim());
+    let result;
+    if (pdfBase64 && typeof pdfBase64 === 'string') {
+      try {
+        console.log(`[WhatsApp] N ap tache PDF dokiman (${pdfFileName || 'Recu.pdf'})...`);
+        const media = new MessageMedia('application/pdf', pdfBase64, pdfFileName || 'Recu.pdf');
+        result = await client.sendMessage(chatId, media, { caption: message.trim() });
+      } catch (mediaErr) {
+        console.warn('[WhatsApp] Erè voye PDF, n ap voye kòm tèks senp:', mediaErr.message);
+        result = await client.sendMessage(chatId, message.trim());
+      }
+    } else {
+      result = await client.sendMessage(chatId, message.trim());
+    }
 
     res.json({
       ok: true,

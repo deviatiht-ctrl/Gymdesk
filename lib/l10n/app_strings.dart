@@ -2481,6 +2481,19 @@ class AppStrings {
       'Préparation du navigateur pour générer le code QR... Cela peut prendre 5 à 15 secondes.',
       'Preparing browser to generate QR code... This may take 5 to 15 seconds.',
     ],
+    'campaign_channel_email': ['Imèl (Email)', 'Email', 'Email'],
+    'campaign_channel_whatsapp': ['WhatsApp (SecurGYM)', 'WhatsApp (SecurGYM)', 'WhatsApp (SecurGYM)'],
+    'campaign_whatsapp_sending': ['N ap voye kanpay WhatsApp la...', 'Envoi de la campagne WhatsApp...', 'Sending WhatsApp campaign...'],
+    'campaign_whatsapp_sent_summary': ['mesaj WhatsApp voye avèk siksè !', 'messages WhatsApp envoyés avec succès !', 'WhatsApp messages sent successfully!'],
+    'whatsapp_auto_welcome_title': ['Voye mesaj byenvini otomatikman sou WhatsApp', 'Envoyer le message de bienvenue automatiquement sur WhatsApp', 'Automatically send welcome message on WhatsApp'],
+    'whatsapp_auto_welcome_desc': [
+      'Lè yon nouvo manm enskri, li resevwa lyen espas manm li, nimewo li ak enstriksyon pou l anrejistre nimewo SecurGYM nan.',
+      'À chaque nouvelle inscription, le membre reçoit son lien d\'espace membre, son numéro et la consigne d\'enregistrer le numéro SecurGYM.',
+      'When a new member registers, they receive their portal link, ID, and instructions to save the SecurGYM number.',
+    ],
+    'whatsapp_check_reminders_btn': ['Kouri Tcheke & Voye Rapèl 7 Jou Kounye a', 'Vérifier & Envoyer les Rappels 7 Jours Maintenant', 'Check & Send 7-Day Reminders Now'],
+    'whatsapp_reminders_sent_count': ['rapèl fin voye sou WhatsApp bay manm ki pral ekspire yo !', 'rappels envoyés sur WhatsApp aux membres expirants !', 'reminders sent via WhatsApp to expiring members!'],
+    'whatsapp_no_due_reminders': ['Pa gen okenn abònman ki prèt pou ekspire jodi a.', 'Aucun abonnement n\'arrive à échéance aujourd\'hui.', 'No memberships are expiring today.'],
   };
 }
 

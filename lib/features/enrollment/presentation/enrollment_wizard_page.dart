@@ -29,6 +29,7 @@ import '../../subscriptions/domain/subscription_rules.dart';
 import '../../../core/access_control/access_monitor.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../members/data/member_pin_service.dart';
+import '../../../core/whatsapp/whatsapp_notification_service.dart';
 
 class EnrollmentWizardPage extends ConsumerStatefulWidget {
   const EnrollmentWizardPage({
@@ -630,6 +631,22 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       final gymId = runtime.session?.gymId;
       if (gymId != null && _lastPaymentId.isNotEmpty) {
         unawaited(ReceiptService(runtime.client, gymId).autoEnqueue(_receiptData(fullName, plan.name, endDate, gym), gym['logo_url'] as String?));
+      }
+
+      // Voye mesaj byenvini WhatsApp otomatikman ak lyen espas manm nan
+      final waPhone = draft.whatsapp.isNotEmpty ? draft.whatsapp : draft.phone;
+      if (waPhone.isNotEmpty) {
+        unawaited(
+          ref.read(whatsAppNotificationServiceProvider).sendWelcomeMessage(
+            to: waPhone,
+            memberName: fullName,
+            memberNumber: result.memberNumber,
+            gymName: gym['name'] as String? ?? 'SecurGYM',
+            gymPhone: gym['phone'] as String?,
+            gymId: gymId,
+            languageCode: s.locale.languageCode,
+          ),
+        );
       }
 
       if (mounted) {

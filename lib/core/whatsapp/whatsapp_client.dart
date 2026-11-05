@@ -25,8 +25,10 @@ class WhatsAppState {
     this.pushName,
     this.validNumber = '',
     this.defaultCountryCode = '509',
+    this.autoSendWelcome = true,
     this.autoSendReceipts = true,
     this.autoSendReminders = true,
+    this.reminderDaysBefore = 7,
     this.lastError,
     this.lastChecked,
   });
@@ -38,8 +40,10 @@ class WhatsAppState {
   final String? pushName;
   final String validNumber;
   final String defaultCountryCode;
+  final bool autoSendWelcome;
   final bool autoSendReceipts;
   final bool autoSendReminders;
+  final int reminderDaysBefore;
   final String? lastError;
   final DateTime? lastChecked;
 
@@ -57,8 +61,10 @@ class WhatsAppState {
     String? pushName,
     String? validNumber,
     String? defaultCountryCode,
+    bool? autoSendWelcome,
     bool? autoSendReceipts,
     bool? autoSendReminders,
+    int? reminderDaysBefore,
     String? lastError,
     DateTime? lastChecked,
   }) {
@@ -70,8 +76,10 @@ class WhatsAppState {
       pushName: pushName ?? this.pushName,
       validNumber: validNumber ?? this.validNumber,
       defaultCountryCode: defaultCountryCode ?? this.defaultCountryCode,
+      autoSendWelcome: autoSendWelcome ?? this.autoSendWelcome,
       autoSendReceipts: autoSendReceipts ?? this.autoSendReceipts,
       autoSendReminders: autoSendReminders ?? this.autoSendReminders,
+      reminderDaysBefore: reminderDaysBefore ?? this.reminderDaysBefore,
       lastError: lastError,
       lastChecked: lastChecked ?? this.lastChecked,
     );
@@ -136,8 +144,10 @@ class WhatsAppClient {
           pushName: data['pushname'] as String?,
           validNumber: (config['validNumber'] as String? ?? validNumberFallback ?? '').trim(),
           defaultCountryCode: (config['defaultCountryCode'] as String? ?? '509').trim(),
+          autoSendWelcome: config['autoSendWelcome'] as bool? ?? true,
           autoSendReceipts: config['autoSendReceipts'] as bool? ?? true,
           autoSendReminders: config['autoSendReminders'] as bool? ?? true,
+          reminderDaysBefore: config['reminderDaysBefore'] as int? ?? 7,
           lastError: data['lastError'] as String?,
           lastChecked: DateTime.now(),
         );
@@ -160,8 +170,10 @@ class WhatsAppClient {
   Future<bool> saveConfig({
     required String validNumber,
     String defaultCountryCode = '509',
+    bool autoSendWelcome = true,
     bool autoSendReceipts = true,
     bool autoSendReminders = true,
+    int reminderDaysBefore = 7,
   }) async {
     final uri = Uri.parse('$baseUrl/api/config');
     try {
@@ -171,8 +183,10 @@ class WhatsAppClient {
         body: jsonEncode({
           'validNumber': validNumber.trim(),
           'defaultCountryCode': defaultCountryCode.trim(),
+          'autoSendWelcome': autoSendWelcome,
           'autoSendReceipts': autoSendReceipts,
           'autoSendReminders': autoSendReminders,
+          'reminderDaysBefore': reminderDaysBefore,
         }),
       ).timeout(const Duration(seconds: 5));
       return response.statusCode == 200;
@@ -181,10 +195,12 @@ class WhatsAppClient {
     }
   }
 
-  /// Voye yon mesaj WhatsApp
+  /// Voye yon mesaj WhatsApp (ak sipò dokiman PDF si bay)
   Future<WhatsAppSendResult> sendMessage({
     required String to,
     required String message,
+    String? pdfBase64,
+    String? pdfFileName,
   }) async {
     final uri = Uri.parse('$baseUrl/api/send');
     try {
@@ -194,8 +210,10 @@ class WhatsAppClient {
         body: jsonEncode({
           'to': to.trim(),
           'message': message.trim(),
+          if (pdfBase64 != null && pdfBase64.isNotEmpty) 'pdfBase64': pdfBase64,
+          if (pdfFileName != null && pdfFileName.isNotEmpty) 'pdfFileName': pdfFileName,
         }),
-      ).timeout(const Duration(seconds: 25));
+      ).timeout(const Duration(seconds: 40));
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (response.statusCode == 200 && data['ok'] == true) {
