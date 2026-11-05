@@ -36,3 +36,6 @@ GymDesk_USB/SHA256SUMS.txt
 GymDesk_USB/VulnerabilityReport.*
 nul
 enroll_*.tsv
+
+node_modules/
+.wwebjs_auth/

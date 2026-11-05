@@ -2468,6 +2468,19 @@ class AppStrings {
     'whatsapp_enter_number': ['Tanpri antre yon nimewo telefòn valid.', 'Veuillez renseigner un numéro valide.', 'Please enter a valid phone number.'],
     'whatsapp_enter_message': ['Tanpri antre yon mesaj pou voye.', 'Veuillez saisir un message.', 'Please enter a message.'],
     'whatsapp_receipt_sent': ['Resi a voye sou WhatsApp avèk siksè !', 'Reçu envoyé sur WhatsApp avec succès !', 'Receipt sent via WhatsApp successfully!'],
+    'whatsapp_status_error': ['🔴 Erè Koneksyon WhatsApp', '🔴 Erreur de Connexion WhatsApp', '🔴 WhatsApp Connection Error'],
+    'whatsapp_reset_btn': ['Reyinisyalize Sesyon an', 'Réinitialiser la Session', 'Reset Session'],
+    'whatsapp_reset_title': ['Reyinisyalize Sesyon WhatsApp ?', 'Réinitialiser la Session WhatsApp ?', 'Reset WhatsApp Session ?'],
+    'whatsapp_reset_confirm': [
+      'Aksyon sa a ap siye fichye sesyon lokal yo epi jenere yon nouvo Kòd QR tou nèf. Èske w vle kontinye ?',
+      'Cette action effacera les fichiers locaux de session et générera un nouveau QR code propre. Voulez-vous continuer ?',
+      'This action will clear local session files and generate a brand-new QR code. Do you want to proceed?',
+    ],
+    'whatsapp_initializing_hint': [
+      'N ap prepare navigatè a pou jenere Kòd QR la... Sa ka pran 5 a 15 segond.',
+      'Préparation du navigateur pour générer le code QR... Cela peut prendre 5 à 15 secondes.',
+      'Preparing browser to generate QR code... This may take 5 to 15 seconds.',
+    ],
   };
 }
 

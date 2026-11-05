@@ -23,9 +23,9 @@ class WhatsAppSettingsPage extends ConsumerStatefulWidget {
 class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   final _formKey = GlobalKey<FormState>();
   final _gatewayUrlController = TextEditingController(text: 'http://127.0.0.1:47812');
-  final _validNumberController = TextEditingController();
+  final _validNumberController = TextEditingController(text: '50932986751');
   final _countryCodeController = TextEditingController(text: '509');
-  final _testNumberController = TextEditingController();
+  final _testNumberController = TextEditingController(text: '50932986751');
   final _testMessageController = TextEditingController(
     text: '🏋️ Bonjou ! Sa a se yon tès mesaj WhatsApp depi sistèm jesyon GymDesk / SecurGYM nan.',
   );
@@ -37,7 +37,6 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   bool _loading = true;
   bool _saving = false;
   bool _sendingTest = false;
-  String? _statusMessage;
   Timer? _pollTimer;
 
   @override
@@ -119,7 +118,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       _autoSendReminders = state.autoSendReminders;
     });
 
-    if (state.status == WhatsAppStatus.scanQr || state.status == WhatsAppStatus.initializing) {
+    if (state.status == WhatsAppStatus.scanQr ||
+        state.status == WhatsAppStatus.initializing ||
+        state.status == WhatsAppStatus.error) {
       _startPolling();
     } else {
       _stopPolling();
@@ -133,7 +134,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
 
     if (state.status != _state.status ||
         state.connectedPhone != _state.connectedPhone ||
-        state.rawQr != _state.rawQr) {
+        state.rawQr != _state.rawQr ||
+        state.lastError != _state.lastError) {
       setState(() => _state = state);
       if (state.status == WhatsAppStatus.ready) {
         _stopPolling();
@@ -245,6 +247,37 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     if (mounted) setState(() => _loading = false);
   }
 
+  Future<void> _resetSession() async {
+    final s = AppStrings.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.text('whatsapp_reset_title')),
+        content: Text(s.text('whatsapp_reset_confirm')),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.text('cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade800),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.text('whatsapp_reset_btn')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    setState(() => _loading = true);
+    final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+    await client.resetSession();
+    await Future<void>.delayed(const Duration(seconds: 3));
+    await _checkStatus();
+    _startPolling();
+    if (mounted) setState(() => _loading = false);
+  }
+
   Future<void> _logout() async {
     final s = AppStrings.of(context);
     final ok = await showDialog<bool>(
@@ -333,6 +366,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     final isReady = _state.isReady;
     final isWaitingQr = _state.isWaitingForQr;
     final isOffline = _state.isOffline;
+    final isError = _state.isError;
+    final isInitializing = _state.isInitializing;
 
     Color cardBorder;
     Color statusBadgeColor;
@@ -349,6 +384,11 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       statusBadgeColor = Colors.amber.shade700;
       statusTitle = s.text('whatsapp_waiting_scan');
       statusIcon = LucideIcons.qrCode;
+    } else if (isError) {
+      cardBorder = Colors.red.shade400;
+      statusBadgeColor = Colors.red.shade700;
+      statusTitle = s.text('whatsapp_status_error');
+      statusIcon = LucideIcons.alertCircle;
     } else if (isOffline) {
       cardBorder = Colors.red.shade300;
       statusBadgeColor = Colors.red;
@@ -395,19 +435,32 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     ],
                   ),
                 ),
-                if (isReady)
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
-                    onPressed: _logout,
-                    icon: const Icon(LucideIcons.logOut, size: 16),
-                    label: Text(s.text('whatsapp_disconnect_btn')),
-                  )
-                else
-                  FilledButton.tonalIcon(
-                    onPressed: _reconnect,
-                    icon: const Icon(LucideIcons.refreshCw, size: 16),
-                    label: Text(s.text('whatsapp_reconnect_btn')),
-                  ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (isReady)
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                        onPressed: _logout,
+                        icon: const Icon(LucideIcons.logOut, size: 16),
+                        label: Text(s.text('whatsapp_disconnect_btn')),
+                      )
+                    else ...[
+                      FilledButton.tonalIcon(
+                        onPressed: _reconnect,
+                        icon: const Icon(LucideIcons.refreshCw, size: 16),
+                        label: Text(s.text('whatsapp_reconnect_btn')),
+                      ),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(foregroundColor: Colors.orange.shade800),
+                        onPressed: _resetSession,
+                        icon: const Icon(LucideIcons.rotateCcw, size: 16),
+                        label: Text(s.text('whatsapp_reset_btn')),
+                      ),
+                    ],
+                  ],
+                ),
               ],
             ),
 
@@ -481,6 +534,75 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ),
             ],
 
+            // Si gen yon erè nan inisyalizasyon an
+            if (isError) ...[
+              const Divider(height: 32),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(LucideIcons.alertTriangle, color: Colors.red, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Detay Erè a:',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.red.shade800,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SelectableText(
+                      _state.lastError ?? 'Erè inisyalizasyon enkoni.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontFamily: 'monospace',
+                        color: Colors.red.shade900,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '💡 Si navigatè a te bloke, klike sou bouton "Reyinisyalize Sesyon an" anwo a pou siye fichye locks yo epi rekòmanse a zewo.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // Si n ap inisyalize (in progress)
+            if (isInitializing) ...[
+              const Divider(height: 32),
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Column(
+                    children: [
+                      const SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        s.text('whatsapp_initializing_hint'),
+                        style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+
             // Si sèvis la pa reponn (offline)
             if (isOffline) ...[
               const Divider(height: 32),
@@ -499,8 +621,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     Expanded(
                       child: Text(
                         'Sèvis WhatsApp la poko kòmanse sou machin sa a.\n'
-                        '👉 Pou demare l: Ale nan dosye "tools\\whatsapp_service" la epi fè yon doub klik sou fichye "LANCER_WHATSAPP.bat".\n'
-                        'Depi l demare, klike sou bouton "Rafrechi" anwo a pou konekte l.',
+                        '👉 Pou demare l: Fè yon doub klik sou fichye "Lancer_WhatsApp.bat" ki nan dosye GymDesk la.\n'
+                        'Depi l demare, klike sou bouton "Rafrechi / Rekonekte" anwo a pou konekte l.',
                         style: theme.textTheme.bodyMedium,
                       ),
                     ),
@@ -559,7 +681,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 ),
                 validator: (v) {
                   final val = v?.trim() ?? '';
-                  if (val.isEmpty) return null; // Opsyonèl men rekòmande
+                  if (val.isEmpty) return null;
                   final digits = val.replaceAll(RegExp(r'\D'), '');
                   if (digits.length < 8) return s.text('whatsapp_invalid_number');
                   return null;

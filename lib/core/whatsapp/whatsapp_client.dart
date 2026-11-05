@@ -46,6 +46,8 @@ class WhatsAppState {
   bool get isReady => status == WhatsAppStatus.ready;
   bool get isWaitingForQr => status == WhatsAppStatus.scanQr;
   bool get isOffline => status == WhatsAppStatus.offline;
+  bool get isError => status == WhatsAppStatus.error;
+  bool get isInitializing => status == WhatsAppStatus.initializing;
 
   WhatsAppState copyWith({
     WhatsAppStatus? status,
@@ -257,7 +259,18 @@ class WhatsAppClient {
   Future<bool> reconnect() async {
     final uri = Uri.parse('$baseUrl/api/initialize');
     try {
-      final response = await http.post(uri).timeout(const Duration(seconds: 5));
+      final response = await http.post(uri).timeout(const Duration(seconds: 10));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Reyinisyalize sesyon an nèt (wipe .wwebjs_auth epi kreye nouvo sesyon)
+  Future<bool> resetSession() async {
+    final uri = Uri.parse('$baseUrl/api/reset');
+    try {
+      final response = await http.post(uri).timeout(const Duration(seconds: 15));
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -272,7 +285,7 @@ class WhatsAppClient {
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'clearSession': clearSession}),
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(const Duration(seconds: 10));
       return response.statusCode == 200;
     } catch (_) {
       return false;
