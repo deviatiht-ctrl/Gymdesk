@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../core/whatsapp/whatsapp_notification_service.dart';
 import '../l10n/app_strings.dart';
 import 'providers.dart';
 import 'router.dart';
@@ -38,6 +39,12 @@ class _GymDeskAppState extends ConsumerState<GymDeskApp> {
     _runtime = ref.read(appRuntimeProvider);
     _router = createRouter(_runtime);
     unawaited(_runtime.initialize(passwordRecovery: widget.passwordRecovery));
+    // Demare sèvis automatizasyon entèlijan rapèl WhatsApp (100% otomatik an background)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(whatsAppNotificationServiceProvider).startAutomatedBackgroundChecker();
+      }
+    });
   }
 
   @override

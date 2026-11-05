@@ -470,14 +470,16 @@ create or replace function public.guard_member_deletion()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   if tg_op = 'DELETE' then
-    if public.current_role() <> 'owner' and not public.is_super_admin() then
+    if auth.role() = 'authenticated' and public.current_role() <> 'owner' and not public.is_super_admin() then
       raise exception 'access_denied: sèlman pwopryetè a ka efase yon manm' using errcode = '42501';
     end if;
+    return old;
   end if;
   if tg_op = 'UPDATE' and new.deleted_at is not null and old.deleted_at is null then
-    if public.current_role() <> 'owner' and not public.is_super_admin() then
+    if auth.role() = 'authenticated' and public.current_role() <> 'owner' and not public.is_super_admin() then
       raise exception 'access_denied: sèlman pwopryetè a ka achive yon manm' using errcode = '42501';
     end if;
+    return new;
   end if;
   return new;
 end;

@@ -186,9 +186,10 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       setState(() => _state = state);
       if (state.status == WhatsAppStatus.ready) {
         _stopPolling();
+        final s = AppStrings.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('🎉 WhatsApp konekte avèk siksè !'),
+          SnackBar(
+            content: Text(s.text('whatsapp_connected')),
             backgroundColor: Colors.green,
           ),
         );
@@ -201,7 +202,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     try {
       final res = await Supabase.instance.client.rpc('platform_whatsapp_gym_access_list');
       if (res != null && res is List) {
-        final list = (res as List)
+        final list = res
             .map((e) => GymWhatsAppAccess.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList();
         if (mounted) {
@@ -423,37 +424,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     if (mounted) setState(() => _loading = false);
   }
 
-  Future<void> _runExpirationCheck() async {
-    final s = AppStrings.of(context);
-    setState(() => _loading = true);
-    try {
-      final count = await ref
-          .read(whatsAppNotificationServiceProvider)
-          .checkAndSendPendingExpirationReminders(daysBefore: 7, languageCode: s.locale.languageCode);
-      if (mounted) {
-        if (count > 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('$count ${s.text('whatsapp_reminders_sent_count')}'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(s.text('whatsapp_no_due_reminders'))),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erè: $e'), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
+
 
   Future<void> _logout() async {
     final s = AppStrings.of(context);
@@ -515,22 +486,22 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 children: [
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Aktive Sèvis WhatsApp pou gym sa a'),
-                    subtitle: Text(enabled ? 'Aksè ouvri' : 'Aksè fèmen'),
+                    title: Text(s.text('whatsapp_enable_service_label')),
+                    subtitle: Text(enabled ? s.text('whatsapp_access_open') : s.text('whatsapp_access_closed')),
                     value: enabled,
                     onChanged: (val) => setDlgState(() => enabled = val),
                   ),
                   const Divider(),
                   const SizedBox(height: 8),
 
-                  const Text('Chwazi yon peryòd rapid :', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(s.text('whatsapp_quick_period_label'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
                       ActionChip(
-                        label: const Text('+1 Mwa (30 jou)'),
+                        label: Text(s.text('whatsapp_period_1m')),
                         onPressed: () {
                           setDlgState(() {
                             enabled = true;
@@ -541,7 +512,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         },
                       ),
                       ActionChip(
-                        label: const Text('+3 Mwa (90 jou)'),
+                        label: Text(s.text('whatsapp_period_3m')),
                         onPressed: () {
                           setDlgState(() {
                             enabled = true;
@@ -552,7 +523,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         },
                       ),
                       ActionChip(
-                        label: const Text('+6 Mwa (180 jou)'),
+                        label: Text(s.text('whatsapp_period_6m')),
                         onPressed: () {
                           setDlgState(() {
                             enabled = true;
@@ -563,7 +534,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         },
                       ),
                       ActionChip(
-                        label: const Text('+1 An (365 jou)'),
+                        label: Text(s.text('whatsapp_period_1y')),
                         onPressed: () {
                           setDlgState(() {
                             enabled = true;
@@ -592,7 +563,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                             if (pick != null) setDlgState(() => startDate = pick);
                           },
                           icon: const Icon(LucideIcons.calendar, size: 16),
-                          label: Text('Debi: ${df.format(startDate)}'),
+                          label: Text('${s.text('whatsapp_start_date_label')} ${df.format(startDate)}'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -608,14 +579,14 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                             if (pick != null) setDlgState(() => endDate = pick);
                           },
                           icon: const Icon(LucideIcons.calendarCheck, size: 16),
-                          label: Text('Fen: ${df.format(endDate)}'),
+                          label: Text('${s.text('whatsapp_end_date_label')} ${df.format(endDate)}'),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'Peryòd valab: $daysDiff jou ki rete',
+                    s.text('whatsapp_days_remaining_label').replaceAll('{0}', '$daysDiff'),
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -627,14 +598,14 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   // Estati (Aktif vs Sispann)
                   DropdownButtonFormField<String>(
                     value: status,
-                    decoration: const InputDecoration(
-                      labelText: 'Estati Abònman',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: s.text('whatsapp_subscription_status_label'),
+                      border: const OutlineInputBorder(),
                     ),
-                    items: const [
-                      DropdownMenuItem(value: 'active', child: Text('🟢 Aktif (Ap mache)')),
-                      DropdownMenuItem(value: 'suspended', child: Text('🟠 Sispann (Mete an Poz)')),
-                      DropdownMenuItem(value: 'inactive', child: Text('⚪ Inaktif (Koupe)')),
+                    items: [
+                      DropdownMenuItem(value: 'active', child: Text(s.text('whatsapp_status_active_opt'))),
+                      DropdownMenuItem(value: 'suspended', child: Text(s.text('whatsapp_status_suspended_opt'))),
+                      DropdownMenuItem(value: 'inactive', child: Text(s.text('whatsapp_status_inactive_opt'))),
                     ],
                     onChanged: (val) {
                       if (val != null) setDlgState(() => status = val);
@@ -646,11 +617,11 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   TextFormField(
                     controller: backupCtrl,
                     keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(
-                      labelText: 'Nimewo WhatsApp de Sekou (Opsyonèl)',
+                    decoration: InputDecoration(
+                      labelText: s.text('whatsapp_backup_number_opt_label'),
                       hintText: '50937001122',
-                      prefixIcon: Icon(LucideIcons.phoneForwarded),
-                      border: OutlineInputBorder(),
+                      prefixIcon: const Icon(LucideIcons.phoneForwarded),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -659,10 +630,10 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   TextFormField(
                     controller: notesCtrl,
                     maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Nòt / Kòmantè (Super Admin)',
-                      hintText: 'Peman pa MonCash resevwa...',
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: s.text('whatsapp_notes_label'),
+                      hintText: s.text('whatsapp_notes_hint'),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                 ],
@@ -697,7 +668,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Aksè WhatsApp pou ${gym.gymName} mete ajou avèk siksè !'),
+            content: Text('${gym.gymName} : ${s.text('whatsapp_access_updated')}'),
             backgroundColor: Colors.green,
           ),
         );
@@ -716,9 +687,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   }
 
   Future<void> _quickToggleSuspend(GymWhatsAppAccess gym) async {
+    final s = AppStrings.of(context);
     final newStatus = gym.status == 'suspended' ? 'active' : 'suspended';
-    final actionName = newStatus == 'suspended' ? 'sispann' : 'relanse';
-
+    
     setState(() => _loadingGyms = true);
     try {
       await Supabase.instance.client.rpc('platform_whatsapp_gym_access_set', params: {
@@ -734,7 +705,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Sèvis WhatsApp pou ${gym.gymName} $actionName avèk siksè !'),
+            content: Text('${gym.gymName} : ${s.text('whatsapp_access_updated')}'),
             backgroundColor: newStatus == 'active' ? Colors.green : Colors.orange.shade800,
           ),
         );
@@ -753,6 +724,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   }
 
   Future<void> _quickRenewMonth(GymWhatsAppAccess gym) async {
+    final s = AppStrings.of(context);
     final now = DateTime.now();
     final currentEnd = gym.endDate;
     final baseDate = (currentEnd != null && currentEnd.isAfter(now)) ? currentEnd : now;
@@ -773,7 +745,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('🎉 Abònman ${gym.gymName} renouvle pou 1 mwa anplis !'),
+            content: Text('🎉 ${gym.gymName} : ${s.text('whatsapp_renew_success')}'),
             backgroundColor: Colors.green,
           ),
         );
@@ -926,8 +898,10 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   const SizedBox(height: 2),
                   Text(
                     access.endDate != null
-                        ? 'Aksè mesaj otomatik ak kanpay aktif jiska ${df.format(access.endDate!)} (${access.daysRemaining} jou ki rete).'
-                        : 'Sèvis WhatsApp SecurGYM pare epi aktif.',
+                        ? s.text('whatsapp_subscription_active_desc')
+                            .replaceAll('{0}', df.format(access.endDate!))
+                            .replaceAll('{1}', '${access.daysRemaining}')
+                        : s.text('whatsapp_service_ready_desc'),
                     style: TextStyle(color: Colors.green.shade900, fontSize: 13),
                   ),
                 ],
@@ -967,7 +941,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '📞 Pou renouvle oswa aktive aksè gym ou a, kontakte sipò SecurGYM.',
+                  s.text('whatsapp_contact_support_renew'),
                   style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red.shade900, fontSize: 12),
                 ),
               ],
@@ -1070,7 +1044,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                       ),
                       if (isReady && _state.connectedPhone != null)
                         Text(
-                          'Nimewo konekte: +${_state.connectedPhone} ${_state.pushName != null ? "(${_state.pushName})" : ""}',
+                          '${s.text('whatsapp_connected_phone')} +${_state.connectedPhone} ${_state.pushName != null ? "(${_state.pushName})" : ""}',
                           style: theme.textTheme.bodySmall,
                         ),
                     ],
@@ -1165,7 +1139,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                                   '${_gatewayUrlController.text.trim()}/api/qr.png',
                                   width: 220,
                                   height: 220,
-                                  errorBuilder: (_, __, ___) => const SizedBox(
+                                  errorBuilder: (context, error, stackTrace) => const SizedBox(
                                     width: 220,
                                     height: 220,
                                     child: Center(child: CircularProgressIndicator()),
@@ -1174,7 +1148,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      'Kòd sa a ap rafrechi otomatikman. Eskane l avèk WhatsApp sou telefòn ou.',
+                      s.text('whatsapp_qr_auto_refresh_hint'),
                       style: theme.textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
                     ),
                   ],
@@ -1200,7 +1174,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         const Icon(LucideIcons.alertTriangle, color: Colors.red, size: 20),
                         const SizedBox(width: 8),
                         Text(
-                          'Detay Erè a:',
+                          s.text('whatsapp_error_details'),
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.bold,
                             color: Colors.red.shade800,
@@ -1218,7 +1192,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      '💡 Si navigatè a te bloke, klike sou bouton "Reyinisyalize Sesyon an" anwo a pou siye fichye locks yo epi rekòmanse a zewo.',
+                      s.text('whatsapp_error_reset_hint'),
                       style: theme.textTheme.bodySmall,
                     ),
                   ],
@@ -1268,9 +1242,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Sèvis WhatsApp la poko kòmanse sou machin sa a.\n'
-                        '👉 Pou demare l: Fè yon doub klik sou fichye "Lancer_WhatsApp.bat" ki nan dosye GymDesk la.\n'
-                        'Depi l demare, klike sou bouton "Rafrechi / Rekonekte" anwo a pou konekte l.',
+                        s.text('whatsapp_offline_guide'),
                         style: theme.textTheme.bodyMedium,
                       ),
                     ),
@@ -1406,17 +1378,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 value: _autoSendReminders,
                 onChanged: (val) => setState(() => _autoSendReminders = val),
               ),
-              if (_state.isReady) ...[
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0F766E),
-                    side: const BorderSide(color: Color(0xFF0F766E)),
-                  ),
-                  onPressed: _loading ? null : _runExpirationCheck,
-                  icon: const Icon(LucideIcons.bellRing, size: 16),
-                  label: Text(s.text('whatsapp_check_reminders_btn')),
-                ),
+              if (_autoSendReminders) ...[
+                const SizedBox(height: 14),
+                _buildAutomationStatusWidget(s, theme),
               ],
 
               const SizedBox(height: 16),
@@ -1558,7 +1522,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           controller: _gymSearchController,
           onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
-            labelText: 'Chèche yon gym pa non oswa kòd...',
+            labelText: s.text('whatsapp_search_gym_hint'),
             prefixIcon: const Icon(LucideIcons.search),
             suffixIcon: _gymSearchController.text.isNotEmpty
                 ? IconButton(
@@ -1583,7 +1547,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             child: Padding(
               padding: const EdgeInsets.all(40),
               child: Text(
-                'Pa gen okenn gym ki koresponn ak rechèch la.',
+                s.text('whatsapp_no_gyms_found'),
                 style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
               ),
             ),
@@ -1666,12 +1630,12 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                       ),
                       if (gym.gymPhone.isNotEmpty)
                         Text(
-                          '📞 Kontak: ${gym.gymPhone}',
+                          '${s.text('whatsapp_contact_label')} ${gym.gymPhone}',
                           style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
                         ),
                       if (gym.backupPhone.isNotEmpty)
                         Text(
-                          '📱 Nimewo de Sekou: ${gym.backupPhone}',
+                          '${s.text('whatsapp_backup_number_opt_label')}: ${gym.backupPhone}',
                           style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
                         ),
                     ],
@@ -1707,7 +1671,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   const Icon(LucideIcons.calendar, size: 14, color: Colors.grey),
                   const SizedBox(width: 6),
                   Text(
-                    'Peryòd: ${df.format(gym.startDate!)} → ${df.format(gym.endDate!)}',
+                    '${s.text('whatsapp_period_display')} ${df.format(gym.startDate!)} → ${df.format(gym.endDate!)}',
                     style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                   ),
                 ],
@@ -1754,4 +1718,64 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       ),
     );
   }
+
+  Widget _buildAutomationStatusWidget(AppStrings s, ThemeData theme) {
+    final notifService = ref.watch(whatsAppNotificationServiceProvider);
+    final lastCheck = notifService.lastAutoCheckTime;
+    final lastCount = notifService.lastAutoSentCount;
+    final isChecking = notifService.isAutoChecking;
+    final dfTime = DateFormat('HH:mm');
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F766E).withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(LucideIcons.bot, color: Color(0xFF0F766E), size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        s.text('whatsapp_auto_reminders_active'),
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E), fontSize: 13),
+                      ),
+                    ),
+                    if (isChecking)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0F766E)),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  s.text('whatsapp_auto_reminders_desc_active'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: Colors.teal.shade900),
+                ),
+                if (lastCheck != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    '${s.text('whatsapp_last_auto_check')} ${dfTime.format(lastCheck)} ($lastCount ${s.text('whatsapp_reminders_sent_badge')})',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade800),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 }
