@@ -45,7 +45,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add web_deploy
           if ! git diff --staged --quiet; then
-            git commit -m "build(web): compile web_deploy from flutter build [skip ci]"
+            git commit -m "build(web): compile web_deploy from flutter build "
             git push origin main
           fi
 

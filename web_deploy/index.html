@@ -285,14 +285,22 @@
       setTimeout(dismissSplash, 15000);
     })();
   </script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(regs) {
-        for (var r of regs) { r.update(); }
-      });
+    <script>
+    var BUILD_VERSION = "20261105_0655";
+    if (localStorage.getItem("securgym_build_version") !== BUILD_VERSION) {
+      localStorage.setItem("securgym_build_version", BUILD_VERSION);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          for (var r of regs) { r.unregister(); }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then(function(names) {
+          for (var name of names) { caches.delete(name); }
+        });
+      }
     }
-// Cache preserved for instant startup
   </script>
-  <script src="flutter_bootstrap.js?v=20261105_0140" async></script>
+  <script src="flutter_bootstrap.js?v=20261105_0655" async></script>
 </body>
 </html>
