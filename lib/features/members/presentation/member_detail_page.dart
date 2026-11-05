@@ -28,6 +28,7 @@ import '../../subscriptions/data/subscriptions_repository.dart';
 import '../../subscriptions/domain/gym_subscription.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
 import '../data/member_pin_service.dart';
+import '../../../core/whatsapp/whatsapp_client.dart';
 import '../data/members_repository.dart';
 import '../domain/member.dart';
 import 'fingerprint_enrollment_dialog.dart';

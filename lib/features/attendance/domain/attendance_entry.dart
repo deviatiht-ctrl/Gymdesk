@@ -56,3 +56,23 @@ class AttendanceFailure implements Exception {
   const AttendanceFailure(this.code);
   final String code;
 }
+
+const allowedAttendanceResults = {
+  'granted',
+  'denied_expired',
+  'denied_no_subscription',
+  'denied_suspended',
+  'denied_bad_fingerprint',
+  'denied_unknown',
+};
+
+String sanitizeAttendanceResult(String? result) {
+  if (result == null || result.isEmpty) return 'denied_unknown';
+  if (allowedAttendanceResults.contains(result)) return result;
+  if (result == 'denied_duplicate' || result == 'duplicate') return 'granted';
+  if (result == 'denied_pending_renewal' || result == 'denied_pending') return 'denied_expired';
+  if (result == 'denied_blocked_badge' || result == 'denied_unactivated') return 'denied_suspended';
+  if (result == 'denied_pin_locked' || result == 'denied_bad_pin') return 'denied_bad_fingerprint';
+  return 'denied_unknown';
+}
+

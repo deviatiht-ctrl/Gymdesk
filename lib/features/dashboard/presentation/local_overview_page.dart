@@ -148,7 +148,13 @@ class LocalOverviewPage extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Bannière Kota Manm Aktif
-                    _buildQuotaBanner(context, metrics.activeMembers, maxMembers),
+                    _buildQuotaBanner(
+                      context,
+                      metrics.activeMembers,
+                      metrics.maxMembers,
+                      isUnlimited: metrics.isUnlimitedPlan,
+                      planName: metrics.planName,
+                    ),
                     const SizedBox(height: 16),
 
                     LayoutBuilder(
@@ -318,10 +324,16 @@ class LocalOverviewPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildQuotaBanner(BuildContext context, int active, int max) {
+  Widget _buildQuotaBanner(
+    BuildContext context,
+    int active,
+    int max, {
+    bool isUnlimited = false,
+    String? planName,
+  }) {
     final s = AppStrings.of(context);
-    final pct = max > 0 ? (active / max).clamp(0.0, 1.0) : 0.0;
-    final slotsLeft = max > 0 ? (max - active).clamp(0, max) : 9999;
+    final pct = (!isUnlimited && max > 0) ? (active / max).clamp(0.0, 1.0) : 0.0;
+    final slotsLeft = (!isUnlimited && max > 0) ? (max - active).clamp(0, max) : 999999;
 
     return Card(
       elevation: 1,
@@ -349,7 +361,9 @@ class LocalOverviewPage extends ConsumerWidget {
                   ],
                 ),
                 Text(
-                  '$active / $max ${s.text('active_members_label')}',
+                  isUnlimited
+                      ? '$active ${s.text('active_members_label')} · ${s.text('unlimited_members')}'
+                      : '$active / $max ${s.text('active_members_label')}',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF047857)),
                 ),
               ],
@@ -358,15 +372,17 @@ class LocalOverviewPage extends ConsumerWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: LinearProgressIndicator(
-                value: pct,
+                value: isUnlimited ? 1.0 : pct,
                 minHeight: 10,
                 backgroundColor: Colors.grey.shade200,
-                color: pct >= 0.95 ? Colors.red : const Color(0xFF059669),
+                color: (!isUnlimited && pct >= 0.95) ? Colors.red : const Color(0xFF059669),
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              'ℹ️ ${s.text('active_quota_description')} ($slotsLeft ${s.text('available_slots')}).',
+              isUnlimited
+                  ? '🚀 ${planName ?? s.text('unlimited_members')} — ${s.text('unlimited_members_desc')}'
+                  : 'ℹ️ ${s.text('active_quota_description')} ($slotsLeft ${s.text('available_slots')}).',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
             ),
           ],

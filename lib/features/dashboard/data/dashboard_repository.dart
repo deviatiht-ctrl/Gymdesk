@@ -26,7 +26,7 @@ class DashboardRepository {
           "SELECT entity, payload FROM records "
           "WHERE gym_id = ? AND deleted_at IS NULL "
           "AND ("
-          "  entity IN ('members', 'subscriptions', 'payments') "
+          "  entity IN ('members', 'subscriptions', 'payments', 'gym_contracts') "
           "  OR (entity = 'attendance' AND json_extract(payload, '\$.scanned_at') >= ?)"
           ")",
           variables: [
@@ -44,6 +44,7 @@ class DashboardRepository {
     final subscriptions = <GymSubscription>[];
     final payments = <GymPayment>[];
     final attendance = <AttendanceEntry>[];
+    Map<String, dynamic>? activeContract;
 
     for (final row in rows) {
       final payload = Map<String, dynamic>.from(
@@ -58,6 +59,10 @@ class DashboardRepository {
         payments.add(GymPayment(payload));
       } else if (entity == 'attendance') {
         attendance.add(AttendanceEntry(payload));
+      } else if (entity == 'gym_contracts') {
+        if ({'active', 'trial', 'grace'}.contains(payload['status'])) {
+          activeContract = payload;
+        }
       }
     }
 
@@ -117,6 +122,38 @@ class DashboardRepository {
       }
     }
 
+    final snapshot = activeContract?['price_snapshot'] as Map? ?? {};
+    final contractConfig = snapshot['config'] as Map? ?? {};
+    final offerId = (activeContract?['offer_id'] ?? snapshot['offer_id'])?.toString() ?? '';
+    final offerName = (snapshot['name'] ?? activeContract?['name'])?.toString();
+
+    final gymSettings = session.gym?['settings'] as Map? ?? {};
+    final gymOfferId = session.gym?['offer_id']?.toString() ?? gymSettings['offer_id']?.toString() ?? '';
+    final gymOfferName = session.gym?['plan_name']?.toString() ?? gymSettings['plan_name']?.toString();
+
+    final isUnlimited = offerId == 'plan_enterprise' ||
+        offerId == 'unlimited_annual' ||
+        offerId.toLowerCase().contains('unlimited') ||
+        offerId.toLowerCase().contains('illimit') ||
+        gymOfferId == 'plan_enterprise' ||
+        gymOfferId == 'unlimited_annual' ||
+        gymOfferId.toLowerCase().contains('unlimited') ||
+        gymOfferId.toLowerCase().contains('illimit') ||
+        (offerName != null && (offerName.toLowerCase().contains('illimit') || offerName.toLowerCase().contains('unlimited'))) ||
+        (gymOfferName != null && (gymOfferName.toLowerCase().contains('illimit') || gymOfferName.toLowerCase().contains('unlimited'))) ||
+        (contractConfig['max_members'] != null && (contractConfig['max_members'] as num).toInt() == 0) ||
+        contractConfig['is_unlimited'] == true ||
+        (gymSettings['max_members'] != null && (gymSettings['max_members'] as num).toInt() == 0) ||
+        gymSettings['is_unlimited'] == true;
+
+    final resolvedMax = isUnlimited
+        ? 0
+        : ((contractConfig['max_members'] as num?)?.toInt() ??
+            (gymSettings['max_members'] as num?)?.toInt() ??
+            1000);
+
+    final resolvedPlanName = offerName ?? gymOfferName ?? (isUnlimited ? 'Plan Illimité' : null);
+
     return DashboardMetrics(
       activeMembers: activeMembers,
       suspendedMembers: suspendedMembers,
@@ -130,6 +167,9 @@ class DashboardRepository {
       ),
       entriesToday: entriesToday,
       deniedToday: deniedToday,
+      maxMembers: resolvedMax,
+      isUnlimitedPlan: isUnlimited,
+      planName: resolvedPlanName,
     );
   }
 }
@@ -145,6 +185,9 @@ class DashboardMetrics {
     required this.revenueToday,
     required this.entriesToday,
     required this.deniedToday,
+    this.maxMembers = 1000,
+    this.isUnlimitedPlan = false,
+    this.planName,
   });
   final int activeMembers;
   final int suspendedMembers;
@@ -155,4 +198,7 @@ class DashboardMetrics {
   final double revenueToday;
   final int entriesToday;
   final int deniedToday;
+  final int maxMembers;
+  final bool isUnlimitedPlan;
+  final String? planName;
 }

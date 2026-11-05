@@ -12,6 +12,7 @@ import '../../../app/providers.dart';
 import '../../../l10n/app_strings.dart';
 import '../data/receipt_pdf.dart';
 import '../data/receipt_service.dart';
+import '../../../core/whatsapp/whatsapp_client.dart';
 
 /// Dyalòg resi apre peman: telechaje / enprime / email / WhatsApp.
 /// PDF la jenere yon fwa epi upload la fèt sèlman si itilizatè a
@@ -177,6 +178,18 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
         '${s.text('receipt_download')} (PDF):',
         url,
       ].join('\n');
+      // 1. Eseye voye dirèk ak whatsapp-web.js si sèvis la konekte
+      final waClient = ref.read(whatsAppClientProvider);
+      final waState = await waClient.checkStatus();
+      if (waState.isReady) {
+        final sendResult = await waClient.sendMessage(to: phone, message: message);
+        if (sendResult.success) {
+          if (mounted) setState(() => _status = s.text('whatsapp_receipt_sent'));
+          return;
+        }
+      }
+
+      // 2. Solisyon sekou: louvri wa.me si sèvis la pa limen
       final ok = await launchUrl(
         Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(message)}'),
         mode: LaunchMode.externalApplication,

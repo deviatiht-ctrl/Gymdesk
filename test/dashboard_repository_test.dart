@@ -88,4 +88,26 @@ void main() {
       expect(metrics.entriesToday, 1);
     },
   );
+
+  test('dashboard metrics correctly recognizes unlimited plan from gym contract', () async {
+    await db.putRemote(SyncEntity.gymContracts, {
+      'id': '60000000-0000-4000-8000-000000000001',
+      'gym_id': gymId,
+      'offer_id': 'plan_enterprise',
+      'status': 'active',
+      'starts_at': now.toIso8601String(),
+      'price_snapshot': {
+        'name': 'PLAN 4 : ENTREPRISE (Performance illimitée)',
+        'config': {
+          'max_members': 0,
+        },
+      },
+      'updated_at': now.toIso8601String(),
+    });
+
+    final metrics = await DashboardRepository(db, session).watch().first;
+    expect(metrics.isUnlimitedPlan, isTrue);
+    expect(metrics.maxMembers, 0);
+    expect(metrics.planName, contains('ENTREPRISE'));
+  });
 }

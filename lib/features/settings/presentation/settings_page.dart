@@ -37,6 +37,15 @@ class SettingsPage extends ConsumerWidget {
         if ({'owner', 'supervisor'}.contains(session?.role)) ...[
           ListTile(
             contentPadding: EdgeInsets.zero,
+            leading: const Icon(LucideIcons.messageSquare),
+            title: Text(s.text('whatsapp_admin_title')),
+            subtitle: Text(s.text('whatsapp_admin_subtitle')),
+            trailing: const Icon(LucideIcons.chevronRight),
+            onTap: () => context.push('/admin/whatsapp'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
             leading: const Icon(LucideIcons.fingerprint),
             title: Text(s.text('biometrics_settings')),
             subtitle: Text(s.text('biometrics_settings_hint')),

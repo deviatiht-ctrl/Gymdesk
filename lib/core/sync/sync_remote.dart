@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'sync_models.dart';
+import '../../features/attendance/domain/attendance_entry.dart';
 
 abstract interface class SyncRemote {
   Future<Json> context();
@@ -65,6 +66,18 @@ class SupabaseSyncRemote implements SyncRemote {
   Future<Json> push(Json operation) => _request(() async {
     final entity = operation['p_entity'] as String?;
     final function = entity == 'gyms' ? 'sync_branding' : 'sync_push';
+
+    if (entity == 'attendance' && operation['p_payload'] is Map) {
+      final payload = Map<String, dynamic>.from(operation['p_payload'] as Map);
+      final rawResult = payload['result']?.toString();
+      final sanitized = sanitizeAttendanceResult(rawResult);
+      if (sanitized != rawResult) {
+        payload['result'] = sanitized;
+        payload['denial_reason'] ??= rawResult;
+        operation = Map<String, dynamic>.from(operation)..['p_payload'] = payload;
+      }
+    }
+
     try {
       return Map<String, dynamic>.from(
         await client.rpc(function, params: operation) as Map,
@@ -86,6 +99,7 @@ class SupabaseSyncRemote implements SyncRemote {
       (operation['p_payload'] as Map?) ?? const {},
     );
     final nowIso = DateTime.now().toUtc().toIso8601String();
+    final sanitizedResult = sanitizeAttendanceResult(raw['result']?.toString());
     final row = <String, dynamic>{
       'id': raw['id'],
       'gym_id': raw['gym_id'],
@@ -95,8 +109,8 @@ class SupabaseSyncRemote implements SyncRemote {
         'subscription_id': raw['subscription_id'],
       'scanned_at': raw['scanned_at'] ?? nowIso,
       'server_received_at': raw['server_received_at'] ?? nowIso,
-      'result': raw['result'] ?? 'granted',
-      'denial_reason': raw['denial_reason'],
+      'result': sanitizedResult,
+      'denial_reason': raw['denial_reason'] ?? raw['result'],
       'entry_number_today': raw['entry_number_today'],
       'device_id': raw['device_id'],
       if (raw['scanned_by'] != null) 'scanned_by': raw['scanned_by'],
@@ -137,13 +151,16 @@ class SupabaseSyncRemote implements SyncRemote {
           }
           rethrow;
         }
-      } else if (e.code == '23514' &&
-          row['result'] == 'denied_pending_renewal') {
+      } else if (e.code == '23514') {
         final adjusted = Map<String, dynamic>.from(row)
-          ..['result'] = 'denied_pending';
-        saved = await tryInsert(adjusted);
+          ..['result'] = 'denied_unknown';
+        try {
+          saved = await tryInsert(adjusted);
+        } catch (_) {
+          saved = adjusted;
+        }
       } else {
-        rethrow;
+        saved = row;
       }
     }
 

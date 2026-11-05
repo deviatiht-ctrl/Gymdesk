@@ -297,30 +297,59 @@ class AttendanceRepository {
       session.timezone,
     );
 
-    final todayGranted = await _todayGrantedEntries(member.id, scanTime);
-    final isEntry = todayGranted.length % 2 == 0;
-    final direction = isEntry ? 'in' : 'out';
-
-    String result = 'denied_unknown';
-    String? reason = validity.reason;
-    int? entryNumber;
-
+    // 1. Si manm nan valid: verifye si li te deja anrejistre prezans li jodi a
     if (validity.valid) {
-      if (await _isDuplicate(member.id, scanTime)) {
-        result = 'denied_duplicate';
-        reason = 'duplicate_scan';
-      } else {
-        result = 'granted';
-        entryNumber = todayGranted.length + 1;
+      final todayGranted = await _todayGrantedEntries(member.id, scanTime);
+      // Yon sèl fwa pa jou : si li te deja pase, pa rekreye prezans pou evite doublon!
+      if (todayGranted.isNotEmpty) {
+        return ScanOutcome(
+          result: 'granted',
+          entry: todayGranted.first,
+          member: member,
+          message: 'welcome_member',
+          direction: 'in',
+        );
       }
-    } else {
-      result = switch (validity.reason) {
-        'pending_payment' => 'denied_pending_renewal',
-        'expired' => 'denied_expired',
-        'no_subscription' => 'denied_no_subscription',
-        _ => 'denied_suspended',
+
+      // Premye fwa jodi a : kreye prezans lan
+      final row = <String, dynamic>{
+        'id': _uuid.v4(),
+        'gym_id': session.gymId,
+        'member_id': member.id,
+        'badge_id': badge?.id,
+        'subscription_id': validity.subscriptionId,
+        'scanned_at': scanTime.toIso8601String(),
+        'server_received_at': null,
+        'result': 'granted',
+        'denial_reason': null,
+        'pin_verified': false,
+        'fingerprint_verified': true,
+        'entry_number_today': 1,
+        'direction': 'in',
+        'device_id': await db.deviceId(),
+        'scanned_by': session.staffId,
+        'was_offline': offline,
+        'suspect_clock': suspectClock,
+        'created_at': scanTime.toIso8601String(),
       };
+      await db.save(SyncEntity.attendance, row, changedAt: scanTime);
+
+      return ScanOutcome(
+        result: 'granted',
+        entry: AttendanceEntry(row),
+        member: member,
+        message: 'welcome_member',
+        direction: 'in',
+      );
     }
+
+    // 2. Si manm nan pa valid (refize)
+    final denialResult = switch (validity.reason) {
+      'pending_payment' => 'denied_expired',
+      'expired' => 'denied_expired',
+      'no_subscription' => 'denied_no_subscription',
+      _ => 'denied_suspended',
+    };
 
     final row = <String, dynamic>{
       'id': _uuid.v4(),
@@ -330,12 +359,12 @@ class AttendanceRepository {
       'subscription_id': validity.subscriptionId,
       'scanned_at': scanTime.toIso8601String(),
       'server_received_at': null,
-      'result': result,
-      'denial_reason': result == 'granted' ? null : reason,
+      'result': denialResult,
+      'denial_reason': validity.reason,
       'pin_verified': false,
       'fingerprint_verified': true,
-      'entry_number_today': entryNumber,
-      'direction': direction,
+      'entry_number_today': null,
+      'direction': 'in',
       'device_id': await db.deviceId(),
       'scanned_by': session.staffId,
       'was_offline': offline,
@@ -344,16 +373,12 @@ class AttendanceRepository {
     };
     await db.save(SyncEntity.attendance, row, changedAt: scanTime);
 
-    final outcomeMessage = result == 'granted'
-        ? (isEntry ? 'welcome_member' : 'goodbye_member')
-        : (result == 'denied_duplicate' ? 'duplicate_scan' : 'scan_$result');
-
     return ScanOutcome(
-      result: result == 'denied_duplicate' ? 'duplicate' : result,
+      result: denialResult,
       entry: AttendanceEntry(row),
       member: member,
-      message: outcomeMessage,
-      direction: direction,
+      message: 'scan_$denialResult',
+      direction: 'in',
     );
   }
 

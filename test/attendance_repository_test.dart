@@ -1,3 +1,4 @@
+import 'package:gym_desk/features/members/domain/member.dart';
 import 'dart:convert';
 
 import 'package:drift/native.dart';
@@ -201,5 +202,45 @@ void main() {
     );
     expect(denied.result, 'denied_bad_pin');
     expect(denied.entry!.denialReason, isNotNull);
+  });
+
+  test('fingerprint verification creates presence ONLY once per day', () async {
+    await db.save(SyncEntity.members, memberRow(), changedAt: now);
+    await db.save(
+      SyncEntity.subscriptions,
+      subscriptionRow(),
+      changedAt: now,
+    );
+    final member = Member(memberRow());
+
+    // 1st scan creates attendance
+    final first = await repository.verifyFingerprintAndGrant(
+      member: member,
+      fingerprintMatched: true,
+      scannedAt: now,
+      offline: true,
+      suspectClock: false,
+    );
+    expect(first.result, 'granted');
+    expect(first.entry!.entryNumberToday, 1);
+
+    // 2nd scan on the same day welcomes member without creating a duplicate record
+    final second = await repository.verifyFingerprintAndGrant(
+      member: member,
+      fingerprintMatched: true,
+      scannedAt: now.add(const Duration(minutes: 30)),
+      offline: true,
+      suspectClock: false,
+    );
+    expect(second.result, 'granted');
+    expect(second.entry!.id, first.entry!.id); // exact same entry returned
+
+    // Only 1 record in SQLite
+    final records = await db.watchRecords(SyncEntity.attendance).first;
+    expect(records, hasLength(1));
+
+    // Only 1 operation in outbox
+    final outboxOps = (await db.pending()).where((e) => e.entity == 'attendance');
+    expect(outboxOps, hasLength(1));
   });
 }

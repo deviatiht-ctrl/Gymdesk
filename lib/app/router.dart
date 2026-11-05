@@ -10,6 +10,7 @@ import '../core/widgets/securgym_background.dart';
 import '../features/admin/presentation/declarations_page.dart';
 import '../features/admin/presentation/email_settings_page.dart';
 import '../features/admin/presentation/offers_page.dart';
+import '../features/admin/presentation/whatsapp_settings_page.dart';
 import '../features/auth/presentation/login_page.dart';
 import '../features/auth/presentation/password_reset_page.dart';
 import '../features/auth/presentation/signup_page.dart';
@@ -469,6 +470,10 @@ GoRouter createRouter(AppRuntime runtime) {
           path: '/admin/email',
           builder: (context, state) => const EmailSettingsPage(),
         ),
+        GoRoute(
+          path: '/admin/whatsapp',
+          builder: (context, state) => const WhatsAppSettingsPage(),
+        ),
       ],
     ),
   ],
@@ -529,6 +534,7 @@ class _AppShell extends StatelessWidget {
         _NavItem('/admin/offers', 'offers', LucideIcons.tag),
         _NavItem('/admin/declarations', 'declarations', LucideIcons.clipboardCheck),
         _NavItem('/admin/email', 'email_admin', LucideIcons.mail),
+        _NavItem('/admin/whatsapp', 'whatsapp_admin', LucideIcons.messageSquare),
         _NavItem('/settings', 'settings', LucideIcons.settings),
       ];
     }
@@ -545,6 +551,7 @@ class _AppShell extends StatelessWidget {
     if (session?.isOwner == true || session?.isSupervisor == true) {
       items.add(const _NavItem('/member-space', 'member_space', LucideIcons.smartphone));
       items.add(const _NavItem('/campaigns', 'campaigns', LucideIcons.mail));
+      items.add(const _NavItem('/admin/whatsapp', 'whatsapp_admin', LucideIcons.messageSquare));
     }
     if (session?.canCashier ?? true) {
       items.add(const _NavItem('/cash', 'cash', LucideIcons.wallet));

@@ -5,6 +5,7 @@ import 'package:drift_flutter/drift_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../sync/sync_models.dart';
+import '../../features/attendance/domain/attendance_entry.dart';
 
 part 'local_database.g.dart';
 
@@ -269,22 +270,26 @@ class LocalDatabase extends _$LocalDatabase {
         deletedAt: Value(row['deleted_at'] as String?),
       ),
     );
-    await into(outbox).insert(
-      OutboxCompanion.insert(
-        id: _uuid.v4(),
-        entity: entity.table,
-        entityId: data['id'] as String,
-        operation: deleting
-            ? 'delete'
-            : previous == null
-            ? 'insert'
-            : 'update',
-        payload: jsonEncode(row),
-        baseVersion: Value(previous?.serverVersion),
-        changedAt: timestamp,
-        createdAt: DateTime.now().toUtc().toIso8601String(),
-      ),
-    );
+    final isAttendanceDuplicate = entity == SyncEntity.attendance &&
+        (row['result'] == 'denied_duplicate' || row['result'] == 'duplicate');
+    if (!isAttendanceDuplicate) {
+      await into(outbox).insert(
+        OutboxCompanion.insert(
+          id: _uuid.v4(),
+          entity: entity.table,
+          entityId: data['id'] as String,
+          operation: deleting
+              ? 'delete'
+              : previous == null
+              ? 'insert'
+              : 'update',
+          payload: jsonEncode(row),
+          baseVersion: Value(previous?.serverVersion),
+          changedAt: timestamp,
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+        ),
+      );
+    }
   }
 
   Future<List<OutboxData>> pending({int limit = 50}) =>
@@ -441,6 +446,43 @@ class LocalDatabase extends _$LocalDatabase {
       }
 
       await setMetadata('repaired_sync_payloads_v2', 'true');
+
+      final alreadyDoneAtt = await metadata('repaired_sync_attendance_v3');
+      if (alreadyDoneAtt != 'true') {
+        // 1. Delete duplicate attendance records from outbox so they don't block sync
+        await customUpdate(
+          "DELETE FROM outbox WHERE entity = 'attendance' AND (payload LIKE '%\"result\":\"denied_duplicate\"%' OR payload LIKE '%\"result\":\"duplicate\"%')",
+          updates: {outbox},
+        );
+
+        // 2. Unblock and sanitize any failed attendance rows in outbox
+        final failedAttendance = await customSelect(
+          "SELECT id, payload, status FROM outbox WHERE entity = 'attendance'",
+          readsFrom: {},
+        ).get();
+
+        for (final row in failedAttendance) {
+          final id = row.read<String>('id');
+          final status = row.read<String>('status');
+          try {
+            final payload = Map<String, dynamic>.from(jsonDecode(row.read<String>('payload')) as Map);
+            final rawResult = payload['result']?.toString();
+            final sanitized = sanitizeAttendanceResult(rawResult);
+            if (sanitized != rawResult || status == 'failed') {
+              payload['result'] = sanitized;
+              if (rawResult != null && rawResult != sanitized) {
+                payload['denial_reason'] ??= rawResult;
+              }
+              await customUpdate(
+                "UPDATE outbox SET payload = ?, status = 'pending', attempts = 0, next_attempt_at = null, last_error = null WHERE id = ?",
+                variables: [Variable.withString(jsonEncode(payload)), Variable.withString(id)],
+                updates: {outbox},
+              );
+            }
+          } catch (_) {}
+        }
+        await setMetadata('repaired_sync_attendance_v3', 'true');
+      }
     } catch (_) {}
   }
 
