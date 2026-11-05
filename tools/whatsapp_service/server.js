@@ -22,15 +22,26 @@ const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jrhdegdvdqnxstpdzbya.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyaGRlZ2R2ZHFueHN0cGR6YnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyOTM2NDksImV4cCI6MjEwNjg2OTY0OX0.O8WMsF2z447mdWj6gNMyaJ9Q8eTFQwKZyLMMsxrfx5Y';
 
-// Paramèt Delè Sekirite Anti-Spam & Anti-Bann (Human Pacing)
+// Paramèt Delè Sekirite Anti-Spam & Anti-Bann (Human Pacing Entèlijan)
 const PACING_CONFIG = {
-  minDelayMs: 25000,           // Omwen 25 segonn ant chak mesaj sou MENM nimewo a
-  maxJitterMs: 25000,          // + 0 a 25 segonn varyab (total 25s - 50s)
-  typingDelayMinMs: 3000,      // Similasyon moun k ap tape: 3 a 5 segonn
-  typingDelayMaxMs: 5500,
-  batchPauseAfterCount: 7,     // Apre chak 7 mesaj sou menm nimewo a, pran yon poz
-  batchPauseDurationMs: 180000,// Poz 3 minit (180s) pou repoze nimewo a
-  defaultDailyLimit: 40,       // Maksimòm 40 mesaj san danje pa nimewo chak jou
+  // Tranzaksyonèl (Enskripsyon & Renouvèlman & Resi & Tès): 3 a 5 minit
+  priorityMinDelayMs: 180000,        // 3 minit minimòm (180 segonn)
+  priorityJitterMs: 120000,          // + 0 a 2 minit varyab (total 3 a 5 minit)
+
+  // Rapèl Abònman (7j, 2j, Échéance, Ekspire): 8 a 12 minit (Mwayèn 10 minit)
+  // Sa pèmèt distribiye tout rapèl yo dousman sou 24h a 34h san WhatsApp pa janm detekte spam
+  reminderMinDelayMs: 480000,        // 8 minit minimòm (480 segonn)
+  reminderJitterMs: 240000,          // + 0 a 4 minit varyab (total 8 a 12 minit)
+
+  // Similasyon moun k ap tape tèks la
+  typingDelayMinMs: 3000,            // 3 segonn
+  typingDelayMaxMs: 5500,            // 5.5 segonn
+
+  // Poz repo apre 7 mesaj konsekitif sou menm nimewo a
+  batchPauseAfterCount: 7,
+  batchPauseDurationMs: 180000,      // Poz 3 minit pou repoze nimewo a
+
+  defaultDailyLimit: 40,             // Maksimòm 40 mesaj san danje pa nimewo chak jou
 };
 
 // 1. Chaje konfigirasyon lokal
@@ -179,11 +190,14 @@ class WhatsAppAccountInstance {
     return false;
   }
 
-  // Tcheke si kont sa a ka pran yon nouvo mesaj kounye a (Human Pacing)
-  canSendNow() {
+  // Tcheke si kont sa a ka pran yon nouvo mesaj kounye a dapre kalite mesaj la
+  canSendNow(messageKind = 'reminder') {
     if (!this.isReady) return false;
     if (this.isBusy) return false;
     if (this.sentToday >= this.dailyLimit) return false;
+
+    // Si se premye mesaj liy lan ap voye, li lib touswit
+    if (this.lastSentAt === 0) return true;
 
     const now = Date.now();
     // 1. Tcheke si l nan poz repo apre 7 mesaj
@@ -195,8 +209,14 @@ class WhatsAppAccountInstance {
       }
     }
 
-    // 2. Tcheke delè minimòm ant chak mesaj (25s - 50s)
-    const requiredDelay = PACING_CONFIG.minDelayMs + Math.floor(Math.random() * PACING_CONFIG.maxJitterMs);
+    // 2. Delè dapre kalite mesaj la:
+    // Tranzaksyonèl (Enskripsyon / Renouvèlman / Tès): 3 a 5 minit
+    // Rapèl abònman (Expiration reminders): 8 a 12 minit (mwayèn 10 minit)
+    const isPriority = ['receipt', 'welcome', 'manual', 'test'].includes(messageKind);
+    const minDelay = isPriority ? PACING_CONFIG.priorityMinDelayMs : PACING_CONFIG.reminderMinDelayMs;
+    const jitter = isPriority ? PACING_CONFIG.priorityJitterMs : PACING_CONFIG.reminderJitterMs;
+
+    const requiredDelay = minDelay + Math.floor(Math.random() * jitter);
     if (now - this.lastSentAt < requiredDelay) {
       return false;
     }
@@ -525,8 +545,8 @@ class AccountCluster {
   }
 
   // Jwenn pwochen kont ki kalifye e ki pare pou voye (Round-Robin & Least Recently Used)
-  getNextAvailableAccount() {
-    const readyAccounts = this.getAllAccounts().filter((acc) => acc.canSendNow());
+  getNextAvailableAccount(messageKind = 'reminder') {
+    const readyAccounts = this.getAllAccounts().filter((acc) => acc.canSendNow(messageKind));
     if (readyAccounts.length === 0) return null;
 
     // Chwazi kont ki gen pi lontan depi l voye yon mesaj (Least Recently Used)
@@ -540,15 +560,12 @@ class AccountCluster {
     this.isDispatching = true;
 
     try {
-      const assignedAccount = this.getNextAvailableAccount();
-      if (!assignedAccount) {
-        // Okenn liy pa lib kounye a (swa y ap respekte delè moun 30s la, swa nan poz repo, oswa okenn liy poko konekte)
-        return;
-      }
+      let item = null;
+      let assignedAccount = null;
 
-      // Rale 1 mesaj ki nan pending
-      const url = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&order=created_at.asc&limit=1`;
-      const res = await fetch(url, {
+      // 1. Chèche mesaj tranzaksyonèl priyoritè an premye (Enskripsyon / Renouvèlman / Resi: 3 a 5 minit)
+      const priorityUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=in.(receipt,welcome,manual,test)&order=created_at.asc&limit=1`;
+      const pRes = await fetch(priorityUrl, {
         method: 'GET',
         headers: {
           'apikey': SUPABASE_ANON_KEY,
@@ -556,11 +573,43 @@ class AccountCluster {
         },
       });
 
-      if (!res.ok) return;
-      const messages = await res.json();
-      if (!Array.isArray(messages) || messages.length === 0) return;
+      if (pRes.ok) {
+        const pMessages = await pRes.json();
+        if (Array.isArray(pMessages) && pMessages.length > 0) {
+          const candidateAcc = this.getNextAvailableAccount('receipt');
+          if (candidateAcc) {
+            item = pMessages[0];
+            assignedAccount = candidateAcc;
+          }
+        }
+      }
 
-      const item = messages[0];
+      // 2. Si pa gen mesaj priyoritè pare, tcheke rapèl abònman (chak 8 a 12 minit, mwayèn 10 minit)
+      if (!item) {
+        const candidateReminderAcc = this.getNextAvailableAccount('reminder');
+        if (candidateReminderAcc) {
+          const reminderUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=not.in.(receipt,welcome,manual,test)&order=created_at.asc&limit=1`;
+          const rRes = await fetch(reminderUrl, {
+            method: 'GET',
+            headers: {
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+          });
+          if (rRes.ok) {
+            const rMessages = await rRes.json();
+            if (Array.isArray(rMessages) && rMessages.length > 0) {
+              item = rMessages[0];
+              assignedAccount = candidateReminderAcc;
+            }
+          }
+        }
+      }
+
+      if (!item || !assignedAccount) {
+        // Okenn mesaj oswa okenn liy pa nan entèval tan pou voye kounye a
+        return;
+      }
 
       // Mete l kòm processing touswit
       await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
