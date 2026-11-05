@@ -345,6 +345,7 @@ class WhatsAppAccountInstance {
       this.client.on('ready', async () => {
         console.log(`[Liy ${this.accountIndex}] ✅ Kliyan WhatsApp pare nèt pou voye mesaj!`);
         this.status = 'READY';
+        try { await this.ensureInjected(); } catch (_) {}
         this.isInitializing = false;
         this.lastError = null;
         try {
@@ -380,6 +381,14 @@ class WhatsAppAccountInstance {
       });
 
       await this.client.initialize();
+      if (this.client && this.client.pupPage) {
+        this.client.pupPage.on('framenavigated', async () => {
+          try {
+            const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
+            await this.client.pupPage.evaluate(LoadUtils);
+          } catch (_) {}
+        });
+      }
     } catch (err) {
       console.error(`[Liy ${this.accountIndex}] Erè inisyalizasyon:`, err.message);
       this.status = 'ERROR';
@@ -387,6 +396,55 @@ class WhatsAppAccountInstance {
       this.isInitializing = false;
       this.sendHeartbeat();
     }
+  }
+
+  // Asire ke kòd entèn WWebJS ak getChat disponib nan kontèks paj Puppeteer la
+  async ensureInjected() {
+    if (!this.client || !this.client.pupPage || this.client.pupPage.isClosed()) {
+      throw new Error(`Navigatè pou Liy ${this.accountIndex} pa pare.`);
+    }
+
+    let isReady = await this.client.pupPage.evaluate(() => {
+      return (
+        typeof window.WWebJS !== 'undefined' &&
+        typeof window.WWebJS.getChat === 'function' &&
+        typeof window.WWebJS.sendMessage === 'function'
+      );
+    }).catch(() => false);
+
+    if (!isReady) {
+      console.log(`[Liy ${this.accountIndex}] 🔄 window.WWebJS pa pare nan paj la. Re-injeksyon LoadUtils...`);
+      const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
+      const { ExposeAuthStore } = require('whatsapp-web.js/src/util/Injected/AuthStore/AuthStore');
+
+      try {
+        await this.client.pupPage.evaluate(ExposeAuthStore);
+      } catch (_) {}
+
+      try {
+        await this.client.pupPage.evaluate(LoadUtils);
+      } catch (e) {
+        console.warn(`[Liy ${this.accountIndex}] Erè evaluate LoadUtils:`, e.message);
+      }
+
+      for (let i = 0; i < 25; i++) {
+        isReady = await this.client.pupPage.evaluate(() => {
+          return (
+            typeof window.WWebJS !== 'undefined' &&
+            typeof window.WWebJS.getChat === 'function' &&
+            typeof window.WWebJS.sendMessage === 'function'
+          );
+        }).catch(() => false);
+        if (isReady) break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+
+      if (!isReady) {
+        throw new Error(`Kòd entèn WWebJS pa t ka chaje sou Liy ${this.accountIndex}`);
+      }
+      console.log(`[Liy ${this.accountIndex}] ✅ window.WWebJS reyinjekte avèk siksè.`);
+    }
+    return true;
   }
 
   async destroy() {
@@ -415,11 +473,20 @@ class WhatsAppAccountInstance {
 
     this.isBusy = true;
     try {
-      // 1. Voye siyal prezans "Online"
+      // 1. Asire kòd WWebJS byen enjekte nan paj la anvan nenpòt aksyon
+      await this.ensureInjected();
+
+      // 2. Voye siyal prezans "Online"
       try { await this.client.sendPresenceAvailable(); } catch (_) {}
 
-      // 2. Simile yon moun k ap tape tèks la
-      try { await this.client.sendPresenceTyping(chatId); } catch (_) {}
+      // 3. Simile yon moun k ap tape tèks la
+      try {
+        await this.client.pupPage.evaluate((cid) => {
+          if (window.WWebJS && typeof window.WWebJS.sendChatstate === 'function') {
+            window.WWebJS.sendChatstate('typing', cid);
+          }
+        }, chatId);
+      } catch (_) {}
       const typingMs = PACING_CONFIG.typingDelayMinMs + Math.floor(Math.random() * (PACING_CONFIG.typingDelayMaxMs - PACING_CONFIG.typingDelayMinMs));
       await new Promise((r) => setTimeout(r, typingMs));
 
@@ -429,7 +496,15 @@ class WhatsAppAccountInstance {
         res = await this.client.sendMessage(chatId, content, options);
       } catch (sendErr) {
         const errMsg = String(sendErr && sendErr.message ? sendErr.message : sendErr);
-        if (errMsg.includes('evaluate') || errMsg.includes('Target closed') || errMsg.includes('Session closed')) {
+        if (errMsg.includes('getChat') || errMsg.includes('WWebJS')) {
+          console.warn(`[Liy ${this.accountIndex}] Erè getChat detekte, re-injeksyon kòd epi re-eseye...`);
+          try {
+            await this.ensureInjected();
+            res = await this.client.sendMessage(chatId, content, options);
+          } catch (retryErr) {
+            throw retryErr;
+          }
+        } else if (errMsg.includes('evaluate') || errMsg.includes('Target closed') || errMsg.includes('Session closed')) {
           console.warn(`[Liy ${this.accountIndex}] Navigatè a te kraze: ${errMsg}. N ap relanse l...`);
           this.status = 'DISCONNECTED';
           this.sendHeartbeat();
@@ -441,7 +516,14 @@ class WhatsAppAccountInstance {
         throw sendErr;
       }
 
-      // 4. Remete siyal prezans nòmal
+      // 4. Kanpe siyal k ap tape epi remete siyal prezans nòmal
+      try {
+        await this.client.pupPage.evaluate((cid) => {
+          if (window.WWebJS && typeof window.WWebJS.sendChatstate === 'function') {
+            window.WWebJS.sendChatstate('stop', cid);
+          }
+        }, chatId);
+      } catch (_) {}
       try { await this.client.sendPresenceAvailable(); } catch (_) {}
 
       // 5. Mete ajou statistik lokal ak Supabase
@@ -671,7 +753,9 @@ class AccountCluster {
         });
       } catch (sendErr) {
         console.warn(`[Cluster] Echèk voye mesaj sou Liy ${assignedAccount.accountIndex}:`, sendErr.message);
-        // Remete mesaj la kòm pending pou yon lòt liy nan cluster a ka pran l!
+        assignedAccount.lastSentAt = Date.now();
+        const retries = (item.retry_count || 0) + 1;
+        const newStatus = retries >= 5 ? 'failed' : 'pending';
         await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
           method: 'PATCH',
           headers: {
@@ -680,8 +764,9 @@ class AccountCluster {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            status: 'pending',
-            error_message: `Echwe sou Liy ${assignedAccount.accountIndex} (${sendErr.message}); ap re-eseye sou yon lòt liy.`,
+            status: newStatus,
+            error_message: `Echwe sou Liy ${assignedAccount.accountIndex} (${sendErr.message}); ${retries >= 5 ? 'abandone apre 5 tantativ' : 'ap re-eseye sou yon lòt liy'}`,
+            retry_count: retries,
             processed_at: null,
           }),
         });
@@ -700,13 +785,25 @@ class AccountCluster {
     }
     const chatId = `${cleanPhone}@c.us`;
 
-    // Jwenn nenpòt kont ki pare kounye a
-    const available = this.getAllAccounts().filter((a) => a.isReady && !a.isBusy);
-    if (available.length === 0) {
+    // Tann jiska 5 segonn si gen yon liy ki pare men ki okipe ap fini voye yon lòt mesaj
+    let chosen = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const readyAccounts = this.getAllAccounts().filter((a) => a.isReady && !a.isBusy);
+      if (readyAccounts.length > 0) {
+        readyAccounts.sort((a, b) => a.lastSentAt - b.lastSentAt);
+        chosen = readyAccounts[0];
+        break;
+      }
+      const hasAnyReady = this.getAllAccounts().some((a) => a.isReady);
+      if (!hasAnyReady) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
+    if (!chosen) {
       throw new Error('Okenn liy WhatsApp pa pare oswa konekte pou voye mesaj kounye a.');
     }
-    available.sort((a, b) => a.lastSentAt - b.lastSentAt);
-    const chosen = available[0];
 
     if (mediaBase64) {
       const media = new MessageMedia('application/pdf', mediaBase64, mediaName || 'Document.pdf');
