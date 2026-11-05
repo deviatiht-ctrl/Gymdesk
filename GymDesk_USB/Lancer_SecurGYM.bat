@@ -1,36 +1,39 @@
 @echo off
-title SecurGYM - Demarrage Instantane (Web + USB + Terminal IP)
+title SecurGYM - Demarrage Ultra-Rapid (Web + USB + Terminal IP + WhatsApp)
 
 cd /d "%~dp0"
 
-rem --- 1. Enregistrement automatique au demarrage de Windows (sans besoin d'informaticien ni d'admin) ---
+rem --- 1. Enregistrement automatique au demarrage de Windows ---
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "SecurGYM_AccessAgent" /t REG_SZ /d "wscript.exe \"%~dp0Demarrer_Agent_Silencieux.vbs\"" /f >nul 2>&1
 
 rem --- 2. Verifier si l'agent tourne deja en arriere-plan (0 seconde d'attente!) ---
 curl -s -m 1 http://127.0.0.1:47811/health >nul 2>&1 && goto :agent_ready
 
-echo Demarrage de l'agent materiel SecurGYM (USB BioMini + Terminal IP W2)...
+echo Demarrage de l'agent materiel SecurGYM...
 if exist "%~dp0Demarrer_Agent_Silencieux.vbs" (
     wscript.exe "%~dp0Demarrer_Agent_Silencieux.vbs"
-) else (
+) else if exist "%~dp0access_agent.exe" (
     start /min "" "%~dp0access_agent.exe"
 )
 
-for /l %%i in (1,1,15) do (
+for /l %%i in (1,1,20) do (
     curl -s -m 1 http://127.0.0.1:47811/health >nul 2>&1 && goto :agent_ready
-    pathping -n -q 1 -p 150 127.0.0.1 >nul 2>&1
+    ping -n 1 -w 100 127.0.0.1 >nul 2>&1
 )
 
 :agent_ready
 set "DATA_DIR=%~dp0data\profile"
 
-rem --- 2b. Synchronisation automatique de la derniere version Web si disponible ---
-if exist "%~dp0..\web_deploy\main.dart.js" (
-    xcopy /Y /D /Q "%~dp0..\web_deploy\*" "%~dp0web\" >nul 2>&1
-    if exist "%~dp0..\web_deploy\assets" xcopy /Y /D /Q /S "%~dp0..\web_deploy\assets\*" "%~dp0web\assets\" >nul 2>&1
+rem --- 2b. Demarrage automatique du service WhatsApp (whatsapp-web.js) ---
+curl -s -m 1 http://127.0.0.1:47812/health >nul 2>&1 || (
+    if exist "%~dp0Demarrer_WhatsApp_Silencieux.vbs" (
+        wscript.exe "%~dp0Demarrer_WhatsApp_Silencieux.vbs"
+    ) else if exist "%~dp0whatsapp_service\Demarrer_WhatsApp_Silencieux.vbs" (
+        wscript.exe "%~dp0whatsapp_service\Demarrer_WhatsApp_Silencieux.vbs"
+    )
 )
 
-rem --- 3. Ouverture instantanee de la version Web SecurGYM (compatible USB + IP) ---
+rem --- 3. Ouverture instantanee de la version Web SecurGYM ---
 if exist "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" (
     start "" "%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe" --app=http://127.0.0.1:47811 --user-data-dir="%DATA_DIR%" --no-first-run --window-size=1280,800
 ) else if exist "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" (
