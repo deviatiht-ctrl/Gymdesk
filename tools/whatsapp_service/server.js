@@ -38,10 +38,10 @@ const PACING_CONFIG = {
   typingDelayMaxMs: 5500,            // 5.5 segonn
 
   // Poz repo apre 7 mesaj konsekitif sou menm nimewo a
-  batchPauseAfterCount: 7,
-  batchPauseDurationMs: 180000,      // Poz 3 minit pou repoze nimewo a
+  batchPauseAfterCount: 5,
+  batchPauseDurationMs: 600000,      // Poz 10 minit apre 5 mesaj      // Poz 3 minit pou repoze nimewo a
 
-  defaultDailyLimit: 40,             // Maksimòm 40 mesaj san danje pa nimewo chak jou
+  defaultDailyLimit: 25,             // Maksimòm 25 mesaj san danje pa nimewo chak jou             // Maksimòm 40 mesaj san danje pa nimewo chak jou
 };
 
 // 1. Chaje konfigirasyon lokal
@@ -129,6 +129,52 @@ function cleanSessionLockFiles(sessionDirPath) {
 }
 
 // 4. Netwaye epi mete nimewo a nan bon fòma entènasyonal (egz: 50937001122)
+
+// ============================================================================
+// PWOTEKSYON ANTI-SPAM & ANTI-BANN META (Zero Duplicate Hashes & Spintax)
+// ============================================================================
+function applySpintaxAndHashShield(message) {
+  if (!message || typeof message !== 'string') return message;
+
+  let text = message;
+
+  // 1. Varyasyon fòmil salitasyon
+  const greetings = ['Bonjour', 'Salut', 'Bonsoir', 'Cher(e) membre', 'Salitasyon'];
+  text = text.replace(/^(Bonjour|Salut|Bonsoir|Cher\(e\) membre|Salitasyon)/i, () => {
+    return greetings[Math.floor(Math.random() * greetings.length)];
+  });
+
+  // 2. Varyasyon Emojis pou evite menm anprent vizyèl
+  const reminderIcons = ['⏳', '🔔', '📢', '⚠️', '⚡', '🏋️'];
+  text = text.replace(/[⏳🔔📢⚠️⚡]/g, () => {
+    return reminderIcons[Math.floor(Math.random() * reminderIcons.length)];
+  });
+
+  // 3. Fòmil Envitasyon pou Repons "OK" (Anti-Signalement Spam)
+  // Lè kliyan an reponn menm "OK", Meta retire nimewo a nan lis sispèk
+  if (text.includes('Ne répondez pas')) {
+    text = text.replace(
+      /Ne répondez pas à ce (numéro|message)[^.]*\./gi,
+      '💡 Pour confirmer la bonne réception et conserver vos accès, répondez simplement "OK" à ce message.'
+    );
+  }
+
+  // 4. Hash Shield: Enjekte espas envizib Unicode (Zero-Width Space \u200B / \u200C)
+  // Sa fè ke CHAK GRENN MESAJ gen yon anprent SHA-256 diferan nèt,
+  // konsa filtè WhatsApp pa ka janm detekte se menm mesaj ki repete!
+  const zeroWidths = ['\u200B', '\u200C', '\u200D', ''];
+  const words = text.split(' ');
+  const variated = words.map((w, idx) => {
+    if (idx % 3 === 0) {
+      const zw = zeroWidths[Math.floor(Math.random() * zeroWidths.length)];
+      return w + zw;
+    }
+    return w;
+  }).join(' ');
+
+  return variated;
+}
+
 function cleanPhoneNumber(phone) {
   if (!phone) return null;
   let digits = String(phone).replace(/\D/g, '');
@@ -316,6 +362,7 @@ class WhatsAppAccountInstance {
             '--no-first-run',
             '--no-default-browser-check',
             '--disable-extensions',
+            '--disable-blink-features=AutomationControlled',
             '--disable-features=Translate,OptimizationHints,MediaRouter',
             '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
           ],
@@ -403,6 +450,16 @@ class WhatsAppAccountInstance {
     if (!this.client || !this.client.pupPage || this.client.pupPage.isClosed()) {
       throw new Error(`Navigatè pou Liy ${this.accountIndex} pa pare.`);
     }
+
+
+      // Maske navigator.webdriver pou Meta pa detekte ke se yon bot
+      await this.client.pupPage.evaluate(() => {
+        try {
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+          if (!window.chrome) window.chrome = { runtime: {} };
+          Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'] });
+        } catch (_) {}
+      }).catch(() => {});
 
     let isReady = await this.client.pupPage.evaluate(() => {
       return (
@@ -493,7 +550,12 @@ class WhatsAppAccountInstance {
       // 3. Voye mesaj la
       let res;
       try {
-        res = await this.client.sendMessage(chatId, content, options);
+        const finalContent = typeof content === 'string' ? applySpintaxAndHashShield(content) : content;
+      const finalOptions = { ...options };
+      if (finalOptions.caption && typeof finalOptions.caption === 'string') {
+        finalOptions.caption = applySpintaxAndHashShield(finalOptions.caption);
+      }
+      res = await this.client.sendMessage(chatId, finalContent, finalOptions);
       } catch (sendErr) {
         const errMsg = String(sendErr && sendErr.message ? sendErr.message : sendErr);
         if (errMsg.includes('getChat') || errMsg.includes('WWebJS')) {
