@@ -88,6 +88,7 @@ class _FingerprintEnrollmentDialogState
   StreamSubscription<BiometricEvent>? _eventSub;
   bool _useTerminal = false;
   bool _scanningTerminal = false;
+  String? _lastScanError;
 
   @override
   void initState() {
@@ -503,6 +504,51 @@ class _FingerprintEnrollmentDialogState
                 ),
               ),
               const SizedBox(height: 12),
+              if (_lastScanError != null) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(LucideIcons.circleAlert, color: Colors.red, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _lastScanError!,
+                              style: TextStyle(color: Colors.red.shade900, fontSize: 12, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0F766E),
+                          side: const BorderSide(color: Color(0xFF0F766E)),
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _useTerminal = false;
+                            _lastScanError = null;
+                            _updateHint();
+                          });
+                          ref.read(biometricServiceProvider).startCapture();
+                        },
+                        icon: const Icon(LucideIcons.usb, size: 16),
+                        label: const Text('Itilize Lektè USB BioMini pito'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
 
             // Status Badge (eta reyèl lektè a)

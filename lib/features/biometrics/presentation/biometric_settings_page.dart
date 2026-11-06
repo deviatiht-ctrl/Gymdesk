@@ -35,6 +35,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
   bool _saving = false;
   bool _testingRelay = false;
   bool _testingTerminal = false;
+  bool? _terminalOnlineLive;
 
   String? _terminalStatusText;
 
@@ -117,6 +118,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
           _defaultEnrollmentReader = cfg['default_enrollment_reader'] as String? ?? modes.defaultEnrollmentReader;
           _loading = false;
         });
+        _checkTerminalOnline();
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -200,6 +202,16 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     }
   }
 
+  Future<void> _checkTerminalOnline() async {
+    try {
+      final client = AccessAgentClient();
+      final ok = await client.pingTerminal(terminalIp: _terminalIpController.text.trim());
+      if (mounted) setState(() => _terminalOnlineLive = ok);
+    } catch (_) {
+      if (mounted) setState(() => _terminalOnlineLive = false);
+    }
+  }
+
   Future<void> _testTerminalPing() async {
     setState(() {
       _testingTerminal = true;
@@ -211,6 +223,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     if (mounted) {
       setState(() {
         _testingTerminal = false;
+        _terminalOnlineLive = ok;
         _terminalStatusText = ok
             ? (isFr ? 'En ligne (BioEntry W2 détecté)' : 'Sou liy (BioEntry W2 detekte)')
             : (isFr ? 'Hors ligne ou injoignable' : 'Paka jwenn li sou rezo a');
@@ -241,6 +254,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
       if (ip != null && ip.isNotEmpty) {
         setState(() {
           _terminalIpController.text = ip;
+          _terminalOnlineLive = true;
           _terminalStatusText = isFr
               ? 'Terminal détecté : $ip'
               : 'Tèminal detekte sou rezo a : $ip';
@@ -505,8 +519,8 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     final isFr = s.locale.languageCode == 'fr';
     final isEn = s.locale.languageCode == 'en';
     final bio = ref.watch(biometricServiceProvider);
-    final isTerminalActive = (bio.agent.status.value.connected && bio.agent.status.value.terminalWatch) ||
-        AccessMonitor.instance.terminalOnline.value;
+    final isTerminalActive = _terminalOnlineLive ??
+        (bio.agent.status.value.connected && bio.agent.status.value.terminalWatch && AccessMonitor.instance.terminalOnline.value);
 
     return Scaffold(
       appBar: AppBar(
