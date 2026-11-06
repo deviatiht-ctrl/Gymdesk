@@ -59,7 +59,7 @@ class BiometricService {
   /// Tèminal pòt la pare (agent la konekte epi tèminal la konfigire / siveye).
   bool get terminalAvailable {
     final st = agent.status.value;
-    return st.connected && (st.terminalWatch || (st.terminalIp != null && st.terminalIp!.isNotEmpty));
+    return st.connected && (st.terminalWatch || st.doorConnected);
   }
 
   /// Eksplikasyon pou itilizatè a lè lektè a pa disponib.

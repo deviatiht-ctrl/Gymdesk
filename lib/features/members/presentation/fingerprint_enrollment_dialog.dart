@@ -95,23 +95,35 @@ class _FingerprintEnrollmentDialogState
     final defaultReader = AccessMonitor.instance.config.defaultEnrollmentReader;
     final bio = ref.read(biometricServiceProvider);
 
+    final isTerminalOnline = bio.terminalAvailable;
+
     if (defaultReader == 'terminal_bew2') {
-      _useTerminal = true;
+      if (isTerminalOnline) {
+        _useTerminal = true;
+      } else if (bio.readerAvailable) {
+        _useTerminal = false; // Fall back to USB if available so staff is not blocked
+      } else {
+        _useTerminal = true;
+      }
     } else if (defaultReader == 'usb_biomini') {
       _useTerminal = false;
     } else {
       // auto
-      _useTerminal = !bio.readerAvailable && bio.terminalAvailable;
+      _useTerminal = isTerminalOnline || (!bio.readerAvailable && bio.terminalAvailable);
     }
 
     _eventSub = bio.events.listen(_onBiometricEvent);
 
     if (_useTerminal) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_busy && !_scanningTerminal) {
-          _startTerminalScan();
-        }
-      });
+      if (isTerminalOnline) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_busy && !_scanningTerminal) {
+            _startTerminalScan();
+          }
+        });
+      } else {
+        _hint = '⚠️ Lektè sou pòt la (BioEntry W2) pa konekte nan rezo a (192.168.1.41). Tcheke fil rezo a oswa konekte BioMini USB.';
+      }
     } else {
       bio.startCapture();
     }
@@ -128,9 +140,15 @@ class _FingerprintEnrollmentDialogState
   void _updateHint() {
     setState(() {
       if (_useTerminal) {
-        _hint = _scanningTerminal
-            ? '🟢 Lektè pòt la pare! Mete dwèt la sou li kounye a...'
-            : 'Mete moun nan devan pòt la, epi klike sou "Kòmanse Eskane sou Pòt la".';
+        final bio = ref.read(biometricServiceProvider);
+        final isOnline = bio.terminalAvailable;
+        if (!isOnline) {
+          _hint = '⚠️ Lektè sou pòt la (BioEntry W2) pa konekte nan rezo a (192.168.1.41). Tcheke fil rezo a oswa konekte BioMini USB.';
+        } else {
+          _hint = _scanningTerminal
+              ? '🟢 Lektè pòt la pare! Mete dwèt la sou li kounye a...'
+              : 'Mete moun nan devan pòt la, epi klike sou "Kòmanse Eskane sou Pòt la".';
+        }
       } else {
         _hint = _required == 1
             ? 'Poze dwèt la byen plat sou lektè a'

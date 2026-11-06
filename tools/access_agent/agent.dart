@@ -15,7 +15,7 @@ import 'suprema_ffi.dart';
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
 const String agentVersion = '3.6.0';
-bool _doorConnected = true;
+bool _doorConnected = false;
 
 ReaderBackend? _sdk;
 DateTime _lastRefresh = DateTime.fromMillisecondsSinceEpoch(0);
@@ -130,6 +130,7 @@ Future<void> _watchLoop() async {
         final f = line.trim().split('\t');
         if (f.first == 'watching') {
           _watchReady = true;
+          _doorConnected = true;
           _watchError = null;
           backoff = 2;
           failCount = 0;
@@ -166,6 +167,7 @@ Future<void> _watchLoop() async {
     final wasReady = _watchReady;
     _watchProc = null;
     _watchReady = false;
+    _doorConnected = false;
     if (wasReady) broadcastEvent({'type': 'terminal_watch', 'online': false});
     if (!_watchPaused) {
       failCount++;
@@ -632,7 +634,7 @@ Future<void> _handleRequest(HttpRequest request) async {
         'reader_connected': sdk?.readerConnected ?? false,
         'reader_name': (sdk?.readerConnected ?? false) ? 'Suprema BioMini' : null,
         'reader_serial': sdk?.scannerId,
-        'door_connected': _doorConnected,
+        'door_connected': _watchReady,
         'terminal_watch': _watchReady,
         'terminal_ip': terminalConfig()['ip'],
       });

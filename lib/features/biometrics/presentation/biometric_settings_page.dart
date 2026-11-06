@@ -450,10 +450,10 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                         decoration: BoxDecoration(
-                          color: isOnline ? const Color(0xFFECFDF5) : Colors.grey.shade100,
+                          color: isOnline ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isOnline ? const Color(0xFF10B981) : Colors.grey.shade300,
+                            color: isOnline ? const Color(0xFF10B981) : const Color(0xFFF87171),
                           ),
                         ),
                         child: Row(
@@ -462,7 +462,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                             Icon(
                               Icons.circle,
                               size: 8,
-                              color: isOnline ? const Color(0xFF059669) : Colors.grey.shade500,
+                              color: isOnline ? const Color(0xFF059669) : const Color(0xFFDC2626),
                             ),
                             const SizedBox(width: 5),
                             Text(
@@ -470,7 +470,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
-                                color: isOnline ? const Color(0xFF047857) : Colors.grey.shade600,
+                                color: isOnline ? const Color(0xFF047857) : const Color(0xFFDC2626),
                               ),
                             ),
                           ],
@@ -505,7 +505,8 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     final isFr = s.locale.languageCode == 'fr';
     final isEn = s.locale.languageCode == 'en';
     final bio = ref.watch(biometricServiceProvider);
-    final isTerminalActive = bio.terminalAvailable || AccessMonitor.instance.terminalOnline.value;
+    final isTerminalActive = (bio.agent.status.value.connected && bio.agent.status.value.terminalWatch) ||
+        AccessMonitor.instance.terminalOnline.value;
 
     return Scaffold(
       appBar: AppBar(
@@ -681,7 +682,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                           icon: LucideIcons.doorClosed,
                           isOnline: isTerminalActive,
                           onlineText: isFr ? 'En ligne (BioEntry W2)' : 'Sou liy (BioEntry W2)',
-                          offlineText: isFr ? 'Vérifier réseau' : 'Tcheke rezo a',
+                          offlineText: isFr ? 'Hors ligne (Non connecté)' : 'Pa konekte (Tcheke rezo / fil)',
                         ),
 
                         const SizedBox(height: 10),
