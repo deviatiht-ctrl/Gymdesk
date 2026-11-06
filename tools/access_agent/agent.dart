@@ -136,6 +136,8 @@ Future<void> _watchLoop() async {
           failCount = 0;
           print('[W2] Siveyan aktif sou ${term['ip']} (${f.length > 1 ? f[1] : '?'})');
           broadcastEvent({'type': 'terminal_watch', 'online': true, 'ip': term['ip']});
+        } else if (f.first == 'ready') {
+          broadcastEvent({'type': 'terminal_ready_to_scan', 'source': 'terminal'});
         } else if (f.first == 'evt' && f.length >= 7) {
           _watchLastEvent = DateTime.now();
           String field(String prefix) {

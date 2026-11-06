@@ -99,18 +99,12 @@ class _FingerprintEnrollmentDialogState
     final isTerminalOnline = bio.terminalAvailable;
 
     if (defaultReader == 'terminal_bew2') {
-      if (isTerminalOnline) {
-        _useTerminal = true;
-      } else if (bio.readerAvailable) {
-        _useTerminal = false; // Fall back to USB if available so staff is not blocked
-      } else {
-        _useTerminal = true;
-      }
+      _useTerminal = true;
     } else if (defaultReader == 'usb_biomini') {
       _useTerminal = false;
     } else {
-      // auto
-      _useTerminal = isTerminalOnline || (!bio.readerAvailable && bio.terminalAvailable);
+      // auto: prefere USB sou biwo a si li branche, sinon lekte pot la
+      _useTerminal = !bio.readerAvailable;
     }
 
     _eventSub = bio.events.listen(_onBiometricEvent);
