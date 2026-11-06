@@ -29,11 +29,13 @@ class TerminalAccessConfig {
     this.appControls = false,
     this.terminalIp = '192.168.1.41',
     this.pulseSeconds = 3,
+    this.defaultEnrollmentReader = 'terminal_bew2',
   });
 
   factory TerminalAccessConfig.fromJson(Json cfg) {
     final terminal = cfg['terminal_enforces_expiry'] != false;
     final app = cfg['app_controls_door'] == true;
+    final reader = (cfg['default_enrollment_reader'] as String?)?.trim();
     return TerminalAccessConfig(
       terminalEnforces: terminal || !app,
       appControls: app,
@@ -41,6 +43,7 @@ class TerminalAccessConfig {
           ? (cfg['terminal_ip'] as String).trim()
           : '192.168.1.41',
       pulseSeconds: ((cfg['pulse_duration_seconds'] as num?)?.round() ?? 3).clamp(1, 20),
+      defaultEnrollmentReader: (reader != null && reader.isNotEmpty) ? reader : 'terminal_bew2',
     );
   }
 
@@ -48,6 +51,7 @@ class TerminalAccessConfig {
   final bool appControls;
   final String terminalIp;
   final int pulseSeconds;
+  final String defaultEnrollmentReader;
 }
 
 enum AccessOutcome { granted, denied, unrecognized, legacy }

@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
+import '../../../core/access_control/access_monitor.dart';
 import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../l10n/app_strings.dart';
@@ -28,6 +29,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
   double _pulseDurationSeconds = 3.0;
   bool _terminalEnforces = true;
   bool _appControls = false;
+  String _defaultEnrollmentReader = 'terminal_bew2'; // 'terminal_bew2' | 'usb_biomini' | 'auto'
 
   bool _loading = true;
   bool _saving = false;
@@ -112,6 +114,7 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
           final modes = TerminalAccessConfig.fromJson(cfg);
           _terminalEnforces = modes.terminalEnforces;
           _appControls = modes.appControls;
+          _defaultEnrollmentReader = cfg['default_enrollment_reader'] as String? ?? modes.defaultEnrollmentReader;
           _loading = false;
         });
       }
@@ -140,7 +143,9 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
         'pulse_duration_seconds': _pulseDurationSeconds,
         'terminal_enforces_expiry': _terminalEnforces,
         'app_controls_door': _appControls,
+        'default_enrollment_reader': _defaultEnrollmentReader,
       };
+      AccessMonitor.instance.config = TerminalAccessConfig.fromJson(config);
 
       // 1. Lire les settings actuels pour merger
       Map<String, dynamic> currentSettings = Map<String, dynamic>.from(runtime.session?.settings ?? {});
@@ -388,6 +393,105 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     }
   }
 
+  Widget _buildEnrollmentReaderTile({
+    required String id,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool isOnline,
+    required String onlineText,
+    required String offlineText,
+  }) {
+    final isSelected = _defaultEnrollmentReader == id;
+    return InkWell(
+      onTap: () => setState(() => _defaultEnrollmentReader = id),
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF0F766E).withOpacity(0.07) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF0F766E) : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Radio<String>(
+              value: id,
+              groupValue: _defaultEnrollmentReader,
+              onChanged: (val) {
+                if (val != null) setState(() => _defaultEnrollmentReader = val);
+              },
+              activeColor: const Color(0xFF0F766E),
+            ),
+            const SizedBox(width: 6),
+            Icon(icon, size: 28, color: isSelected ? const Color(0xFF0F766E) : Colors.grey.shade700),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? const Color(0xFF0F766E) : Colors.black87,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isOnline ? const Color(0xFFECFDF5) : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isOnline ? const Color(0xFF10B981) : Colors.grey.shade300,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.circle,
+                              size: 8,
+                              color: isOnline ? const Color(0xFF059669) : Colors.grey.shade500,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              isOnline ? onlineText : offlineText,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: isOnline ? const Color(0xFF047857) : Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _relayPortController.dispose();
@@ -400,6 +504,8 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
     final s = AppStrings.of(context);
     final isFr = s.locale.languageCode == 'fr';
     final isEn = s.locale.languageCode == 'en';
+    final bio = ref.watch(biometricServiceProvider);
+    final isTerminalActive = bio.terminalAvailable || AccessMonitor.instance.terminalOnline.value;
 
     return Scaffold(
       appBar: AppBar(
@@ -520,6 +626,92 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                         Text(
                           s.text('access_display_hint'),
                           style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Section : Aparèy pou Pran Anprent (Lektè Default pou Enskripsyon)
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(color: Color(0xFF0F766E), width: 1.5),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.fingerprint, color: Color(0xFF0F766E), size: 28),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isFr ? 'Appareil d\'Enrôlement Actif (Par Défaut)' : 'Lektè Prensipal pou Pran Anprent',
+                                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    isFr
+                                        ? 'Choisissez quel lecteur s\'activera automatiquement quand vous cliquez sur "Enregistrer empreinte".'
+                                        : 'Chwazi ki lektè k ap ouvri otomatikman lè w klike "Enskri Anprent" sou yon manm.',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+
+                        // 1. Suprema BioEntry W2 (Lektè sou Pòt la)
+                        _buildEnrollmentReaderTile(
+                          id: 'terminal_bew2',
+                          title: isFr ? 'Lecteur sur la Porte (BioEntry W2)' : 'Lektè sou Pòt la (BioEntry W2)',
+                          subtitle: isFr
+                              ? 'Recommandé : Le membre pose son doigt directement sur la porte et est validé immédiatement.'
+                              : 'Rekòmande : Moun nan mete dwèt li dirèkteman sou pòt la epi l ap tou valide nèt.',
+                          icon: LucideIcons.doorClosed,
+                          isOnline: isTerminalActive,
+                          onlineText: isFr ? 'En ligne (BioEntry W2)' : 'Sou liy (BioEntry W2)',
+                          offlineText: isFr ? 'Vérifier réseau' : 'Tcheke rezo a',
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        // 2. Suprema BioMini (Lektè USB sou Biwo a)
+                        _buildEnrollmentReaderTile(
+                          id: 'usb_biomini',
+                          title: isFr ? 'Lecteur USB de Bureau (BioMini)' : 'Lektè USB sou Biwo a (BioMini)',
+                          subtitle: isFr
+                              ? 'Le membre pose son doigt sur le lecteur USB branché à l\'ordinateur.'
+                              : 'Manm nan mete dwèt li sou aparèy USB ki branche nan òdinatè a.',
+                          icon: LucideIcons.usb,
+                          isOnline: bio.readerAvailable,
+                          onlineText: isFr ? 'Connecté (USB actif)' : 'Konekte (USB aktif)',
+                          offlineText: isFr ? 'Non branché' : 'Pa branche',
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        // 3. Otomatik / Entelijan
+                        _buildEnrollmentReaderTile(
+                          id: 'auto',
+                          title: isFr ? 'Détection Automatique (Intelligent)' : 'Deteksyon Otomatik (Entelijan)',
+                          subtitle: isFr
+                              ? 'Utilise le BioMini USB s\'il est branché, sinon bascule directement sur le lecteur de la porte.'
+                              : 'Itilize BioMini USB si li branche, sinon li pran anprent sou pòt la otomatikman.',
+                          icon: LucideIcons.sparkles,
+                          isOnline: bio.readerAvailable || isTerminalActive,
+                          onlineText: isFr ? 'Prêt' : 'Pare',
+                          offlineText: isFr ? 'Aucun lecteur' : 'Okenn lektè',
                         ),
                       ],
                     ),

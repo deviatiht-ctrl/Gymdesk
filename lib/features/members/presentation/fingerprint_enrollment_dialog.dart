@@ -92,12 +92,27 @@ class _FingerprintEnrollmentDialogState
   @override
   void initState() {
     super.initState();
+    final defaultReader = AccessMonitor.instance.config.defaultEnrollmentReader;
     final bio = ref.read(biometricServiceProvider);
-    if (!bio.readerAvailable && bio.terminalAvailable) {
+
+    if (defaultReader == 'terminal_bew2') {
       _useTerminal = true;
+    } else if (defaultReader == 'usb_biomini') {
+      _useTerminal = false;
+    } else {
+      // auto
+      _useTerminal = !bio.readerAvailable && bio.terminalAvailable;
     }
+
     _eventSub = bio.events.listen(_onBiometricEvent);
-    if (!_useTerminal) {
+
+    if (_useTerminal) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_busy && !_scanningTerminal) {
+          _startTerminalScan();
+        }
+      });
+    } else {
       bio.startCapture();
     }
     _updateHint();
@@ -363,6 +378,7 @@ class _FingerprintEnrollmentDialogState
                 final bio = ref.read(biometricServiceProvider);
                 if (_useTerminal) {
                   bio.stopCapture();
+                  _startTerminalScan();
                 } else {
                   bio.startCapture();
                 }
