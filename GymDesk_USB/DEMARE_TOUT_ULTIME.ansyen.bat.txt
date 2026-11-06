@@ -1,0 +1,70 @@
+@echo off
+:: ========================================================================
+::  DEMARE_TOUT_ULTIME.bat  -  SecurGYM + BioStar 2 ANSANM (Otomamik 0.5s)
+:: ------------------------------------------------------------------------
+::  - 2 IP yo monte pèmanan sou kat USB la (192.168.1.50 + 192.168.1.16)
+::  - Lektè W2 (192.168.1.41) pataje ant BioStar ak SecurGYM
+::  - SecurGYM remonte otomatikman nan 0.5s (500ms) apre chak aksyon BioStar
+::  - Tès kominikasyon W2 fèt anvan pou pa janm bay fo erè -601
+::  - Gadyen fonksyone nan background chak 500 milisegonn san kanpe
+:: ========================================================================
+
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [INFO] Demann dwa Administrate...
+    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
+)
+
+title SecurGYM + BioStar 2 - MOD ULTIME (0.5s)
+cd /d "%~dp0"
+echo ==========================================================
+echo   SecurGYM + BioStar 2 - MOD ULTIME (Pataje Otomatik 0.5s)
+echo ==========================================================
+echo.
+
+if not exist "%~dp0Gadyen_Ultime.ps1" (
+    echo [ERE] Gadyen_Ultime.ps1 pa jwenn bo kote fichye sa a.
+    pause
+    exit /b 1
+)
+
+echo [1/4] Konfigirasyon Gadyen: 2 IP pèmanan, wout W2, firewall, sèvis BioStar...
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Gadyen_Ultime.ps1" -Enstale
+
+echo.
+echo [2/4] Tès kominikasyon dirèk ak lektè W2 (192.168.1.41:51211)...
+:: Fèmen ansyen biostar_tool anvan tès la pou po 51211 lib
+taskkill /f /im access_agent.exe >nul 2>&1
+taskkill /f /im biostar_tool.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+if exist "%~dp0biostar_tool.exe" (
+    "%~dp0biostar_tool.exe" Lib\Window\lib\x64 ping 192.168.1.41 51211
+)
+
+echo.
+echo [3/4] Relanse ajan SecurGYM la ak siveyans pèmanan (0.5s)...
+start "" "%~dp0access_agent.exe"
+timeout /t 2 /nobreak >nul
+curl -s http://127.0.0.1:47811/health >nul 2>&1
+
+echo.
+echo [4/4] Louvri SecurGYM ak sit BioStar 2...
+start "" cmd /c "%~dp0Lancer_SecurGYM.bat"
+start https://192.168.1.16
+
+echo.
+echo ==========================================================
+echo   TOUT BAGAY LIMEN AK SIKSÈ!
+echo ----------------------------------------------------------
+echo   SecurGYM : http://127.0.0.1:47811   (IP 192.168.1.50)
+echo   BioStar 2: https://192.168.1.16      (IP 192.168.1.16)
+echo   Terminal : 192.168.1.41 (W2 pataje, SecurGYM mèt nan 0.5s)
+echo   Gadyen   : Siveyans chak 0.5 segonn (500ms) nan background
+echo   Senkro   : Senkronize_Ak_BioStar.bat (pou efase moun imedyatman nan lekte a)
+echo.
+echo   Eta an dirèk : type C:\ProgramData\SecurGYM\gadyen_eta.txt
+echo   Jounal       : C:\ProgramData\SecurGYM\gadyen_ultime.log
+echo ==========================================================
+pause
