@@ -320,7 +320,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     }
   }
 
-  Future<void> _captureFingerprint(AppStrings s) async {
+  Future<void> _captureFingerprint(AppStrings s, {bool fromTerminal = false}) async {
     if (!_consentGiven) {
       setState(() => _errorMessage = s.text('must_consent'));
       return;
@@ -331,7 +331,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     });
 
     try {
-      final sample = await _biometricService.captureFingerprintSample(step: _selectedFingerIndex);
+      final sample = fromTerminal
+          ? (await _biometricService.captureFromTerminal()).template
+          : await _biometricService.captureFingerprintSample(step: _selectedFingerIndex);
 
       // Verifikasyon 1:N kont doublon nan baz lokal (algorit SDK a)
       final runtime = ref.read(appRuntimeProvider);
@@ -1501,6 +1503,29 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(vertical: 18),
+                                    side: const BorderSide(color: Color(0xFF0F766E)),
+                                  ),
+                                  onPressed: _isCapturing
+                                      ? null
+                                      : () async {
+                                          _consentGiven = true;
+                                          await _captureFingerprint(s, fromTerminal: true);
+                                        },
+                                  icon: const Icon(LucideIcons.doorClosed, color: Color(0xFF0F766E)),
+                                  label: Text(
+                                    isFr ? 'Scanner porte (W2)' : 'Skane sou pòt la (W2)',
+                                    style: const TextStyle(
+                                      color: Color(0xFF0F766E),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
                                 ),
                               ),
                             ],
@@ -2314,7 +2339,29 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 Text(
                   (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
                       ? 'Empreinte enregistrée et configurée.'
-                      : 'Lektè a ap koute otomatikman — pa bezwen klike anyen.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                ),
+                if ((_selectedFingerIndex == 1 ? _primaryTemplate == null : _backupTemplate == null)) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF0F766E),
+                      side: const BorderSide(color: Color(0xFF0F766E)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                    onPressed: _isCapturing
+                        ? null
+                        : () async {
+                            _consentGiven = true;
+                            await _captureFingerprint(s, fromTerminal: true);
+                          },
+                    icon: const Icon(LucideIcons.doorClosed, size: 18),
+                    label: const Text(
+                      'Skane sou Lektè Pòt la (BioEntry W2)',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
                   style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                 ),
                 if ((_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)) ...[

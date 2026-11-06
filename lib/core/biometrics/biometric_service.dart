@@ -56,6 +56,12 @@ class BiometricService {
     return st.connected && st.readerConnected;
   }
 
+  /// Tèminal pòt la pare (agent la konekte epi tèminal la konfigire / siveye).
+  bool get terminalAvailable {
+    final st = agent.status.value;
+    return st.connected && (st.terminalWatch || (st.terminalIp != null && st.terminalIp!.isNotEmpty));
+  }
+
   /// Eksplikasyon pou itilizatè a lè lektè a pa disponib.
   String get unavailableReason {
     final st = agent.status.value;
@@ -292,9 +298,39 @@ class BiometricService {
   }
 
   /// Kaptire yon anprent reyèl epi retounen template a (base64).
-  Future<String> captureFingerprintSample({int step = 1}) async {
+  Future<String> captureFingerprintSample({int step = 1, bool allowTerminalFallback = true}) async {
+    if (!readerAvailable && allowTerminalFallback && terminalAvailable) {
+      final cap = await captureFromTerminal();
+      return cap.template;
+    }
     final cap = await captureWithQuality();
     return cap.template;
+  }
+
+  /// Eskane anprent sou tèminal pòt la (BioEntry W2)
+  Future<FingerprintCapture> captureFromTerminal({
+    String? terminalIp,
+    Duration timeout = const Duration(seconds: 25),
+  }) async {
+    final res = await agent.scanTerminalFingerprint(
+      terminalIp: terminalIp,
+      timeout: timeout,
+    );
+    if (res['success'] == true && res['template'] is String) {
+      final tpl = res['template'] as String;
+      final q = (res['quality'] as num?)?.toInt() ?? 50;
+      _eventsController.add(BiometricEvent(
+        type: 'fingerprint_captured',
+        template: tpl,
+        quality: q,
+        raw: res,
+      ));
+      return FingerprintCapture(template: tpl, quality: q);
+    }
+    throw BiometricUnavailableException(
+      res['error']?.toString() ?? 'terminal_error',
+      res['message']?.toString() ?? 'Echèk eskan sou lektè pòt la.',
+    );
   }
 
   /// Verifikasyon 1:1 ant anprent ki sot poze a ak anprent ki anrejistre a.

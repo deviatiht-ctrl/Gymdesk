@@ -755,6 +755,8 @@ static class Program
     delegate void OnReadyToScanDelegate(uint deviceId, uint sequence);
     static void OnReadyToScan(uint deviceId, uint sequence)
     {
+        Console.WriteLine("ready\t" + sequence);
+        Console.Out.Flush();
         Console.Error.WriteLine("[scan] >>> W2 PARE — METE DWÈT LA SOU KAPTEUR LA KOUNYE A <<<");
         Console.Error.Flush();
     }
@@ -892,6 +894,32 @@ static class Program
             }
             finally { Marshal.FreeHGlobal(uids); }
         }
+        else if (cmd.StartsWith("scan"))
+        {
+            var fp = Marshal.AllocHGlobal(772);
+            var cbPtr = Marshal.GetFunctionPointerForDelegate(readyCb);
+            try
+            {
+                for (var i = 0; i < 772; i++) Marshal.WriteByte(fp, i, 0);
+                uint q = 0;
+                int rc;
+                lock (cmdLock)
+                {
+                    rc = Native.BS2_ScanFingerprintEx(ctx, id, fp, 0, 40, 0, out q, cbPtr);
+                }
+                if (rc >= 0)
+                {
+                    var tpl = new byte[384];
+                    Marshal.Copy(new IntPtr(fp.ToInt64() + 4), tpl, 0, 384);
+                    result = "ok\t" + Convert.ToBase64String(tpl) + "\t" + q;
+                }
+                else
+                {
+                    result = "err\tscan\t" + rc;
+                }
+            }
+            finally { Marshal.FreeHGlobal(fp); }
+        }
         else if (doorId == 0) result = "err\tno_door\tOkenn pòt pa konfigire sou tèminal la";
         else
         {
@@ -928,7 +956,7 @@ static class Program
 
     // Eskane yon dwèt sou W2 a (fòma natif SUPREMA) epi afiche template yo
     // an base64 — pou pwodwi template ki soti dirèkteman sou tèminal la.
-    static int SScan(string ip, ushort port)
+    static int SScan(string ip, ushort port, int count = 1)
     {
         uint id;
         var rc = Connect(ip, port, out id);
@@ -938,20 +966,21 @@ static class Program
         try
         {
             for (var i = 0; i < 772; i++) Marshal.WriteByte(fp, i, 0);
-            for (uint t = 0; t < 2; t++)
+            var targetCount = Math.Max(1, Math.Min(2, count));
+            for (uint t = 0; t < (uint)targetCount; t++)
             {
                 var ok = false;
                 for (var attempt = 1; attempt <= 3 && !ok; attempt++)
                 {
                     uint q;
-                    Console.Error.WriteLine("[sscan] Template " + (t + 1) + "/2, tantativ " + attempt + " — tann sinyal W2 a...");
+                    Console.Error.WriteLine("[sscan] Template " + (t + 1) + "/" + targetCount + ", tantativ " + attempt + " — tann sinyal W2 a...");
                     rc = Native.BS2_ScanFingerprintEx(ctx, id, fp, t, 40, 0, out q, cbPtr);
-                    if (rc > 0)
+                    if (rc >= 0)
                     {
                         Console.Error.WriteLine("[sscan] t" + t + " ok quality=" + q);
                         var tpl = new byte[384];
                         Marshal.Copy(new IntPtr(fp.ToInt64() + 4 + t * 384), tpl, 0, 384);
-                        Console.WriteLine("fp\t" + Convert.ToBase64String(tpl));
+                        Console.WriteLine("fp\t" + Convert.ToBase64String(tpl) + "\t" + q);
                         Console.Out.Flush();
                         ok = true;
                     }
@@ -977,6 +1006,8 @@ static class Program
                     return -1;
                 }
             }
+            Console.WriteLine("ok\t" + targetCount);
+            Console.Out.Flush();
         }
         finally { Marshal.FreeHGlobal(fp); }
         Native.BS2_DisconnectDevice(ctx, id);
@@ -1529,8 +1560,8 @@ static class Program
                     if (args.Length < 4) { Console.WriteLine("err\tusage\tvscan <ip> <uid> [port]"); return 1; }
                     return VScan(args[2], args[3], args.Length > 4 ? ushort.Parse(args[4]) : (ushort)51211);
                 case "sscan":
-                    if (args.Length < 3) { Console.WriteLine("err\tusage\tsscan <ip> [port]"); return 1; }
-                    return SScan(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211);
+                    if (args.Length < 3) { Console.WriteLine("err\tusage\tsscan <ip> [port] [count]"); return 1; }
+                    return SScan(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211, args.Length > 4 ? int.Parse(args[4]) : 1);
                 case "watch":
                     if (args.Length < 3) { Console.WriteLine("err\tusage\twatch <ip> [port] [seconds] [cmdDir]"); return 1; }
                     return Watch(args[2], args.Length > 3 ? ushort.Parse(args[3]) : (ushort)51211,

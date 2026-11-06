@@ -457,6 +457,91 @@ Completer<Map<String, dynamic>>? _activeCapture;
 /// Kapti reyèl, pataje pa /capture ak /enroll/capture.
 /// Si yon lòt demann /capture deja an kou (pa egzanp siveyans oubyen yon lòt
 /// onglet), dezyèm demann nan pataje menm kapti a olye li retounen 409 (busy).
+Future<void> _handleTerminalScan(Map<String, dynamic> body, HttpResponse res) async {
+  final cfg = terminalConfig();
+  final ip = body['ip']?.toString() ?? cfg['ip'] as String;
+  final port = (body['port'] as num?)?.toInt() ?? cfg['port'] as int;
+  final timeoutSec = ((body['timeout_seconds'] as num?)?.toInt() ?? 25).clamp(5, 60);
+
+  broadcastEvent({
+    'type': 'terminal_scan_start',
+    'message': 'Lektè pòt la ap prepare...',
+    'timestamp': DateTime.now().toIso8601String(),
+  });
+
+  try {
+    // 1. Eseye pase nan siveyan ki deja konekte a
+    if (ip == cfg['ip'] && _watchReady) {
+      broadcastEvent({'type': 'waiting_finger', 'source': 'terminal'});
+      final viaWatch = await _watchDoorCommand('scan', timeoutMs: timeoutSec * 1000);
+      if (viaWatch != null && viaWatch.first == 'ok' && viaWatch.length >= 2) {
+        final tpl = viaWatch[1];
+        final q = viaWatch.length > 2 ? int.tryParse(viaWatch[2]) ?? 50 : 50;
+        broadcastEvent({
+          'type': 'fingerprint_captured',
+          'template': tpl,
+          'quality': q,
+          'source': 'terminal',
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+        await _json(res, {
+          'success': true,
+          'template': tpl,
+          'templates': [tpl],
+          'quality': q,
+          'format': 'suprema_native',
+          'source': 'terminal',
+        });
+        return;
+      }
+    }
+
+    // 2. Si siveyan an pa reponn oswa offline, fè yon apèl dirèk biostar_tool sscan
+    broadcastEvent({'type': 'waiting_finger', 'source': 'terminal'});
+    final lines = await _biostarCall(['sscan', ip, '$port', '1'], timeout: Duration(seconds: timeoutSec + 5));
+    String? tpl;
+    int quality = 50;
+    for (final l in lines) {
+      if (l.first == 'ready') {
+        broadcastEvent({'type': 'terminal_ready_to_scan', 'source': 'terminal'});
+      } else if (l.first == 'fp' && l.length >= 2) {
+        tpl = l[1];
+        if (l.length >= 3) quality = int.tryParse(l[2]) ?? quality;
+      }
+    }
+
+    if (tpl != null && tpl.isNotEmpty) {
+      broadcastEvent({
+        'type': 'fingerprint_captured',
+        'template': tpl,
+        'quality': quality,
+        'source': 'terminal',
+        'timestamp': DateTime.now().toIso8601String(),
+      });
+      await _json(res, {
+        'success': true,
+        'template': tpl,
+        'templates': [tpl],
+        'quality': quality,
+        'format': 'suprema_native',
+        'source': 'terminal',
+      });
+      return;
+    }
+
+    final err = lines.firstWhere((l) => l.first == 'err', orElse: () => const ['err', 'scan_failed', 'Echèk eskan sou pòt la']);
+    await _json(res, {
+      'success': false,
+      'error': err.length > 1 ? err[1] : 'scan_failed',
+      'message': err.length > 2 ? err[2] : 'Pa gen anprent ki detekte sou pòt la.',
+    });
+  } on SupremaException catch (e) {
+    await _json(res, {'success': false, 'error': e.code, 'message': e.message});
+  } catch (e) {
+    await _json(res, {'success': false, 'error': 'terminal_error', 'message': '$e'});
+  }
+}
+
 Future<void> _handleCapture(HttpRequest request, HttpResponse res) async {
   final body = await _readJson(request);
   final timeoutMs = ((body['timeout_ms'] as num?)?.toInt() ?? 10000).clamp(1000, 30000);
@@ -469,6 +554,10 @@ Future<void> _handleCapture(HttpRequest request, HttpResponse res) async {
   await _ensureSdk();
   final sdk = _sdk;
   if (sdk == null || !sdk.readerConnected) {
+    if (body['source'] == 'terminal' || body['fallback_terminal'] == true) {
+      await _handleTerminalScan(body, res);
+      return;
+    }
     await _json(res, _readerUnavailable(), status: HttpStatus.serviceUnavailable);
     return;
   }
@@ -696,6 +785,13 @@ Future<void> _handleRequest(HttpRequest request) async {
       } on SupremaException catch (e) {
         await _json(res, {'success': false, 'error': e.code, 'message': e.message});
       }
+      return;
+    }
+
+    // Eskane anprent dirèkteman sou tèminal pòt la (BioEntry W2)
+    if (path == '/api/terminals/scan' && request.method == 'POST') {
+      final body = await _readJson(request);
+      await _handleTerminalScan(body, res);
       return;
     }
 

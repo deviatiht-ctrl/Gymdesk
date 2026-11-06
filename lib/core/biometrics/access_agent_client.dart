@@ -13,6 +13,8 @@ class AccessAgentStatus {
     this.sdkError,
     this.doorName,
     this.version,
+    this.terminalWatch = false,
+    this.terminalIp,
   });
 
   final bool connected;
@@ -23,11 +25,14 @@ class AccessAgentStatus {
   final String? sdkError;
   final String? doorName;
   final String? version;
+  final bool terminalWatch;
+  final String? terminalIp;
 
   factory AccessAgentStatus.disconnected() => const AccessAgentStatus(
         connected: false,
         readerConnected: false,
         doorConnected: false,
+        terminalWatch: false,
       );
 }
 
@@ -62,6 +67,8 @@ class AccessAgentClient {
           sdkError: data['sdk_error']?.toString(),
           doorName: data['door_name']?.toString(),
           version: data['version']?.toString(),
+          terminalWatch: data['terminal_watch'] == true,
+          terminalIp: data['terminal_ip']?.toString(),
         );
         status.value = current;
         return current;
@@ -366,6 +373,36 @@ class AccessAgentClient {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Eskane anprent dirèkteman sou tèminal pòt la (BioEntry W2)
+  Future<Map<String, dynamic>> scanTerminalFingerprint({
+    String? terminalIp,
+    Duration timeout = const Duration(seconds: 25),
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/terminals/scan'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          if (terminalIp != null && terminalIp.isNotEmpty) 'ip': terminalIp,
+          'timeout_seconds': timeout.inSeconds,
+        }),
+      ).timeout(timeout + const Duration(seconds: 5));
+      if (res.statusCode == 200 && res.body.isNotEmpty) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+      if (res.body.isNotEmpty) {
+        final data = jsonDecode(res.body);
+        if (data is Map<String, dynamic>) return data;
+      }
+    } on TimeoutException {
+      return {'success': false, 'error': 'timeout', 'message': 'Tan eskan sou pòt la pase — pa gen dwèt ki poze.'};
+    } catch (e) {
+      return {'success': false, 'error': 'error', 'message': '$e'};
+    }
+    return {'success': false, 'error': 'unreachable', 'message': 'Tèminal pòt la pa reponn.'};
   }
 
   void dispose() {

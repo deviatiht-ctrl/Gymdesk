@@ -86,13 +86,20 @@ class _FingerprintEnrollmentDialogState
   bool _busy = false;
   String _hint = '';
   StreamSubscription<BiometricEvent>? _eventSub;
+  bool _useTerminal = false;
+  bool _scanningTerminal = false;
 
   @override
   void initState() {
     super.initState();
     final bio = ref.read(biometricServiceProvider);
+    if (!bio.readerAvailable && bio.terminalAvailable) {
+      _useTerminal = true;
+    }
     _eventSub = bio.events.listen(_onBiometricEvent);
-    bio.startCapture();
+    if (!_useTerminal) {
+      bio.startCapture();
+    }
     _updateHint();
   }
 
@@ -105,20 +112,54 @@ class _FingerprintEnrollmentDialogState
 
   void _updateHint() {
     setState(() {
-      _hint = _required == 1
-          ? 'Poze dwèt la byen plat sou lektè a'
-          : 'Poze dwèt la sou lektè a (Kapti $_currentStep/$_required)';
+      if (_useTerminal) {
+        _hint = _scanningTerminal
+            ? '🟢 Lektè pòt la pare! Mete dwèt la sou li kounye a...'
+            : 'Mete moun nan devan pòt la, epi klike sou "Kòmanse Eskane sou Pòt la".';
+      } else {
+        _hint = _required == 1
+            ? 'Poze dwèt la byen plat sou lektè a'
+            : 'Poze dwèt la sou lektè a (Kapti $_currentStep/$_required)';
+      }
     });
   }
 
   void _onBiometricEvent(BiometricEvent event) {
     if (_busy) return;
-    if (event.type == 'fingerprint_captured' && event.template != null) {
+    if (event.type == 'terminal_ready_to_scan') {
+      setState(() => _hint = '🟢 Lektè pòt la limen! Mete dwèt la sou li kounye a...');
+    } else if (event.type == 'fingerprint_captured' && event.template != null) {
       _processCapture(event.template!);
     } else if (event.type == 'low_quality') {
       setState(() => _hint = event.message ?? 'Kalite pa ase. Repoze dwèt la byen plat.');
     } else if (event.type == 'waiting_finger') {
       _updateHint();
+    }
+  }
+
+  Future<void> _startTerminalScan() async {
+    if (_busy || _scanningTerminal) return;
+    setState(() {
+      _scanningTerminal = true;
+      _hint = 'Ap konekte ak pòt la... tann lektè a pare.';
+    });
+    try {
+      final bio = ref.read(biometricServiceProvider);
+      final cap = await bio.captureFromTerminal(
+        terminalIp: AccessMonitor.instance.config.terminalIp,
+      );
+      if (!mounted) return;
+      setState(() {
+        _scanningTerminal = false;
+        _hint = 'Anprent detekte sou pòt la! Ap anrejistre...';
+      });
+      await _processCapture(cap.template);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _scanningTerminal = false;
+        _hint = 'Echèk eskan sou pòt la: $e. Klike pou re-eseye.';
+      });
     }
   }
 
@@ -212,18 +253,19 @@ class _FingerprintEnrollmentDialogState
                 (member.row['fingerprint_backup_template'] as String).isNotEmpty) {
               tmpls.add(member.row['fingerprint_backup_template'] as String);
             }
-            unawaited(
-              AccessAgentClient()
-                  .syncTerminalMember(
-                    userId: member.id,
-                    name: member.fullName,
-                    startDate: startDate,
-                    endDate: endDate,
-                    templates: tmpls,
-                    terminalIp: AccessMonitor.instance.config.terminalIp,
-                  )
-                  .catchError((_) => false),
+            await AccessAgentClient().syncTerminalMember(
+              userId: member.id,
+              name: member.fullName,
+              startDate: startDate,
+              endDate: endDate,
+              templates: tmpls,
+              terminalIp: AccessMonitor.instance.config.terminalIp,
             );
+            // Ouvri relè pòt la pou valide pou manm lan touswit
+            unawaited(AccessAgentClient().pulseTerminalRelay(
+              terminalIp: AccessMonitor.instance.config.terminalIp,
+              seconds: 2,
+            ));
           } catch (_) {}
         }
       }
@@ -238,12 +280,13 @@ class _FingerprintEnrollmentDialogState
       if (mounted) {
         final name = widget.member?.fullName ?? widget.displayName ?? '';
         Navigator.pop(context);
+        final successMsg = _useTerminal
+            ? 'Anprent anrejistre epi valide sou pòt la avèk siksè pou $name!'
+            : 'Anprent anrejistre avèk siksè pou $name!';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xff1f6f4a),
-            content: Text(
-              'Anprent anrejistre avèk siksè pou $name!',
-            ),
+            content: Text(successMsg),
           ),
         );
       }
@@ -292,7 +335,64 @@ class _FingerprintEnrollmentDialogState
               widget.member?.memberNumber ?? widget.subtitle ?? '',
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 16),
+
+            // Chwa Lektè: USB (BioMini) oswa Pòt la (BioEntry W2)
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment<bool>(
+                  value: false,
+                  icon: Icon(LucideIcons.usb, size: 16),
+                  label: Text('Lektè USB (BioMini)'),
+                ),
+                ButtonSegment<bool>(
+                  value: true,
+                  icon: Icon(LucideIcons.doorClosed, size: 16),
+                  label: Text('Lektè Pòt la (W2)'),
+                ),
+              ],
+              selected: {_useTerminal},
+              onSelectionChanged: _busy ? null : (set) {
+                final val = set.first;
+                if (val == _useTerminal) return;
+                setState(() {
+                  _useTerminal = val;
+                  _scanningTerminal = false;
+                  _updateHint();
+                });
+                final bio = ref.read(biometricServiceProvider);
+                if (_useTerminal) {
+                  bio.stopCapture();
+                } else {
+                  bio.startCapture();
+                }
+              },
+            ),
+            const SizedBox(height: 14),
+
+            if (!bio.readerAvailable && _useTerminal) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(LucideIcons.info, size: 18, color: Color(0xFF1D4ED8)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'BioMini USB pa monte. Anrejistreman an ap fèt dirèkteman sou lektè pòt la (BioEntry W2).',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF1E40AF), fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
 
             if (_required > 1) Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -310,9 +410,9 @@ class _FingerprintEnrollmentDialogState
                 ],
               ],
             ),
-            if (_required > 1) const SizedBox(height: 24),
+            if (_required > 1) const SizedBox(height: 16),
 
-            // Fingerprint Visual Icon
+            // Fingerprint / Door Visual Icon
             AnimatedContainer(
               duration: const Duration(milliseconds: 300),
               width: 100,
@@ -320,23 +420,23 @@ class _FingerprintEnrollmentDialogState
               decoration: BoxDecoration(
                 color: _captures.length >= _currentStep
                     ? const Color(0xff1f6f4a).withAlpha(30)
-                    : Colors.grey.shade100,
+                    : (_useTerminal ? const Color(0xFF0F766E).withAlpha(20) : Colors.grey.shade100),
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: _captures.length >= _currentStep
                       ? const Color(0xff1f6f4a)
-                      : Colors.grey.shade400,
+                      : (_useTerminal ? const Color(0xFF0F766E) : Colors.grey.shade400),
                   width: 2,
                 ),
               ),
               child: Icon(
                 _captures.length >= _required
                     ? LucideIcons.circleCheck
-                    : LucideIcons.fingerprint,
-                size: 56,
+                    : (_useTerminal ? LucideIcons.doorClosed : LucideIcons.fingerprint),
+                size: 52,
                 color: _captures.length >= _currentStep
                     ? const Color(0xff1f6f4a)
-                    : Colors.grey.shade600,
+                    : (_useTerminal ? const Color(0xFF0F766E) : Colors.grey.shade600),
               ),
             ),
             const SizedBox(height: 16),
@@ -348,42 +448,90 @@ class _FingerprintEnrollmentDialogState
             ),
             const SizedBox(height: 12),
 
+            // Bouton pou lanse eskan sou pòt la
+            if (_useTerminal && _captures.length < _required) ...[
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F766E),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: (_busy || _scanningTerminal) ? null : _startTerminalScan,
+                icon: _scanningTerminal
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Icon(LucideIcons.scanLine, size: 20),
+                label: Text(
+                  _scanningTerminal
+                      ? 'Ap koute lektè pòt la...'
+                      : 'Kòmanse Eskane sou Pòt la',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
             // Status Badge (eta reyèl lektè a)
-            ValueListenableBuilder<BiometricSensorState>(
-              valueListenable: bio.state,
-              builder: (context, st, _) {
-                final ok = st == BiometricSensorState.ready ||
-                    st == BiometricSensorState.waitingFinger ||
-                    st == BiometricSensorState.capturing;
-                final serial = bio.agent.status.value.readerSerial;
-                final label = ok
-                    ? 'Lektè konekte${serial != null && serial.isNotEmpty ? ' ($serial)' : ''}'
-                    : bio.unavailableReason;
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: ok ? Colors.green.shade50 : Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.circle, size: 10, color: ok ? Colors.green : Colors.orange),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: ok ? Colors.green.shade800 : Colors.orange.shade800,
+            if (!_useTerminal)
+              ValueListenableBuilder<BiometricSensorState>(
+                valueListenable: bio.state,
+                builder: (context, st, _) {
+                  final ok = st == BiometricSensorState.ready ||
+                      st == BiometricSensorState.waitingFinger ||
+                      st == BiometricSensorState.capturing;
+                  final serial = bio.agent.status.value.readerSerial;
+                  final label = ok
+                      ? 'Lektè USB konekte${serial != null && serial.isNotEmpty ? ' ($serial)' : ''}'
+                      : bio.unavailableReason;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: ok ? Colors.green.shade50 : Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.circle, size: 10, color: ok ? Colors.green : Colors.orange),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: ok ? Colors.green.shade800 : Colors.orange.shade800,
+                            ),
                           ),
                         ),
+                      ],
+                    ),
+                  );
+                },
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: bio.terminalAvailable ? Colors.green.shade50 : Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 10, color: bio.terminalAvailable ? Colors.green : Colors.blue),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'Pòt: BioEntry W2 (${bio.agent.status.value.terminalIp ?? "192.168.1.41"})',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: bio.terminalAvailable ? Colors.green.shade800 : Colors.blue.shade800,
+                        ),
                       ),
-                    ],
-                  ),
-                );
-              },
-            ),
+                    ),
+                  ],
+                ),
+              ),
 
             if (_busy) ...[
               const SizedBox(height: 16),
