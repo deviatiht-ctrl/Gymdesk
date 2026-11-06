@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import '../../../core/web/pwa.dart';
 import '../data/member_portal_repository.dart';
 import '../data/member_session.dart';
+import 'employee_dashboard_view.dart';
 import 'member_auth_view.dart';
 import 'member_dashboard_view.dart';
 import 'member_ui.dart';
@@ -178,6 +179,12 @@ class _MemberPortalPageState extends State<MemberPortalPage> with WidgetsBinding
     }
     return switch (_me!['state']) {
       'member' => MemberDashboardView(
+          data: _me!,
+          onRefresh: _loadMe,
+          onSignOut: _signOut,
+          onChangeGym: () => context.go('/espace-membre'),
+        ),
+      'employee' => EmployeeDashboardView(
           data: _me!,
           onRefresh: _loadMe,
           onSignOut: _signOut,
