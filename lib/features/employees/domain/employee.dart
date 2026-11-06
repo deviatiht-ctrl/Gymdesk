@@ -28,6 +28,31 @@ class Employee {
   bool get active => row['active'] != false;
   DateTime? get hiredOn => DateTime.tryParse(row['hired_on'] as String? ?? '');
 
+  String get employeeNumber {
+    final custom = row['employee_number'] as String?;
+    if (custom != null && custom.trim().isNotEmpty) return custom.trim();
+    final cleanId = id.replaceAll('-', '');
+    final suffix = cleanId.length >= 6 ? cleanId.substring(0, 6).toUpperCase() : cleanId.toUpperCase();
+    return 'EMP-$suffix';
+  }
+
+  String? get photoUrl => row['photo_url'] as String?;
+
+  String get displayJobTitle {
+    if (jobTitle != null && jobTitle!.trim().isNotEmpty) {
+      return jobTitle!.trim();
+    }
+    return switch (jobType) {
+      'coach' => 'Coach',
+      'reception' => 'Réception',
+      'cleaning' => 'Ménage & Hygiène',
+      'security' => 'Sécurité',
+      'manager' => 'Gérant / Manager',
+      'maintenance' => 'Maintenance',
+      _ => 'Employé',
+    };
+  }
+
   /// Kapti anprent yo (fòma natif Suprema). Plizyè kapti menm dwèt la
   /// bay tèminal W2 a 2 template diferan — pi bon rekonesans.
   List<String> get fingerprintTemplates {

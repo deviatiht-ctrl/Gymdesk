@@ -50,6 +50,16 @@ class AccessDisplayPage extends ConsumerStatefulWidget {
 }
 
 class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with TickerProviderStateMixin {
+  static IconData _jobIconFor(String? jobType) => switch (jobType) {
+        'coach' => LucideIcons.dumbbell,
+        'reception' => LucideIcons.conciergeBell,
+        'cleaning' => LucideIcons.sparkles,
+        'security' => LucideIcons.shieldCheck,
+        'manager' => LucideIcons.briefcase,
+        'maintenance' => LucideIcons.wrench,
+        _ => LucideIcons.badgeCheck,
+      };
+
   final _agent = AccessAgentClient();
   late final BiometricService _biometricService;
   late final MembersRepository _members;
@@ -211,11 +221,11 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     }
 
     final member = decision.person?.entry?.member;
-    final memberId = decision.person?.memberId ?? member?.id;
+    final targetId = decision.person?.id ?? decision.person?.memberId ?? member?.id;
     if (member != null) {
       unawaited(_loadPhoto(member, decision));
-    } else if (memberId != null) {
-      unawaited(_loadPhotoById(memberId, decision, decision.person?.photoUrl));
+    } else if (targetId != null) {
+      unawaited(_loadPhotoById(targetId, decision, decision.person?.photoUrl));
     }
 
     setState(() {
@@ -930,13 +940,55 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
                       ),
                     ),
                     if (person?.isEmployee == true) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        person!.employee?.jobTitle?.isNotEmpty == true
-                            ? person.employee!.jobTitle!
-                            : 'Employé',
-                        style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 20, fontWeight: FontWeight.w600),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF14B8A6).withOpacity(0.35),
+                              blurRadius: 10,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _jobIconFor(person?.jobType ?? person?.employee?.jobType),
+                              size: 16,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              (person?.jobTitle?.isNotEmpty == true
+                                      ? person!.jobTitle!
+                                      : (person?.employee?.jobTitle?.isNotEmpty == true
+                                          ? person!.employee!.jobTitle!
+                                          : (person?.displayJob ?? 'Employé')))
+                                  .toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      if ((person?.employeeNumber ?? person?.employee?.employeeNumber)?.isNotEmpty == true) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Matricule : ',
+                          style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ],
                     ] else if (person?.planName?.isNotEmpty == true) ...[
                       const SizedBox(height: 6),
                       Text(

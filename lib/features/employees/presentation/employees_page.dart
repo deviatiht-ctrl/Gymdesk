@@ -1,13 +1,17 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/widgets/async_panel.dart';
 import '../../../l10n/app_strings.dart';
+import '../../members/data/member_photo_codec.dart';
 import '../../members/presentation/fingerprint_enrollment_dialog.dart';
 import '../data/employees_repository.dart';
 import '../domain/employee.dart';
@@ -46,7 +50,11 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
   void initState() {
     super.initState();
     final runtime = ref.read(appRuntimeProvider);
-    _repository = EmployeesRepository(runtime.database!, runtime.session!);
+    _repository = EmployeesRepository(
+      runtime.database!,
+      runtime.session!,
+      client: runtime.client,
+    );
   }
 
   void _toast(String message, {bool error = false}) {
@@ -57,11 +65,33 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     ));
   }
 
+  Future<void> _showProfile(Employee employee) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _EmployeeProfileDialog(
+        employee: employee,
+        repository: _repository,
+        onEdit: () {
+          Navigator.pop(context);
+          _edit(employee);
+        },
+        onEnroll: () {
+          Navigator.pop(context);
+          _enroll(employee);
+        },
+        onArchive: () {
+          Navigator.pop(context);
+          _archive(employee);
+        },
+      ),
+    );
+  }
+
   Future<void> _edit([Employee? existing]) async {
     final s = AppStrings.of(context);
     final result = await showDialog<_EmployeeFormResult>(
       context: context,
-      builder: (_) => _EmployeeFormDialog(existing: existing),
+      builder: (_) => _EmployeeFormDialog(existing: existing, repository: _repository),
     );
     if (result == null || !mounted) return;
     try {
@@ -73,8 +103,11 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
         phone: result.phone,
         email: result.email,
         jobTitle: result.jobTitle,
+        employeeNumber: result.employeeNumber,
         notes: result.notes,
         active: result.active,
+        photo: result.newPhoto,
+        clearPhoto: result.clearPhoto,
       );
       unawaited(ref.read(appRuntimeProvider).sync?.synchronize());
       _toast(s.text('employee_saved'));
@@ -95,7 +128,9 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     await FingerprintEnrollmentDialog.showGeneric(
       context,
       displayName: employee.fullName,
-      subtitle: s.text('job_${employee.jobType}'),
+      subtitle: employee.jobTitle?.isNotEmpty == true
+          ? employee.jobTitle!
+          : s.text('job_${employee.jobType}'),
       onCaptured: (captures) => _repository.saveFingerprints(employee, captures),
       onSaved: () => unawaited(_syncTerminal(silent: true)),
     );
@@ -208,12 +243,15 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
               if (list.isEmpty)
                 MessagePanel(message: s.text('employees_empty'), action: s.text('new_employee'), onAction: () => _edit())
               else
-                for (final e in list) _EmployeeCard(
-                  employee: e,
-                  onEdit: () => _edit(e),
-                  onEnroll: () => _enroll(e),
-                  onArchive: () => _archive(e),
-                ),
+                for (final e in list)
+                  _EmployeeCard(
+                    employee: e,
+                    repository: _repository,
+                    onTap: () => _showProfile(e),
+                    onEdit: () => _edit(e),
+                    onEnroll: () => _enroll(e),
+                    onArchive: () => _archive(e),
+                  ),
             ],
           );
         },
@@ -252,8 +290,17 @@ class _MiniStat extends StatelessWidget {
 }
 
 class _EmployeeCard extends StatelessWidget {
-  const _EmployeeCard({required this.employee, required this.onEdit, required this.onEnroll, required this.onArchive});
+  const _EmployeeCard({
+    required this.employee,
+    required this.repository,
+    required this.onTap,
+    required this.onEdit,
+    required this.onEnroll,
+    required this.onArchive,
+  });
   final Employee employee;
+  final EmployeesRepository repository;
+  final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onEnroll;
   final VoidCallback onArchive;
@@ -263,59 +310,153 @@ class _EmployeeCard extends StatelessWidget {
     final s = AppStrings.of(context);
     final color = _jobColors[employee.jobType] ?? _jobColors['other']!;
     final fp = employee.fingerprintRegistered;
+    final jobLabel = employee.jobTitle?.isNotEmpty == true
+        ? employee.jobTitle!
+        : s.text('job_${employee.jobType}');
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Wrap(
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 14,
-          runSpacing: 10,
-          children: [
-            CircleAvatar(
-              radius: 26,
-              backgroundColor: color.withAlpha(30),
-              child: Icon(_jobIcons[employee.jobType] ?? LucideIcons.user, color: color),
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 180, maxWidth: 340),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(employee.fullName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    employee.jobTitle?.isNotEmpty == true ? employee.jobTitle! : s.text('job_${employee.jobType}'),
-                    if (employee.phone != null) employee.phone!,
-                  ].join(' · '),
-                  style: TextStyle(color: Colors.grey.shade700),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Photo or Job Icon Avatar
+              FutureBuilder<Uint8List?>(
+                future: repository.localPhoto(employee.id),
+                builder: (context, snap) {
+                  final photo = snap.data;
+                  final hasRemote = photo == null &&
+                      employee.photoUrl != null &&
+                      employee.photoUrl!.isNotEmpty &&
+                      (employee.photoUrl!.startsWith('http://') || employee.photoUrl!.startsWith('https://'));
+                  return Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: color.withAlpha(25),
+                      border: Border.all(color: color.withAlpha(80), width: 2),
+                      image: photo != null
+                          ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
+                          : (hasRemote ? DecorationImage(image: NetworkImage(employee.photoUrl!), fit: BoxFit.cover) : null),
+                    ),
+                    child: (photo == null && !hasRemote)
+                        ? Center(child: Icon(_jobIcons[employee.jobType] ?? LucideIcons.user, color: color, size: 24))
+                        : null,
+                  );
+                },
+              ),
+              const SizedBox(width: 14),
+              // Name, Employee Number & Job Title
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            employee.fullName,
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F172A).withAlpha(12),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.black12),
+                          ),
+                          child: Text(
+                            employee.employeeNumber,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: color.withAlpha(20),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: color.withAlpha(50)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(_jobIcons[employee.jobType] ?? LucideIcons.user, size: 12, color: color),
+                              const SizedBox(width: 5),
+                              Text(
+                                jobLabel,
+                                style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (employee.phone != null && employee.phone!.isNotEmpty)
+                          Text(
+                            employee.phone!,
+                            style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
-              ]),
-            ),
-            _Chip(
-              icon: fp ? LucideIcons.fingerprint : LucideIcons.circleAlert,
-              label: s.text(fp ? 'fingerprint_ok' : 'fingerprint_missing'),
-              color: fp ? const Color(0xFF15803D) : Colors.orange.shade800,
-            ),
-            _Chip(
-              icon: employee.active ? LucideIcons.doorOpen : LucideIcons.ban,
-              label: s.text(employee.active ? 'employee_active' : 'employee_inactive'),
-              color: employee.active ? const Color(0xFF0F766E) : Colors.red.shade700,
-            ),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              FilledButton.tonalIcon(
-                onPressed: onEnroll,
-                icon: const Icon(LucideIcons.fingerprint, size: 18),
-                label: Text(s.text(fp ? 're_enroll_fingerprint' : 'enroll_fingerprint')),
               ),
-              IconButton(tooltip: s.text('edit_employee'), onPressed: onEdit, icon: const Icon(LucideIcons.pencil)),
-              IconButton(
-                tooltip: s.text('archive_employee'),
-                onPressed: onArchive,
-                icon: Icon(LucideIcons.trash2, color: Colors.red.shade700),
+              const SizedBox(width: 8),
+              // Chips & Action buttons
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _Chip(
+                    icon: fp ? LucideIcons.fingerprint : LucideIcons.circleAlert,
+                    label: s.text(fp ? 'fingerprint_ok' : 'fingerprint_missing'),
+                    color: fp ? const Color(0xFF15803D) : Colors.orange.shade800,
+                  ),
+                  _Chip(
+                    icon: employee.active ? LucideIcons.doorOpen : LucideIcons.ban,
+                    label: s.text(employee.active ? 'employee_active' : 'employee_inactive'),
+                    color: employee.active ? const Color(0xFF0F766E) : Colors.red.shade700,
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: onEnroll,
+                    icon: const Icon(LucideIcons.fingerprint, size: 16),
+                    label: Text(s.text(fp ? 're_enroll_fingerprint' : 'enroll_fingerprint'), style: const TextStyle(fontSize: 12)),
+                  ),
+                  IconButton(
+                    tooltip: s.text('view_profile'),
+                    onPressed: onTap,
+                    icon: const Icon(LucideIcons.user, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: s.text('edit_employee'),
+                    onPressed: onEdit,
+                    icon: const Icon(LucideIcons.pencil, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: s.text('archive_employee'),
+                    onPressed: onArchive,
+                    icon: Icon(LucideIcons.trash2, size: 18, color: Colors.red.shade700),
+                  ),
+                ],
               ),
-            ]),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -352,8 +493,11 @@ class _EmployeeFormResult {
     required this.email,
     required this.jobType,
     required this.jobTitle,
+    required this.employeeNumber,
     required this.notes,
     required this.active,
+    this.newPhoto,
+    this.clearPhoto = false,
   });
   final String firstName;
   final String lastName;
@@ -361,31 +505,129 @@ class _EmployeeFormResult {
   final String email;
   final String jobType;
   final String jobTitle;
+  final String employeeNumber;
   final String notes;
   final bool active;
+  final Uint8List? newPhoto;
+  final bool clearPhoto;
 }
 
 class _EmployeeFormDialog extends StatefulWidget {
-  const _EmployeeFormDialog({this.existing});
+  const _EmployeeFormDialog({this.existing, required this.repository});
   final Employee? existing;
+  final EmployeesRepository repository;
+
   @override
   State<_EmployeeFormDialog> createState() => _EmployeeFormDialogState();
 }
 
 class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
   final _form = GlobalKey<FormState>();
+  final _picker = ImagePicker();
   late final _first = TextEditingController(text: widget.existing?.firstName ?? '');
   late final _last = TextEditingController(text: widget.existing?.lastName ?? '');
   late final _phone = TextEditingController(text: widget.existing?.phone ?? '');
   late final _email = TextEditingController(text: widget.existing?.email ?? '');
   late final _title = TextEditingController(text: widget.existing?.jobTitle ?? '');
+  late final _empNumber = TextEditingController(text: widget.existing?.employeeNumber ?? _generateDefaultEmpNumber());
   late final _notes = TextEditingController(text: widget.existing?.notes ?? '');
   late String _job = widget.existing?.jobType ?? 'coach';
   late bool _active = widget.existing?.active ?? true;
 
+  Uint8List? _photoBytes;
+  bool _photoCleared = false;
+  bool _loadingExistingPhoto = false;
+
+  static String _generateDefaultEmpNumber() {
+    final rand = (math.Random().nextInt(0x8FFFFF) + 0x100000).toRadixString(16).toUpperCase();
+    return 'EMP-$rand';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.existing != null) {
+      _loadExistingPhoto();
+    }
+  }
+
+  Future<void> _loadExistingPhoto() async {
+    setState(() => _loadingExistingPhoto = true);
+    try {
+      final bytes = await widget.repository.localPhoto(widget.existing!.id);
+      if (mounted) {
+        setState(() {
+          _photoBytes = bytes;
+          _loadingExistingPhoto = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingExistingPhoto = false);
+    }
+  }
+
+  Future<void> _pickPhoto() async {
+    final s = AppStrings.of(context);
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(LucideIcons.camera),
+              title: Text(s.text('take_instant_photo')),
+              subtitle: Text(s.text('photo_instant_hint')),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(LucideIcons.image),
+              title: Text(s.text('choose_from_gallery')),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            if (_photoBytes != null || widget.existing?.photoUrl != null)
+              ListTile(
+                leading: Icon(LucideIcons.trash2, color: Theme.of(context).colorScheme.error),
+                title: Text(
+                  s.text('delete'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                onTap: () {
+                  setState(() {
+                    _photoBytes = null;
+                    _photoCleared = true;
+                  });
+                  Navigator.pop(context);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null) return;
+    try {
+      final file = await _picker.pickImage(source: source, maxWidth: 1200, maxHeight: 1200);
+      if (file == null) return;
+      final raw = await file.readAsBytes();
+      final encoded = encodeMemberPhoto(raw);
+      if (mounted) {
+        setState(() {
+          _photoBytes = encoded;
+          _photoCleared = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.text('invalid_photo'))),
+        );
+      }
+    }
+  }
+
   @override
   void dispose() {
-    for (final c in [_first, _last, _phone, _email, _title, _notes]) {
+    for (final c in [_first, _last, _phone, _email, _title, _empNumber, _notes]) {
       c.dispose();
     }
     super.dispose();
@@ -394,19 +636,76 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
+    final color = _jobColors[_job] ?? _jobColors['other']!;
+
     return AlertDialog(
       title: Text(s.text(widget.existing == null ? 'new_employee' : 'edit_employee')),
       content: SizedBox(
-        width: 460,
+        width: 480,
         child: Form(
           key: _form,
           child: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // Photo Avatar & Selector
+              Center(
+                child: Column(
+                  children: [
+                    Stack(
+                      children: [
+                        GestureDetector(
+                          onTap: _pickPhoto,
+                          child: Container(
+                            width: 90,
+                            height: 90,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: color.withAlpha(20),
+                              border: Border.all(color: color, width: 2.5),
+                              image: _photoBytes != null
+                                  ? DecorationImage(image: MemoryImage(_photoBytes!), fit: BoxFit.cover)
+                                  : (widget.existing?.photoUrl != null && !_photoCleared
+                                      ? DecorationImage(image: NetworkImage(widget.existing!.photoUrl!), fit: BoxFit.cover)
+                                      : null),
+                            ),
+                            child: _loadingExistingPhoto
+                                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                                : (_photoBytes == null && (widget.existing?.photoUrl == null || _photoCleared)
+                                    ? Center(child: Icon(LucideIcons.camera, size: 34, color: color))
+                                    : null),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: InkWell(
+                            onTap: _pickPhoto,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF0F766E),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(LucideIcons.pencil, size: 14, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    TextButton.icon(
+                      onPressed: _pickPhoto,
+                      icon: const Icon(LucideIcons.camera, size: 16),
+                      label: Text(_photoBytes != null ? s.text('change_photo') : s.text('choose_photo')),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               Row(children: [
                 Expanded(
                   child: TextFormField(
                     controller: _first,
-                    autofocus: true,
+                    autofocus: widget.existing == null,
                     decoration: InputDecoration(labelText: s.text('first_name')),
                     validator: (v) => (v?.trim().isEmpty ?? true) ? s.text('required') : null,
                   ),
@@ -417,9 +716,25 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
                 ),
               ]),
               const SizedBox(height: 12),
+              // Matricule / Employee Number
+              TextFormField(
+                controller: _empNumber,
+                maxLength: 30,
+                decoration: InputDecoration(
+                  labelText: s.text('employee_number'),
+                  prefixIcon: const Icon(LucideIcons.idCard, size: 18),
+                  counterText: '',
+                  helperText: 'Nimewo idantifikasyon / matrikil pou aksè a.',
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Job Type Dropdown
               DropdownButtonFormField<String>(
                 initialValue: _job,
-                decoration: InputDecoration(labelText: s.text('job_type')),
+                decoration: InputDecoration(
+                  labelText: s.text('job_type'),
+                  prefixIcon: Icon(_jobIcons[_job], color: _jobColors[_job], size: 18),
+                ),
                 items: [
                   for (final j in Employee.jobTypes)
                     DropdownMenuItem(
@@ -434,7 +749,31 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
                 onChanged: (v) => setState(() => _job = v ?? 'other'),
               ),
               const SizedBox(height: 12),
-              TextFormField(controller: _title, maxLength: 80, decoration: InputDecoration(labelText: s.text('job_title'), counterText: '')),
+              // Conditional Custom Job Title
+              if (_job == 'other') ...[
+                TextFormField(
+                  controller: _title,
+                  maxLength: 80,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: '${s.text('custom_job_hint')} *',
+                    helperText: 'Egzanp: Kesyè, Sipèvizè, Asistan...',
+                    prefixIcon: const Icon(LucideIcons.briefcase, size: 18),
+                    counterText: '',
+                  ),
+                  validator: (v) => (v?.trim().isEmpty ?? true) ? s.text('custom_job_required') : null,
+                ),
+              ] else ...[
+                TextFormField(
+                  controller: _title,
+                  maxLength: 80,
+                  decoration: InputDecoration(
+                    labelText: '${s.text('job_title')} (Opsyonèl)',
+                    prefixIcon: const Icon(LucideIcons.briefcase, size: 18),
+                    counterText: '',
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               Row(children: [
                 Expanded(
@@ -442,7 +781,11 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
                     controller: _phone,
                     maxLength: 32,
                     keyboardType: TextInputType.phone,
-                    decoration: InputDecoration(labelText: s.text('phone'), counterText: ''),
+                    decoration: InputDecoration(
+                      labelText: s.text('phone'),
+                      prefixIcon: const Icon(LucideIcons.phone, size: 18),
+                      counterText: '',
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -450,7 +793,10 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
                   child: TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(labelText: s.text('email')),
+                    decoration: InputDecoration(
+                      labelText: s.text('email'),
+                      prefixIcon: const Icon(LucideIcons.mail, size: 18),
+                    ),
                     validator: (v) {
                       final t = v?.trim() ?? '';
                       return t.isEmpty || RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(t) ? null : s.text('invalid_email');
@@ -463,7 +809,11 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
                 controller: _notes,
                 maxLines: 2,
                 maxLength: 1000,
-                decoration: InputDecoration(labelText: s.text('employee_notes'), counterText: ''),
+                decoration: InputDecoration(
+                  labelText: s.text('employee_notes'),
+                  prefixIcon: const Icon(LucideIcons.fileText, size: 18),
+                  counterText: '',
+                ),
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -489,14 +839,315 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
                 email: _email.text,
                 jobType: _job,
                 jobTitle: _title.text,
+                employeeNumber: _empNumber.text,
                 notes: _notes.text,
                 active: _active,
+                newPhoto: _photoBytes,
+                clearPhoto: _photoCleared,
               ),
             );
           },
           child: Text(s.text('save')),
         ),
       ],
+    );
+  }
+}
+
+class _EmployeeProfileDialog extends StatelessWidget {
+  const _EmployeeProfileDialog({
+    required this.employee,
+    required this.repository,
+    required this.onEdit,
+    required this.onEnroll,
+    required this.onArchive,
+  });
+
+  final Employee employee;
+  final EmployeesRepository repository;
+  final VoidCallback onEdit;
+  final VoidCallback onEnroll;
+  final VoidCallback onArchive;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppStrings.of(context);
+    final color = _jobColors[employee.jobType] ?? _jobColors['other']!;
+    final jobLabel = employee.jobTitle?.isNotEmpty == true
+        ? employee.jobTitle!
+        : s.text('job_${employee.jobType}');
+    final fp = employee.fingerprintRegistered;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Top Header Banner
+            Container(
+              padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [color.withOpacity(0.9), color.withOpacity(0.7)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: Column(
+                children: [
+                  FutureBuilder<Uint8List?>(
+                    future: repository.localPhoto(employee.id),
+                    builder: (context, snap) {
+                      final photo = snap.data;
+                      final hasRemote = photo == null &&
+                          employee.photoUrl != null &&
+                          employee.photoUrl!.isNotEmpty &&
+                          (employee.photoUrl!.startsWith('http://') || employee.photoUrl!.startsWith('https://'));
+                      return Container(
+                        width: 96,
+                        height: 96,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.2),
+                              blurRadius: 16,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                          image: photo != null
+                              ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
+                              : (hasRemote ? DecorationImage(image: NetworkImage(employee.photoUrl!), fit: BoxFit.cover) : null),
+                        ),
+                        child: (photo == null && !hasRemote)
+                            ? Center(child: Icon(_jobIcons[employee.jobType] ?? LucideIcons.user, size: 48, color: color))
+                            : null,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    employee.fullName,
+                    style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  // Employee Number Badge with Copy
+                  InkWell(
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: employee.employeeNumber));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Matrikil ${employee.employeeNumber} kopye !')),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.25),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(LucideIcons.idCard, size: 14, color: Colors.white70),
+                          const SizedBox(width: 6),
+                          Text(
+                            employee.employeeNumber,
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(LucideIcons.copy, size: 12, color: Colors.white70),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Position Pill
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(_jobIcons[employee.jobType] ?? LucideIcons.user, size: 14, color: Colors.white),
+                        const SizedBox(width: 6),
+                        Text(
+                          jobLabel.toUpperCase(),
+                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.6),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Profile Body Info
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Contact Section
+                    Text(
+                      s.text('contact_info'),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF64748B)),
+                    ),
+                    const SizedBox(height: 8),
+                    _ProfileTile(
+                      icon: LucideIcons.phone,
+                      label: s.text('phone'),
+                      value: employee.phone?.isNotEmpty == true ? employee.phone! : 'Non renseigné',
+                      onCopy: employee.phone?.isNotEmpty == true
+                          ? () => Clipboard.setData(ClipboardData(text: employee.phone!))
+                          : null,
+                    ),
+                    const SizedBox(height: 6),
+                    _ProfileTile(
+                      icon: LucideIcons.mail,
+                      label: s.text('email'),
+                      value: employee.email?.isNotEmpty == true ? employee.email! : 'Non renseigné',
+                      onCopy: employee.email?.isNotEmpty == true
+                          ? () => Clipboard.setData(ClipboardData(text: employee.email!))
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    // Security & Access Section
+                    Text(
+                      s.text('security_access'),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF64748B)),
+                    ),
+                    const SizedBox(height: 8),
+                    _ProfileTile(
+                      icon: employee.active ? LucideIcons.shieldCheck : LucideIcons.ban,
+                      iconColor: employee.active ? const Color(0xFF10B981) : Colors.red.shade700,
+                      label: 'Statut accès',
+                      value: s.text(employee.active ? 'employee_active' : 'employee_inactive'),
+                    ),
+                    const SizedBox(height: 6),
+                    _ProfileTile(
+                      icon: LucideIcons.fingerprint,
+                      iconColor: fp ? const Color(0xFF10B981) : Colors.orange.shade800,
+                      label: 'Empreinte biométrique',
+                      value: fp
+                          ? s.text('captures_count').replaceAll('{n}', '${employee.fingerprintTemplates.length}')
+                          : s.text('fingerprint_missing'),
+                    ),
+                    if (employee.notes != null && employee.notes!.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        s.text('employee_notes'),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF64748B)),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Text(employee.notes!, style: const TextStyle(fontSize: 13, height: 1.4)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            // Dialog Action Buttons
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: s.text('archive_employee'),
+                    onPressed: onArchive,
+                    icon: Icon(LucideIcons.trash2, color: Colors.red.shade700),
+                  ),
+                  const Spacer(),
+                  OutlinedButton.icon(
+                    onPressed: onEnroll,
+                    icon: const Icon(LucideIcons.fingerprint, size: 16),
+                    label: Text(s.text(fp ? 're_enroll_fingerprint' : 'enroll_fingerprint')),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                    onPressed: onEdit,
+                    icon: const Icon(LucideIcons.pencil, size: 16),
+                    label: Text(s.text('edit_profile')),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileTile extends StatelessWidget {
+  const _ProfileTile({
+    required this.icon,
+    this.iconColor,
+    required this.label,
+    required this.value,
+    this.onCopy,
+  });
+
+  final IconData icon;
+  final Color? iconColor;
+  final String label;
+  final String value;
+  final VoidCallback? onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: iconColor ?? const Color(0xFF64748B)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
+              ],
+            ),
+          ),
+          if (onCopy != null)
+            IconButton(
+              icon: const Icon(LucideIcons.copy, size: 16, color: Color(0xFF94A3B8)),
+              onPressed: () {
+                onCopy!();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$value copié !'), duration: const Duration(seconds: 1)),
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 }

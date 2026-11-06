@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/db/local_database.dart';
@@ -12,9 +14,10 @@ class EmployeeFailure implements Exception {
 }
 
 class EmployeesRepository {
-  const EmployeesRepository(this.db, this.session, {this.now});
+  const EmployeesRepository(this.db, this.session, {this.client, this.now});
   final LocalDatabase db;
   final StaffSession session;
+  final SupabaseClient? client;
   final DateTime Function()? now;
   static const _uuid = Uuid();
 
@@ -42,8 +45,11 @@ class EmployeesRepository {
     String phone = '',
     String email = '',
     String jobTitle = '',
+    String employeeNumber = '',
     String notes = '',
     bool active = true,
+    Uint8List? photo,
+    bool clearPhoto = false,
   }) async {
     if (!_canManage) throw const EmployeeFailure('access_denied');
     final first = firstName.trim();
@@ -56,6 +62,10 @@ class EmployeesRepository {
       throw const EmployeeFailure('invalid_email');
     }
     final id = existing?.id ?? _uuid.v4();
+    final empNum = employeeNumber.trim().isNotEmpty
+        ? employeeNumber.trim()
+        : (existing?.row['employee_number'] as String? ??
+            'EMP-${id.replaceAll('-', '').substring(0, id.replaceAll('-', '').length >= 6 ? 6 : id.replaceAll('-', '').length).toUpperCase()}');
     final row = <String, dynamic>{
       ...?existing?.row,
       'id': id,
@@ -66,13 +76,37 @@ class EmployeesRepository {
       'email': mail.isEmpty ? null : mail,
       'job_type': jobType,
       'job_title': jobTitle.trim().isEmpty ? null : jobTitle.trim(),
+      'employee_number': empNum,
       'notes': notes.trim().isEmpty ? null : notes.trim(),
       'active': active,
       'fingerprint_templates': existing?.row['fingerprint_templates'] ?? const <String>[],
       'fingerprint_registered': existing?.fingerprintRegistered ?? false,
+      if (clearPhoto) 'photo_url': null,
     };
     await _write(row);
+    if (clearPhoto) {
+      await (db.delete(db.photoUploads)..where((t) => t.memberId.equals(id))).go();
+    } else if (photo != null) {
+      await db.enqueuePhoto(id, photo);
+    }
     return id;
+  }
+
+  Future<Uint8List?> localPhoto(String employeeId) async =>
+      (await db.photoForMember(employeeId))?.bytes;
+
+  Future<Uint8List?> photoBytes(Employee employee) async {
+    final local = await localPhoto(employee.id);
+    if (local != null && local.isNotEmpty) return local;
+    if (employee.photoUrl == null || employee.photoUrl!.isEmpty) return null;
+    if (client == null) return null;
+    try {
+      return await client!.storage
+          .from('member-photos')
+          .download(employee.photoUrl!);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> saveFingerprints(Employee employee, List<String> captures) async {

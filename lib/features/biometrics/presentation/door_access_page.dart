@@ -49,6 +49,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   Member? _matchedMember;
   String? _matchedName;
   bool _matchedIsEmployee = false;
+  String? _matchedJobType;
+  String? _matchedJobTitle;
+  String? _matchedEmployeeNumber;
   int? _daysLeft;
   Uint8List? _matchedPhoto;
 
@@ -148,6 +151,26 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     } catch (_) {}
   }
 
+  static IconData _jobIconFor(String? jobType) => switch (jobType) {
+        'coach' => LucideIcons.dumbbell,
+        'reception' => LucideIcons.conciergeBell,
+        'cleaning' => LucideIcons.sparkles,
+        'security' => LucideIcons.shieldCheck,
+        'manager' => LucideIcons.briefcase,
+        'maintenance' => LucideIcons.wrench,
+        _ => LucideIcons.badgeCheck,
+      };
+
+  static String _jobLabelFor(String? jobType, AppStrings s) => switch (jobType) {
+        'coach' => s.text('job_coach'),
+        'reception' => s.text('job_reception'),
+        'cleaning' => s.text('job_cleaning'),
+        'security' => s.text('job_security'),
+        'manager' => s.text('job_manager'),
+        'maintenance' => s.text('job_maintenance'),
+        _ => s.text('job_other'),
+      };
+
   void _onTerminalDecision(AccessDecision decision) {
     if (!mounted) return;
     final person = decision.person;
@@ -156,6 +179,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       _processing = false;
       _matchedMember = person?.entry?.member;
       _matchedIsEmployee = person?.isEmployee == true;
+      _matchedJobType = person?.jobType ?? person?.employee?.jobType;
+      _matchedJobTitle = person?.jobTitle ?? person?.employee?.jobTitle ?? (person?.isEmployee == true ? person?.displayJob : null);
+      _matchedEmployeeNumber = person?.employeeNumber ?? person?.employee?.employeeNumber;
       _matchedName = person?.name ??
           (decision.outcome == AccessOutcome.legacy
               ? (decision.uid != null && decision.uid!.isNotEmpty && decision.uid != '-'
@@ -174,10 +200,11 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     });
     final m = person?.entry?.member;
     final mId = person?.memberId ?? m?.id;
+    final anyId = person?.id ?? mId;
     if (m != null) {
       _loadMemberPhoto(m);
-    } else if (mId != null) {
-      _loadMemberPhotoById(mId, person?.photoUrl);
+    } else if (anyId != null) {
+      _loadMemberPhotoById(anyId, person?.photoUrl);
     }
     _scheduleDismiss(Duration(seconds: granted ? 6 : 6));
   }
@@ -205,6 +232,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     setState(() {
       _matchedMember = member;
       _matchedIsEmployee = snapshot['is_employee'] == true;
+      _matchedJobType = snapshot['job_type']?.toString();
+      _matchedJobTitle = snapshot['job_title']?.toString();
+      _matchedEmployeeNumber = snapshot['employee_number']?.toString();
       _matchedName = name;
       _daysLeft = days;
       _processing = false;
@@ -1049,6 +1079,55 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                  if (_matchedIsEmployee) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF14B8A6).withOpacity(0.35),
+                            blurRadius: 10,
+                            spreadRadius: 1,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _jobIconFor(_matchedJobType),
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            (_matchedJobTitle?.isNotEmpty == true
+                                    ? _matchedJobTitle!
+                                    : _jobLabelFor(_matchedJobType, s))
+                                .toUpperCase(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_matchedEmployeeNumber != null && _matchedEmployeeNumber!.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Matricule : ',
+                        style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ] else ...[
                   if (_daysLeft != null) ...[
                     const SizedBox(height: 8),
                     Container(
@@ -1091,6 +1170,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                         label: Text(s.text('renew_now'), style: const TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ],
+                  ],
                   ],
                 ],
               ],

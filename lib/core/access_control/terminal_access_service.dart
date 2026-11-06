@@ -67,7 +67,10 @@ class AccessPerson {
         _snapshotReason = null,
         _snapshotDaysLeft = null,
         _snapshotEndDate = null,
-        _snapshotPhotoUrl = null;
+        _snapshotPhotoUrl = null,
+        _snapshotJobType = null,
+        _snapshotJobTitle = null,
+        _snapshotEmployeeNumber = null;
 
   const AccessPerson.employee(Employee this.employee)
       : entry = null,
@@ -80,7 +83,10 @@ class AccessPerson {
         _snapshotReason = null,
         _snapshotDaysLeft = null,
         _snapshotEndDate = null,
-        _snapshotPhotoUrl = null;
+        _snapshotPhotoUrl = null,
+        _snapshotJobType = null,
+        _snapshotJobTitle = null,
+        _snapshotEmployeeNumber = null;
 
   AccessPerson.fromSnapshot(Map<String, dynamic> snapshot)
       : entry = null,
@@ -97,7 +103,10 @@ class AccessPerson {
         _snapshotEndDate = snapshot['end_date'] != null
             ? DateTime.tryParse(snapshot['end_date'].toString())
             : null,
-        _snapshotPhotoUrl = snapshot['photo_url']?.toString();
+        _snapshotPhotoUrl = snapshot['photo_url']?.toString(),
+        _snapshotJobType = snapshot['job_type']?.toString(),
+        _snapshotJobTitle = snapshot['job_title']?.toString(),
+        _snapshotEmployeeNumber = snapshot['employee_number']?.toString();
 
   final MemberListEntry? entry;
   final Employee? employee;
@@ -112,6 +121,9 @@ class AccessPerson {
   final int? _snapshotDaysLeft;
   final DateTime? _snapshotEndDate;
   final String? _snapshotPhotoUrl;
+  final String? _snapshotJobType;
+  final String? _snapshotJobTitle;
+  final String? _snapshotEmployeeNumber;
 
   bool get isEmployee => _snapshotIsEmployee ?? (employee != null);
   String get id => _snapshotId ?? (entry?.member.id ?? employee!.id);
@@ -123,7 +135,25 @@ class AccessPerson {
   String get reason => _snapshotReason ?? (isEmployee ? (employee!.active ? 'ok' : 'suspended') : entry!.validity.reason);
   int? get daysLeft => _snapshotDaysLeft ?? entry?.validity.daysLeft;
   DateTime? get endDate => _snapshotEndDate ?? entry?.validity.endDate;
-  String? get photoUrl => _snapshotPhotoUrl ?? entry?.member.photoUrl;
+  String? get photoUrl => _snapshotPhotoUrl ?? (isEmployee ? employee?.photoUrl : entry?.member.photoUrl);
+  String? get jobType => _snapshotJobType ?? employee?.jobType;
+  String? get jobTitle => _snapshotJobTitle ?? employee?.jobTitle;
+  String? get employeeNumber => _snapshotEmployeeNumber ?? employee?.employeeNumber;
+  String? get displayJob {
+    if (jobTitle != null && jobTitle!.trim().isNotEmpty) return jobTitle!.trim();
+    if (jobType != null && jobType!.trim().isNotEmpty) {
+      return switch (jobType!) {
+        'coach' => 'Coach',
+        'reception' => 'Réception',
+        'cleaning' => 'Ménage & Hygiène',
+        'security' => 'Sécurité',
+        'manager' => 'Gérant / Manager',
+        'maintenance' => 'Maintenance',
+        _ => 'Employé',
+      };
+    }
+    return isEmployee ? 'Employé' : null;
+  }
 }
 
 class AccessDecision {
@@ -614,7 +644,13 @@ class TerminalAccessService {
         if (member?.memberNumber != null) 'member_number': member!.memberNumber,
         if (member?.phone != null) 'phone': member!.phone,
         if ((member?.id ?? person?.memberId) != null) 'member_id': member?.id ?? person!.memberId,
-        if (person?.employee?.jobType != null) 'job_type': person!.employee!.jobType,
+        if (person?.id != null) 'id': person!.id,
+        if ((person?.jobType ?? person?.employee?.jobType) != null)
+          'job_type': person?.jobType ?? person!.employee!.jobType,
+        if ((person?.jobTitle ?? person?.employee?.jobTitle) != null)
+          'job_title': person?.jobTitle ?? person!.employee!.jobTitle,
+        if ((person?.employeeNumber ?? person?.employee?.employeeNumber) != null)
+          'employee_number': person?.employeeNumber ?? person!.employee!.employeeNumber,
       };
   }
 

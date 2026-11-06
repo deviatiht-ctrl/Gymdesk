@@ -124,4 +124,18 @@ const stringsV5 = <String, List<String>>{
   'member_not_found_prompt': ['Manm nan pa jwenn otomatikman. Chèche pa non oswa telefòn.', 'Membre introuvable automatiquement. Recherchez par nom ou téléphone.', 'Member not found automatically. Search by name or phone.'],
   'collect_renewal': ['Enkese Renouvèlman', 'Encaisser le renouvellement', 'Collect Renewal'],
   'portal_renewal_success': ['Demann renouvèlman ou an voye ! Prezante nan sal la epi poze dwèt ou sou lektè a pou w konfime peman an.', 'Demande de renouvellement transmise ! Présentez-vous à la salle et posez votre doigt sur le lecteur pour valider votre renouvellement.', 'Renewal request sent! Present yourself at the gym and scan your finger on the reader to validate your renewal.'],
+  // Pwofil Anplwaye ak Pòs
+  'employee_number': ['Matrikil / Nimewo Anplwaye', 'Matricule / N° Employé', 'Employee Number'],
+  'employee_profile': ['Pwofil Anplwaye', 'Profil Employé', 'Employee Profile'],
+  'employee_details': ['Enfòmasyon sou anplwaye a', 'Détails de l’employé', 'Employee Details'],
+  'custom_job_hint': ['Ekri non pòs la (egz: Kesyè, Sipèvizè...)', 'Préciser l’intitulé du poste (ex: Caissière, Superviseur...)', 'Specify position (e.g. Cashier, Supervisor...)'],
+  'custom_job_required': ['Tanpri ekri non pòs la', 'Veuillez préciser le poste', 'Please enter position title'],
+  'employee_photo': ['Foto Anplwaye', 'Photo de l’employé', 'Employee Photo'],
+  'view_profile': ['Gade Pwofil', 'Voir Profil', 'View Profile'],
+  'edit_profile': ['Modifye Pwofil', 'Modifier Profil', 'Edit Profile'],
+  'hired_date': ['Dat Anbouschaj', 'Date d’embauche', 'Hire date'],
+  'captures_count': ['{n} kapti anrejistre', '{n} captures enregistrées', '{n} captures registered'],
+  'contact_info': ['Kontak', 'Contact', 'Contact'],
+  'security_access': ['Sekirite & Aksè', 'Sécurité & Accès', 'Security & Access'],
+  'employee_position_badge': ['Pòs', 'Poste', 'Position'],
 };

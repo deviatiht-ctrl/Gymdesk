@@ -367,15 +367,26 @@ class SyncEngine {
       if (next != null && next.isAfter(DateTime.now().toUtc())) continue;
       try {
         final member = await db.record(SyncEntity.members, photo.memberId);
-        if (member == null) continue;
+        final employee = member == null ? await db.record(SyncEntity.employees, photo.memberId) : null;
+        if (member == null && employee == null) continue;
         await remote.uploadPhoto(photo.objectPath, photo.bytes);
         await db.transaction(() async {
-          final current = await db.record(SyncEntity.members, photo.memberId);
-          if (current != null) {
-            await db.save(SyncEntity.members, {
-              ...(jsonDecode(current.payload) as Json),
-              'photo_url': photo.objectPath,
-            }, changedAt: clock.correctedNow);
+          if (member != null) {
+            final current = await db.record(SyncEntity.members, photo.memberId);
+            if (current != null) {
+              await db.save(SyncEntity.members, {
+                ...(jsonDecode(current.payload) as Json),
+                'photo_url': photo.objectPath,
+              }, changedAt: clock.correctedNow);
+            }
+          } else if (employee != null) {
+            final current = await db.record(SyncEntity.employees, photo.memberId);
+            if (current != null) {
+              await db.save(SyncEntity.employees, {
+                ...(jsonDecode(current.payload) as Json),
+                'photo_url': photo.objectPath,
+              }, changedAt: clock.correctedNow);
+            }
           }
           await (db.delete(
             db.photoUploads,
