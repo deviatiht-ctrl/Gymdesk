@@ -330,17 +330,6 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
       _isCapturing = true;
     });
 
-    if (fromTerminal && !_biometricService.terminalAvailable) {
-      final isFr = s.locale.languageCode == 'fr';
-      setState(() {
-        _isCapturing = false;
-        _errorMessage = isFr
-            ? 'Le lecteur de porte (BioEntry W2) n’est pas connecté au réseau. Vérifiez le câble réseau ou utilisez le lecteur USB BioMini.'
-            : 'Lektè sou pòt la (BioEntry W2) pa konekte nan rezo a. Verifye si fil Ethernet la byen branche oswa itilize lektè USB BioMini a.';
-      });
-      return;
-    }
-
     try {
       final sample = fromTerminal
           ? (await _biometricService.captureFromTerminal()).template
@@ -386,10 +375,9 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
         } catch (_) {}
       }
     } catch (e) {
-      final msg = e is BiometricUnavailableException ? e.message : '$e';
       setState(() {
         _isCapturing = false;
-        _errorMessage = msg;
+        _errorMessage = '${s.text('finger_capture_error')} ($e)';
       });
     }
   }

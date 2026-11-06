@@ -913,18 +913,6 @@ static class Program
                     Marshal.Copy(new IntPtr(fp.ToInt64() + 4), tpl, 0, 384);
                     result = "ok\t" + Convert.ToBase64String(tpl) + "\t" + q;
                 }
-                else if (rc == -305)
-                {
-                    result = "err\ttimeout\t-305";
-                }
-                else if (rc == -308 || rc == -309)
-                {
-                    result = "err\tlow_quality\t" + rc;
-                }
-                else if (rc == -106)
-                {
-                    result = "err\tbusy\t-106";
-                }
                 else
                 {
                     result = "err\tscan\t" + rc;

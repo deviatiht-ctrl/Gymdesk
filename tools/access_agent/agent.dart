@@ -496,35 +496,6 @@ Future<void> _handleTerminalScan(Map<String, dynamic> body, HttpResponse res) as
         });
         return;
       }
-      if (viaWatch != null && viaWatch.first == 'err') {
-        final errKind = viaWatch.length > 1 ? viaWatch[1] : 'scan_failed';
-        final errDetail = viaWatch.length > 2 ? viaWatch[2] : '';
-        String msg = 'Echèk eskan sou lektè pòt la.';
-        if (errKind == 'timeout' || errDetail == '-305') {
-          msg = 'Tan eskan sou pòt la pase — pa gen okenn dwèt ki poze sou lektè W2 a. Eseye ankò.';
-        } else if (errKind == 'low_quality' || errDetail == '-308' || errDetail == '-309') {
-          msg = 'Kalite anprent la twò ba — peze dwèt la byen plat sou sant lektè a.';
-        } else if (errKind == 'busy' || errDetail == '-106') {
-          msg = 'Lektè pòt la okipe — tann kèk segonn epi re-eseye.';
-        } else if (errDetail.isNotEmpty) {
-          msg = 'Echèk eskan sou pòt la: $errDetail';
-        }
-        await _json(res, {'success': false, 'error': errKind, 'message': msg});
-        return;
-      }
-    }
-
-    // Tcheke rapid si pòt la konekte nan rezo a anvan apèl long
-    try {
-      final sock = await Socket.connect(ip, port, timeout: const Duration(milliseconds: 1500));
-      sock.destroy();
-    } catch (_) {
-      await _json(res, {
-        'success': false,
-        'error': 'terminal_offline',
-        'message': 'Lektè sou pòt la (BioEntry W2) pa konekte nan rezo a ($ip:$port). Verifye si fil Ethernet la byen branche nan laptop la oswa itilize lektè USB BioMini a.',
-      });
-      return;
     }
 
     // 2. Si siveyan an pa reponn oswa offline, fè yon apèl dirèk biostar_tool sscan
