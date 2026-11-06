@@ -1503,6 +1503,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
+                                ),
+                              ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: OutlinedButton.icon(
@@ -1524,8 +1526,6 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                ),
-                              ),
                                 ),
                               ),
                             ],
@@ -2338,7 +2338,8 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                 const SizedBox(height: 4),
                 Text(
                   (_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)
-                      ? 'Empreinte enregistrée et configurée.'
+                      ? (isFr ? 'Empreinte enregistrée et configurée.' : 'Anprent anrejistre epi konfigire.')
+                      : (isFr ? 'Vous pouvez aussi utiliser le lecteur de la porte ci-dessous :' : 'Ou ka itilize lektè pòt la tou anba a :'),
                   style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                 ),
                 if ((_selectedFingerIndex == 1 ? _primaryTemplate == null : _backupTemplate == null)) ...[
@@ -2362,8 +2363,6 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                     ),
                   ),
                 ],
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                ),
                 if ((_selectedFingerIndex == 1 ? _primaryTemplate != null : _backupTemplate != null)) ...[
                   const SizedBox(height: 8),
                   TextButton.icon(

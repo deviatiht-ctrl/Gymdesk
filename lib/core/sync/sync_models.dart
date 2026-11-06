@@ -82,12 +82,24 @@ class StaffSession {
       : const {};
 
   String get jobTitle => permissions['job_title'] as String? ?? (isSupervisor ? 'superviseur' : (isReception ? 'reception' : role));
+  bool get isSecretaryOrCashier =>
+      jobTitle.contains('secretaire') ||
+      jobTitle.contains('caissier') ||
+      jobTitle == 'secretaire_caissiere';
+
   bool get canAddMembers => isOwner || (permissions['can_add_members'] as bool? ?? true);
-  bool get canCashier => isOwner || (permissions['can_cashier'] as bool? ?? (isReception || isSupervisor));
+  bool get canCashier =>
+      isOwner ||
+      isSecretaryOrCashier ||
+      (permissions['can_cashier'] as bool? ?? (isReception || isSupervisor));
   bool get canViewPayments => isOwner || (permissions['can_view_payments'] as bool? ?? true);
   bool get canViewReceipts => isOwner || (permissions['can_view_receipts'] as bool? ?? true);
-  bool get canViewReports => isOwner || (permissions['can_view_reports'] as bool? ?? isSupervisor);
-  bool get canManagePlans => isOwner || (permissions['can_manage_plans'] as bool? ?? isSupervisor);
+  bool get canViewReports =>
+      isOwner ||
+      (permissions['can_view_reports'] as bool? ?? (isSupervisor || isSecretaryOrCashier));
+  bool get canManagePlans =>
+      isOwner ||
+      (permissions['can_manage_plans'] as bool? ?? (isSupervisor || isSecretaryOrCashier));
   bool get canAccessControl => isOwner || (permissions['can_access_control'] as bool? ?? true);
   bool get active =>
       staff['active'] == true &&

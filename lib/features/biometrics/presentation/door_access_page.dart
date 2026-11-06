@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -48,6 +50,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   String? _matchedName;
   bool _matchedIsEmployee = false;
   int? _daysLeft;
+  Uint8List? _matchedPhoto;
 
   final _searchController = TextEditingController();
   List<MemberListEntry> _searchResults = [];
@@ -113,6 +116,38 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
   /// Desizyon tèminal la deja pran (pòt ouvri, evènman pibliye, prezans
   /// anrejistre) pa AccessMonitor: isit la nou jis montre l.
+  Future<void> _loadMemberPhoto(Member member) async {
+    try {
+      final bytes = await _membersRepo.photoBytes(member).timeout(const Duration(seconds: 4));
+      if (mounted && bytes != null && bytes.isNotEmpty) {
+        setState(() => _matchedPhoto = bytes);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadMemberPhotoById(String memberId, [String? photoUrl]) async {
+    try {
+      final local = await _membersRepo.localPhoto(memberId);
+      if (local != null && local.isNotEmpty) {
+        if (mounted) setState(() => _matchedPhoto = local);
+        return;
+      }
+      if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http')) {
+        final runtime = ref.read(appRuntimeProvider);
+        final bytes = await runtime.client.storage
+            .from('member-photos')
+            .download(photoUrl)
+            .timeout(const Duration(seconds: 4));
+        if (mounted && bytes.isNotEmpty) {
+          setState(() => _matchedPhoto = bytes);
+          return;
+        }
+      }
+      final member = await _membersRepo.watchMember(memberId).first.timeout(const Duration(seconds: 3));
+      if (member != null) await _loadMemberPhoto(member);
+    } catch (_) {}
+  }
+
   void _onTerminalDecision(AccessDecision decision) {
     if (!mounted) return;
     final person = decision.person;
@@ -135,7 +170,15 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
           : person.reason == 'expired'
           ? AccessStatus.deniedExpired
           : AccessStatus.deniedNoSubscription;
+      _matchedPhoto = null;
     });
+    final m = person?.entry?.member;
+    final mId = person?.memberId ?? m?.id;
+    if (m != null) {
+      _loadMemberPhoto(m);
+    } else if (mId != null) {
+      _loadMemberPhotoById(mId, person?.photoUrl);
+    }
     _scheduleDismiss(Duration(seconds: granted ? 6 : 6));
   }
 
@@ -455,9 +498,10 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     final isEn = s.locale.languageCode == 'en';
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: const Color(0xFF070D18),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: const Color(0xFF0F172A).withOpacity(0.92),
+        elevation: 0,
         foregroundColor: Colors.white,
         title: Text(s.text('door_access_kiosk')),
         actions: [
@@ -483,16 +527,49 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
           ),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Bandeau d'état dynamique : Tèminal Pòt + Lektè USB (Responsive)
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final isNarrow = constraints.maxWidth < 650;
-                return Container(
-                  padding: EdgeInsets.symmetric(horizontal: isNarrow ? 12 : 24, vertical: isNarrow ? 8 : 12),
-                  color: const Color(0xFF1E293B),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isLandscape = constraints.maxWidth >= constraints.maxHeight;
+          final bgAsset = isLandscape
+              ? 'assets/brand/background_desktop.jpeg'
+              : 'assets/brand/background_mobile.jpeg';
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: Image.asset(
+                  bgAsset,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.center,
+                ),
+              ),
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        const Color(0xFF070D18).withOpacity(0.88),
+                        const Color(0xFF0F172A).withOpacity(0.85),
+                        const Color(0xFF064E3B).withOpacity(0.88),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SafeArea(
+                child: Column(
+                  children: [
+                    // Bandeau d'état dynamique : Tèminal Pòt + Lektè USB (Responsive)
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isNarrow = constraints.maxWidth < 650;
+                        return Container(
+                          padding: EdgeInsets.symmetric(horizontal: isNarrow ? 12 : 24, vertical: isNarrow ? 8 : 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F172A).withOpacity(0.75),
+                            border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.08))),
+                          ),
                   child: isNarrow
                       ? Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -841,12 +918,16 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
           ],
         ),
       ),
+            ],
+          );
+        },
+      ),
     );
   }
 
   Widget _buildAccessResultCard(AppStrings s, bool isFr, bool isEn) {
     final isGranted = _status == AccessStatus.granted;
-    final color = isGranted ? const Color(0xFF059669) : const Color(0xFFDC2626);
+    final color = isGranted ? const Color(0xFF10B981) : const Color(0xFFEF4444);
 
     String title;
     String subtitle;
@@ -872,81 +953,149 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     }
 
     final displayName = _matchedMember?.fullName ?? _matchedName;
+    final initials = displayName?.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join();
 
-    return Card(
-      elevation: 8,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      color: isGranted ? const Color(0xFF064E3B) : const Color(0xFF7F1D1D),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        child: Column(
-          children: [
-            CircleAvatar(
-              radius: 40,
-              backgroundColor: color,
-              child: Icon(
-                isGranted ? LucideIcons.checkCheck : LucideIcons.shieldAlert,
-                size: 48,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 24,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.5,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70, fontSize: 16),
-            ),
-            if (displayName != null) ...[
-              const SizedBox(height: 18),
-              const Divider(color: Colors.white24),
-              const SizedBox(height: 12),
-              Text(
-                displayName,
-                style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              if (_daysLeft != null) ...[
-                const SizedBox(height: 4),
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.88),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: color.withOpacity(0.65),
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.25),
+            blurRadius: 32,
+            spreadRadius: 4,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Glowing Circle Avatar with Member Photo
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color, width: 4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(0.45),
+                        blurRadius: 22,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                    color: color.withOpacity(0.15),
+                    image: _matchedPhoto != null
+                        ? DecorationImage(
+                            image: MemoryImage(_matchedPhoto!),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
+                  ),
+                  child: _matchedPhoto == null
+                      ? Center(
+                          child: (initials != null && initials.isNotEmpty)
+                              ? Text(
+                                  initials,
+                                  style: TextStyle(
+                                    color: color,
+                                    fontSize: 44,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                )
+                              : Icon(
+                                  isGranted ? LucideIcons.checkCheck : LucideIcons.shieldAlert,
+                                  size: 54,
+                                  color: color,
+                                ),
+                        )
+                      : null,
+                ),
+                const SizedBox(height: 20),
                 Text(
-                  s.text('days_left_n').replaceAll('{n}', '$_daysLeft'),
+                  title,
                   style: TextStyle(
-                    color: _daysLeft! <= 5 ? Colors.amberAccent : const Color(0xFF34D399),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    color: color,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
                   ),
                 ),
-              ],
-              if (_matchedMember != null) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
                 Text(
-                  'ID: ${_matchedMember!.memberNumber.isNotEmpty ? _matchedMember!.memberNumber : _matchedMember!.id.substring(0, 8)}',
-                  style: const TextStyle(color: Colors.white60, fontSize: 13),
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 16),
                 ),
-                if (!isGranted) ...[
+                if (displayName != null) ...[
                   const SizedBox(height: 18),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF7F1D1D),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  const Divider(color: Colors.white12),
+                  const SizedBox(height: 12),
+                  Text(
+                    displayName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
                     ),
-                    onPressed: () => context.push('/members/${_matchedMember!.id}'),
-                    icon: const Icon(LucideIcons.refreshCw, size: 18),
-                    label: Text(s.text('renew_now'), style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
+                  if (_daysLeft != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: (_daysLeft! <= 5 ? Colors.amber : const Color(0xFF10B981)).withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: _daysLeft! <= 5 ? Colors.amber : const Color(0xFF10B981),
+                          width: 1,
+                        ),
+                      ),
+                      child: Text(
+                        s.text('days_left_n').replaceAll('{n}', '$_daysLeft'),
+                        style: TextStyle(
+                          color: _daysLeft! <= 5 ? Colors.amberAccent : const Color(0xFF34D399),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (_matchedMember != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'ID: ${_matchedMember!.memberNumber.isNotEmpty ? _matchedMember!.memberNumber : _matchedMember!.id.substring(0, 8)}',
+                      style: const TextStyle(color: Colors.white54, fontSize: 13),
+                    ),
+                    if (!isGranted) ...[
+                      const SizedBox(height: 18),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF7F1D1D),
+                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => context.push('/members/${_matchedMember!.id}'),
+                        icon: const Icon(LucideIcons.refreshCw, size: 18),
+                        label: Text(s.text('renew_now'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ],
                 ],
               ],
-            ],
-          ],
+            ),
+          ),
         ),
       ),
     );

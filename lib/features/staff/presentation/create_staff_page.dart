@@ -54,14 +54,14 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
         _permReportsView = false;
         _permPlansManage = false;
         _permAccessControl = true;
-      } else if (job == 'secretaire') {
+      } else if (job == 'secretaire' || job == 'secretaire_caissiere') {
         _role = 'reception';
         _permMembersAdd = true;
-        _permCashier = false;
-        _permPaymentsView = false;
+        _permCashier = true;
+        _permPaymentsView = true;
         _permReceiptsView = true;
-        _permReportsView = false;
-        _permPlansManage = false;
+        _permReportsView = true;
+        _permPlansManage = true;
         _permAccessControl = true;
       } else if (job == 'superviseur') {
         _role = 'supervisor';

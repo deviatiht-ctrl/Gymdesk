@@ -129,6 +129,56 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     if (mounted) context.go('/members');
   }
 
+  Future<void> _deleteMember(Member member) async {
+    final s = AppStrings.of(context);
+    final isFr = s.locale.languageCode == 'fr';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(LucideIcons.triangleAlert, color: Color(0xFFDC2626), size: 24),
+            const SizedBox(width: 10),
+            Text(isFr ? 'Supprimer ce membre' : 'Siprime manm sa a'),
+          ],
+        ),
+        content: Text(
+          isFr
+              ? 'Êtes-vous sûr de vouloir supprimer définitivement ${member.fullName} ? Cette action effacera ses données et son accès.'
+              : 'Èske w sèten ou vle efase ${member.fullName} nèt ale ? Aksyon sa a ap retire tout enfòmasyon li ak aksè li.',
+          style: const TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(s.text('cancel')),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(LucideIcons.trash2, size: 16),
+            label: Text(isFr ? 'Supprimer définitivement' : 'Efase Nèt'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _run(() => _members.archive(member, changedAt: _now));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isFr ? 'Membre supprimé avec succès.' : 'Manm nan efase avèk siksè.'),
+          backgroundColor: const Color(0xFFDC2626),
+        ),
+      );
+      context.go('/members');
+    }
+  }
+
   Future<void> _resetPin(Member member) async {
     final s = AppStrings.of(context);
     final confirmed = await showDialog<bool>(
@@ -1198,6 +1248,16 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                           icon: const Icon(LucideIcons.refreshCw),
                           label: Text(s.text('renew_subscription')),
                         ),
+                        if (role == 'owner')
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFDC2626),
+                              side: const BorderSide(color: Color(0xFFFCA5A5)),
+                            ),
+                            onPressed: _busy ? null : () => _deleteMember(member),
+                            icon: const Icon(LucideIcons.trash2, size: 16),
+                            label: Text(s.locale.languageCode == 'fr' ? 'Supprimer' : 'Siprime'),
+                          ),
                         if (canManage)
                           PopupMenuButton<String>(
                             onSelected: (value) {
@@ -1232,6 +1292,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                   ),
                                 );
                               }
+                              if (value == 'delete_member') _deleteMember(member);
                               if (value == 'archive') _archive(member);
                             },
                             itemBuilder: (context) => [
@@ -1273,11 +1334,25 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                     ),
                                   ),
                                 ),
-                              if (role == 'owner')
+                              if (role == 'owner') ...[
+                                PopupMenuItem(
+                                  value: 'delete_member',
+                                  child: Row(
+                                    children: [
+                                      const Icon(LucideIcons.trash2, color: Color(0xFFDC2626), size: 18),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        s.locale.languageCode == 'fr' ? 'Supprimer le membre' : 'Siprime Manm nan',
+                                        style: const TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.w600),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                                 PopupMenuItem(
                                   value: 'archive',
                                   child: Text(s.text('archive')),
                                 ),
+                              ],
                             ],
                           ),
                       ],

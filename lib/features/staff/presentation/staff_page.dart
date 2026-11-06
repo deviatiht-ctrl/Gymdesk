@@ -129,6 +129,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
     return switch (job) {
       'caissier' => s.text('job_title_cashier'),
       'secretaire' => s.text('job_title_secretary'),
+      'secretaire_caissiere' => 'Secrétaire & Caissière',
       'superviseur' => s.text('job_title_supervisor'),
       _ => s.text(p.role),
     };
@@ -160,14 +161,14 @@ class _StaffPageState extends ConsumerState<StaffPage> {
           permReportsView = false;
           permPlansManage = false;
           permAccessControl = true;
-        } else if (job == 'secretaire') {
+        } else if (job == 'secretaire' || job == 'secretaire_caissiere') {
           role = 'reception';
           permMembersAdd = true;
-          permCashier = false;
-          permPaymentsView = false;
+          permCashier = true;
+          permPaymentsView = true;
           permReceiptsView = true;
-          permReportsView = false;
-          permPlansManage = false;
+          permReportsView = true;
+          permPlansManage = true;
           permAccessControl = true;
         } else if (job == 'superviseur') {
           role = 'supervisor';
@@ -195,7 +196,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   DropdownButtonFormField<String>(
-                    value: ['caissier', 'secretaire', 'superviseur'].contains(jobTitle) ? jobTitle : 'personnalise',
+                    value: ['caissier', 'secretaire', 'secretaire_caissiere', 'superviseur'].contains(jobTitle) ? jobTitle : 'personnalise',
                     decoration: InputDecoration(
                       labelText: s.text('staff_position'),
                       prefixIcon: const Icon(LucideIcons.briefcase),
@@ -208,6 +209,10 @@ class _StaffPageState extends ConsumerState<StaffPage> {
                       DropdownMenuItem(
                         value: 'secretaire',
                         child: Text(s.text('job_title_secretary')),
+                      ),
+                      const DropdownMenuItem(
+                        value: 'secretaire_caissiere',
+                        child: Text('Secrétaire & Caissière'),
                       ),
                       DropdownMenuItem(
                         value: 'superviseur',

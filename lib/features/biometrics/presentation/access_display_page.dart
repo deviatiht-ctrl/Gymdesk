@@ -17,15 +17,11 @@ import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../l10n/app_strings.dart';
-import '../../employees/data/employees_repository.dart';
 import '../../members/data/members_repository.dart';
 import '../../members/domain/member.dart';
 import '../../settings/data/settings_repository.dart';
 
-/// Ouvri ekran aksè a nan yon fenèt apa (web) pou li ka ale sou 2yèm ekran
-/// ki devan pòt la oswa sou yon tablèt Wi-Fi.
-/// Web : vraie fenêtre navigateur (déplaçable sur le 2e écran) ; Windows : 2e
-/// processus SecurGYM. La fenêtre principale reste libre (réduire, autre page).
+/// Ouvrir l'écran d'accès sur le 2e écran public ou tablette Wi-Fi.
 Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = false]) async {
   final target = isTablet ? '/tablet-access' : '/access-display';
   final opened = await AccessDisplayBridge.instance.openDisplayWindow(target);
@@ -43,10 +39,9 @@ Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = fal
   context.push(target);
 }
 
-/// Ekran devan pòt la: lè yon moun mete dwèt li sou W2 a, li montre non li,
-/// yon mesaj byenveni/ankourajman, konbyen jou ki rete, ak avètisman peman.
-/// Se fenèt sa a tou ki ka vewouye nan mòd Kiosk pou sekirite sou tablèt,
-/// epi ki gen bouton pou manm yo ka verifye rès tan yo san yo pa louvri pòt la.
+/// Écran d'accueil et de contrôle d'accès sur le 2e moniteur public (Kiosk).
+/// Design ultra-moderne avec pattern adaptatif (desktop / mobile), affichage photo en temps réel,
+/// espace annonce SecurGYM et interface 100% en français.
 class AccessDisplayPage extends ConsumerStatefulWidget {
   const AccessDisplayPage({super.key, this.isTabletMode = false});
   final bool isTabletMode;
@@ -74,20 +69,28 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   DateTime _now = DateTime.now();
   bool _agentOnline = true;
   bool _terminalOnline = false;
-  int _quote = math.Random().nextInt(8) + 1;
+  int _quote = math.Random().nextInt(8);
   AccessDecision? _decision;
   Uint8List? _photo;
   String? _logoUrl;
   int _todayCount = 0;
 
-  // Mòd Kiosk Fèmen & Verifikasyon
+  // Mode Kiosk Verrouillé
   bool _kioskLocked = true;
-  bool _isCheckOnly = false;
-  bool _inquiryActive = false;
-  BuildContext? _inquiryContext;
   BuildContext? _kioskUnlockContext;
   static const _storage = FlutterSecureStorage();
   static const _kioskPinKey = 'gymdesk:kiosk_pin';
+
+  static const _frenchQuotes = [
+    'Chaque entraînement est une victoire sur vous-même.',
+    'La discipline est la clé de la transformation physique.',
+    'Dépassez vos limites aujourd\'hui pour être plus fort demain.',
+    'Le succès commence par la persévérance et l\'effort.',
+    'Faites de chaque séance votre chef-d\'œuvre.',
+    'La douleur d\'aujourd\'hui est votre force de demain.',
+    'Rien n\'est impossible avec de la régularité et du courage.',
+    'Bienvenue chez SecurGYM, donnez le meilleur de vous-même !',
+  ];
 
   @override
   void initState() {
@@ -99,7 +102,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       if (mounted) setState(() => _now = DateTime.now());
     });
     _quoteTimer = Timer.periodic(const Duration(seconds: 9), (_) {
-      if (mounted && _decision == null) setState(() => _quote = _quote % 8 + 1);
+      if (mounted && _decision == null) setState(() => _quote = (_quote + 1) % _frenchQuotes.length);
     });
     unawaited(_start());
   }
@@ -112,14 +115,12 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     } catch (_) {}
     if (mounted) setState(() {});
 
-    // 1. Siveyan global la (AccessMonitor) trete evènman W2 yo sou Desktop ak Web (PC resepsyon).
     final monitor = AccessMonitor.instance;
     monitor.terminalOnline.addListener(_onMonitorStatus);
     monitor.agentOnline.addListener(_onMonitorStatus);
     _events = monitor.decisions.listen(_onDecision);
     final bridge = AccessDisplayBridge.instance;
     if (bridge.launchedAsDisplay) {
-      // Fenêtre séparée : les décisions viennent de la fenêtre principale (instantané).
       bridge.hostAlive.addListener(_onMonitorStatus);
       bridge.hostAgentOnline.addListener(_onMonitorStatus);
       bridge.hostTerminalOnline.addListener(_onMonitorStatus);
@@ -132,7 +133,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     }
     _onMonitorStatus();
 
-    // 2. Koute Supabase Realtime (Pou tablèt Wi-Fi resevwa evènman yo menm san agent lokal)
     final gymId = runtime.session?.gymId;
     if (gymId != null) {
       try {
@@ -172,8 +172,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     });
   }
 
-  /// Fenêtre séparée sans fenêtre principale ouverte : elle surveille le terminal
-  /// elle-même ; dès que la fenêtre principale revient, elle lui rend la main.
   void _ensureMonitorWhenAlone() {
     if (!mounted) return;
     final runtime = ref.read(appRuntimeProvider);
@@ -190,15 +188,8 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     _onMonitorStatus();
   }
 
-  /// Desizyon AccessMonitor la (PC): pòt, prezans ak evènman deja trete.
   Future<void> _onDecision(AccessDecision decision) async {
     if (!mounted) return;
-    final bool checkOnly = _inquiryActive;
-    if (checkOnly && _inquiryContext != null && _inquiryContext!.mounted) {
-      Navigator.of(_inquiryContext!).pop();
-      _inquiryContext = null;
-      _inquiryActive = false;
-    }
 
     if (_kioskUnlockContext != null && _kioskUnlockContext!.mounted) {
       final runtime = ref.read(appRuntimeProvider);
@@ -211,7 +202,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Kiosk debloke avèk anprent !'),
+              content: Text('Kiosque déverrouillé avec empreinte !'),
               backgroundColor: Color(0xFF059669),
             ),
           );
@@ -220,20 +211,22 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     }
 
     final member = decision.person?.entry?.member;
+    final memberId = decision.person?.memberId ?? member?.id;
     if (member != null) {
       unawaited(_loadPhoto(member, decision));
-    } else if (decision.person?.memberId != null) {
-      unawaited(_loadPhotoById(decision.person!.memberId!, decision));
+    } else if (memberId != null) {
+      unawaited(_loadPhotoById(memberId, decision, decision.person?.photoUrl));
     }
+
     setState(() {
       _decision = decision;
       _photo = null;
-      _isCheckOnly = checkOnly;
-      _quote = math.Random().nextInt(8) + 1;
-      if (!checkOnly && (decision.outcome == AccessOutcome.granted || decision.outcome == AccessOutcome.legacy)) {
+      _quote = math.Random().nextInt(_frenchQuotes.length);
+      if (decision.outcome == AccessOutcome.granted || decision.outcome == AccessOutcome.legacy) {
         _todayCount++;
       }
     });
+
     _dismiss?.cancel();
     _dismiss = Timer(
       Duration(seconds: switch (decision.outcome) {
@@ -250,26 +243,24 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
 
   Future<void> _loadPhoto(Member member, AccessDecision decision) async {
     try {
+      final local = await _members.localPhoto(member.id);
+      if (local != null && local.isNotEmpty) {
+        if (mounted && identical(_decision, decision)) setState(() => _photo = local);
+        return;
+      }
       final photo = await _members.photoBytes(member).timeout(const Duration(seconds: 4));
-      if (mounted && identical(_decision, decision)) setState(() => _photo = photo);
+      if (mounted && identical(_decision, decision) && photo != null) {
+        setState(() => _photo = photo);
+      }
     } catch (_) {}
   }
 
-  /// Tretman evènman an tan reyèl ki soti nan Supabase (Pou Tablèt sou Wi-Fi)
   Future<void> _handleRealtimeAccessEvent(Map<String, dynamic> row) async {
     final memberId = row['member_id']?.toString();
     final eventType = row['event_type']?.toString() ?? 'granted';
     final isGranted = eventType == 'granted';
     final snapshot = Map<String, dynamic>.from(row['member_snapshot'] as Map? ?? {});
 
-    final bool checkOnly = _inquiryActive;
-    if (checkOnly && _inquiryContext != null && _inquiryContext!.mounted) {
-      Navigator.of(_inquiryContext!).pop();
-      _inquiryContext = null;
-      _inquiryActive = false;
-    }
-
-    // Tablèt: afiche touswit ak snapshot evènman an (pa gen chajman lou).
     final person = snapshot.isNotEmpty ? AccessPerson.fromSnapshot(snapshot) : null;
     if (!mounted) return;
     final outcome = isGranted
@@ -279,16 +270,33 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     setState(() {
       _decision = decision;
       _photo = null;
-      _isCheckOnly = checkOnly;
-      _quote = math.Random().nextInt(8) + 1;
-      if (!checkOnly && isGranted) _todayCount++;
+      _quote = math.Random().nextInt(_frenchQuotes.length);
+      if (isGranted) _todayCount++;
     });
-    if (memberId != null) unawaited(_loadPhotoById(memberId, decision));
+    if (memberId != null) {
+      unawaited(_loadPhotoById(memberId, decision, snapshot['photo_url']?.toString()));
+    }
     _scheduleDismiss(Duration(seconds: isGranted ? 8 : 6));
   }
 
-  Future<void> _loadPhotoById(String memberId, AccessDecision decision) async {
+  Future<void> _loadPhotoById(String memberId, AccessDecision decision, [String? photoUrl]) async {
     try {
+      final local = await _members.localPhoto(memberId);
+      if (local != null && local.isNotEmpty) {
+        if (mounted && identical(_decision, decision)) setState(() => _photo = local);
+        return;
+      }
+      if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http')) {
+        final runtime = ref.read(appRuntimeProvider);
+        final bytes = await runtime.client.storage
+            .from('member-photos')
+            .download(photoUrl)
+            .timeout(const Duration(seconds: 3));
+        if (mounted && identical(_decision, decision) && bytes.isNotEmpty) {
+          setState(() => _photo = bytes);
+          return;
+        }
+      }
       final member = await _members.watchMember(memberId).first.timeout(const Duration(seconds: 3));
       if (member != null) await _loadPhoto(member, decision);
     } catch (_) {}
@@ -300,7 +308,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       if (mounted) {
         setState(() {
           _decision = null;
-          _isCheckOnly = false;
         });
       }
     });
@@ -326,15 +333,19 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     super.dispose();
   }
 
-  String _greeting(AppStrings s) => s.text(_now.hour < 12 ? 'good_morning' : _now.hour < 18 ? 'good_afternoon' : 'good_evening');
+  String _frenchGreeting() {
+    final h = _now.hour;
+    if (h < 12) return 'Bonjour';
+    if (h < 18) return 'Bon après-midi';
+    return 'Bonsoir';
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = AppStrings.of(context);
     final runtime = ref.watch(appRuntimeProvider);
     final gymName = runtime.session?.name ?? 'SecurGYM';
-    final locale = Localizations.localeOf(context).languageCode;
-    final dateFmt = DateFormat.yMMMMEEEEd(locale == 'ht' ? 'fr' : locale);
+    final dateFmt = DateFormat.yMMMMEEEEd('fr');
 
     return PopScope(
       canPop: !_kioskLocked,
@@ -344,129 +355,213 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
         }
       },
       child: Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF0B1220), Color(0xFF0F172A), Color(0xFF0B3B36)],
-            ),
-          ),
-          child: SafeArea(
-            child: Column(children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
-                child: Row(children: [
-                  if (_logoUrl != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(_logoUrl!, width: 52, height: 52, fit: BoxFit.contain,
-                          errorBuilder: (_, _, _) => const SizedBox.shrink()),
-                    )
-                  else
-                    const Icon(LucideIcons.dumbbell, color: Color(0xFF2DD4BF), size: 40),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(gymName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: .5)),
+        backgroundColor: const Color(0xFF070D18),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final isLandscape = constraints.maxWidth >= constraints.maxHeight;
+            final bgAsset = isLandscape
+                ? 'assets/brand/background_desktop.jpeg'
+                : 'assets/brand/background_mobile.jpeg';
+
+            return Stack(
+              children: [
+                // Background Pattern adaptatif (Desktop / Mobile)
+                Positioned.fill(
+                  child: Image.asset(
+                    bgAsset,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.center,
                   ),
-                  _buildKioskControls(context, s),
-                  const SizedBox(width: 24),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    Text(DateFormat.Hm().format(_now),
-                        style: const TextStyle(color: Colors.white, fontSize: 38, fontWeight: FontWeight.w300, height: 1)),
-                    Text(_capitalize(dateFmt.format(_now)), style: const TextStyle(color: Colors.white60, fontSize: 14)),
-                  ]),
-                ]),
-              ),
-              if (!_isTabletWifiMode && (!_agentOnline || !_terminalOnline))
-                Container(
-                  margin: const EdgeInsets.fromLTRB(32, 16, 32, 0),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withAlpha(40),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.orange.withAlpha(120)),
-                  ),
-                  child: Row(children: [
-                    const Icon(LucideIcons.wifiOff, color: Colors.orangeAccent, size: 18),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(s.text(!_agentOnline ? 'agent_offline_banner' : 'terminal_offline_banner'),
-                          style: const TextStyle(color: Colors.orangeAccent)),
-                    ),
-                    const SizedBox(width: 12),
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFF2DD4BF),
-                        backgroundColor: const Color(0xFF0F766E).withAlpha(60),
-                      ),
-                      icon: const Icon(LucideIcons.tablet, size: 16),
-                      label: const Text('Mòd Tablèt Wi-Fi'),
-                      onPressed: () => setState(() => _isTabletWifiMode = true),
-                    ),
-                  ]),
-                )
-              else if (_isTabletWifiMode)
-                Container(
-                  margin: const EdgeInsets.fromLTRB(32, 16, 32, 0),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0F766E).withAlpha(40),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF14B8A6).withAlpha(100)),
-                  ),
-                  child: Row(children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF10B981),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(color: Color(0xFF10B981), blurRadius: 6, spreadRadius: 1),
+                ),
+                // Gradient sombre luxueux pour le contraste
+                Positioned.fill(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          const Color(0xFF070D18).withOpacity(0.88),
+                          const Color(0xFF0F172A).withOpacity(0.85),
+                          const Color(0xFF0B3B36).withOpacity(0.88),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Text(
-                        'Mòd Tablèt Wi-Fi · SecurGYM Cloud Live (Koneksyon an dirèk ak nwaj la pou resevwa tout eskanè yo san fil)',
-                        style: TextStyle(color: Color(0xFF5EEAD4), fontSize: 13, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    const Icon(LucideIcons.wifi, color: Color(0xFF2DD4BF), size: 18),
-                  ]),
-                ),
-              Expanded(
-                child: Center(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 450),
-                    switchInCurve: Curves.easeOutBack,
-                    transitionBuilder: (child, anim) => FadeTransition(
-                      opacity: anim,
-                      child: ScaleTransition(scale: Tween(begin: .92, end: 1.0).animate(anim), child: child),
-                    ),
-                    child: _decision == null
-                        ? _idle(s)
-                        : KeyedSubtree(key: ValueKey(_decision), child: _result(s, _decision!)),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(32, 0, 32, 18),
-                child: Row(children: [
-                  const Icon(LucideIcons.userCheck, color: Colors.white38, size: 16),
-                  const SizedBox(width: 6),
-                  Text('$_todayCount', style: const TextStyle(color: Colors.white54)),
-                  const Spacer(),
-                  Text(s.text('fullscreen_hint'), style: const TextStyle(color: Colors.white30, fontSize: 12)),
-                ]),
-              ),
-            ]),
-          ),
+                SafeArea(
+                  child: Column(
+                    children: [
+                      // Header : Logo, Nom du Gym, Statut Kiosk, Horloge
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(32, 20, 32, 0),
+                        child: Row(
+                          children: [
+                            if (_logoUrl != null)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(
+                                  _logoUrl!,
+                                  width: 52,
+                                  height: 52,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                                ),
+                              )
+                            else
+                              const Icon(LucideIcons.dumbbell, color: Color(0xFF2DD4BF), size: 40),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Text(
+                                gymName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 26,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: .5,
+                                ),
+                              ),
+                            ),
+                            _buildKioskControls(context, s),
+                            const SizedBox(width: 24),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  DateFormat.Hm().format(_now),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 38,
+                                    fontWeight: FontWeight.w300,
+                                    height: 1,
+                                  ),
+                                ),
+                                Text(
+                                  _capitalize(dateFmt.format(_now)),
+                                  style: const TextStyle(color: Colors.white60, fontSize: 14),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Bannières d'état réseau & terminal
+                      if (!_isTabletWifiMode && (!_agentOnline || !_terminalOnline))
+                        Container(
+                          margin: const EdgeInsets.fromLTRB(32, 16, 32, 0),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(LucideIcons.wifiOff, color: Colors.orangeAccent, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  !_agentOnline
+                                      ? 'Agent local d’accès hors ligne'
+                                      : 'Lecteur d’accès porte (Suprema W2) hors ligne',
+                                  style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF2DD4BF),
+                                  backgroundColor: const Color(0xFF0F766E).withOpacity(0.3),
+                                ),
+                                icon: const Icon(LucideIcons.tablet, size: 16),
+                                label: const Text('Mode Kiosque Wi-Fi'),
+                                onPressed: () => setState(() => _isTabletWifiMode = true),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (_isTabletWifiMode)
+                        Container(
+                          margin: const EdgeInsets.fromLTRB(32, 16, 32, 0),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F766E).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF14B8A6).withOpacity(0.4)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 10,
+                                height: 10,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF10B981),
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(color: Color(0xFF10B981), blurRadius: 6, spreadRadius: 1),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'Mode Kiosque Wi-Fi Cloud · En direct avec SecurGYM pour validation instantanée',
+                                  style: TextStyle(color: Color(0xFF5EEAD4), fontSize: 13, fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                              const Icon(LucideIcons.wifi, color: Color(0xFF2DD4BF), size: 18),
+                            ],
+                          ),
+                        ),
+
+                      // Zone Centrale : État En Attente (Idle) ou Résultat d'accès
+                      Expanded(
+                        child: Center(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 450),
+                            switchInCurve: Curves.easeOutBack,
+                            transitionBuilder: (child, anim) => FadeTransition(
+                              opacity: anim,
+                              child: ScaleTransition(
+                                scale: Tween(begin: .92, end: 1.0).animate(anim),
+                                child: child,
+                              ),
+                            ),
+                            child: _decision == null
+                                ? _idle(s)
+                                : KeyedSubtree(key: ValueKey(_decision), child: _result(s, _decision!)),
+                          ),
+                        ),
+                      ),
+
+                      // Footer : Compteur d'entrées du jour & raccourci F11
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(32, 0, 32, 18),
+                        child: Row(
+                          children: [
+                            const Icon(LucideIcons.userCheck, color: Colors.white38, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Entrées aujourd’hui : $_todayCount',
+                              style: const TextStyle(color: Colors.white60, fontSize: 13, fontWeight: FontWeight.w500),
+                            ),
+                            const Spacer(),
+                            const Text(
+                              'F11 pour plein écran',
+                              style: TextStyle(color: Colors.white30, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -475,8 +570,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   String _capitalize(String v) => v.isEmpty ? v : v[0].toUpperCase() + v.substring(1);
 
   Widget _buildKioskControls(BuildContext context, AppStrings s) {
-    final isFr = s.locale.languageCode == 'fr';
-    final isEn = s.locale.languageCode == 'en';
     if (_kioskLocked) {
       return Material(
         color: Colors.transparent,
@@ -486,18 +579,18 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B).withAlpha(40),
+              color: const Color(0xFFF59E0B).withOpacity(0.18),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFF59E0B).withAlpha(160)),
+              border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.5)),
             ),
-            child: Row(
+            child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(LucideIcons.lock, color: Color(0xFFFBBF24), size: 16),
-                const SizedBox(width: 8),
+                Icon(LucideIcons.lock, color: Color(0xFFFBBF24), size: 16),
+                SizedBox(width: 8),
                 Text(
-                  isFr ? 'Kiosque Verrouillé' : isEn ? 'Kiosk Locked' : 'Kiosk Vewouye',
-                  style: const TextStyle(color: Color(0xFFFDE68A), fontSize: 13, fontWeight: FontWeight.w600),
+                  'Kiosque Verrouillé',
+                  style: TextStyle(color: Color(0xFFFDE68A), fontSize: 13, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -517,12 +610,12 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
           ),
           onPressed: () => setState(() => _kioskLocked = true),
           icon: const Icon(LucideIcons.lockOpen, size: 15),
-          label: Text(isFr ? 'Verrouiller' : 'Vewouye'),
+          label: const Text('Verrouiller'),
         ),
         const SizedBox(width: 10),
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFEF4444).withAlpha(180),
+            backgroundColor: const Color(0xFFEF4444).withOpacity(0.8),
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           ),
@@ -538,104 +631,196 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
             }
           },
           icon: const Icon(LucideIcons.logOut, size: 15),
-          label: Text(isFr ? 'Quitter' : 'Sòti'),
+          label: const Text('Quitter'),
         ),
       ],
     );
   }
 
   Widget _idle(AppStrings s) {
-    final locale = s.locale.languageCode;
-    return Column(
+    return SingleChildScrollView(
       key: const ValueKey('idle'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AnimatedBuilder(
-          animation: _pulse,
-          builder: (context, _) => Container(
-            width: 200,
-            height: 200,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Capteur d'empreinte optique animé avec aura pulsante
+          AnimatedBuilder(
+            animation: _pulse,
+            builder: (context, _) => Container(
+              width: 190,
+              height: 190,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFF14B8A6).withOpacity(0.12),
+                border: Border.all(color: const Color(0xFF2DD4BF), width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF14B8A6).withOpacity(0.3 + 0.3 * _pulse.value),
+                    blurRadius: 30 + 25 * _pulse.value,
+                    spreadRadius: 4 + 8 * _pulse.value,
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: Icon(LucideIcons.fingerprint, size: 104, color: Color(0xFF5EEAD4)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 26),
+          const Text(
+            'Scannez votre empreinte',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 36,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Posez votre doigt sur le lecteur de la porte pour entrer',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 18),
+          ),
+          const SizedBox(height: 20),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 500),
+              child: Text(
+                '« ${_frenchQuotes[_quote % _frenchQuotes.length]} »',
+                key: ValueKey(_quote),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xFF99F6E4),
+                  fontSize: 18,
+                  fontStyle: FontStyle.italic,
+                  letterSpacing: 0.2,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+          // Annonce / Publicité SecurGYM pour l'espace membre
+          _buildSecurGymPromoCard(),
+        ],
+      ),
+    );
+  }
+
+  /// Carte promotionnelle Espace Membre SecurGYM (100% en Français, avec QR code)
+  Widget _buildSecurGymPromoCard() {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 680),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A).withOpacity(0.78),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF2DD4BF).withOpacity(0.35), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0D9488).withOpacity(0.18),
+            blurRadius: 24,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // QR Code SecurGYM
+          Container(
+            padding: const EdgeInsets.all(5),
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: const Color(0xFF14B8A6).withAlpha(30),
-              border: Border.all(color: const Color(0xFF2DD4BF), width: 3),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF14B8A6).withAlpha((60 + 80 * _pulse.value).round()),
-                  blurRadius: 30 + 30 * _pulse.value,
-                  spreadRadius: 4 + 10 * _pulse.value,
+                  color: Colors.black.withOpacity(0.25),
+                  blurRadius: 8,
                 ),
               ],
             ),
-            child: const Icon(LucideIcons.fingerprint, size: 110, color: Color(0xFF5EEAD4)),
-          ),
-        ),
-        const SizedBox(height: 32),
-        Text(s.text('display_idle_title'),
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white, fontSize: 38, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 10),
-        Text(s.text('display_idle_sub'), style: const TextStyle(color: Colors.white70, fontSize: 20)),
-        const SizedBox(height: 24),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 600),
-            child: Text(
-              '« ${s.text('motivation_$_quote')} »',
-              key: ValueKey(_quote),
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 20, fontStyle: FontStyle.italic),
-            ),
-          ),
-        ),
-        const SizedBox(height: 32),
-        // Bouton Manyèl pou Manm Tcheke Rès Tan Yo
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => _openMembershipInquiryModal(s),
-            borderRadius: BorderRadius.circular(50),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 15),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF0D9488), Color(0xFF059669)],
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/brand/securegymqr.png',
+                width: 66,
+                height: 66,
+                fit: BoxFit.contain,
+                errorBuilder: (ctx, err, stack) => Container(
+                  width: 66,
+                  height: 66,
+                  color: const Color(0xFF0F766E),
+                  child: const Icon(LucideIcons.qrCode, color: Colors.white, size: 34),
                 ),
-                borderRadius: BorderRadius.circular(50),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF10B981).withAlpha(120),
-                    blurRadius: 24,
-                    spreadRadius: 3,
-                  ),
-                ],
-                border: Border.all(color: const Color(0xFF5EEAD4), width: 1.8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(LucideIcons.scanLine, color: Colors.white, size: 22),
-                  const SizedBox(width: 12),
-                  Text(
-                    locale == 'fr'
-                        ? 'Vérifier mon abonnement'
-                        : locale == 'en'
-                            ? 'Check my membership status'
-                            : 'Tcheke konbyen tan ki rete sou abònman w',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: .3,
-                    ),
-                  ),
-                ],
               ),
             ),
           ),
-        ),
-      ],
+          const SizedBox(width: 18),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F766E).withOpacity(0.65),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFF2DD4BF).withOpacity(0.5)),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.sparkles, color: Color(0xFF5EEAD4), size: 11),
+                          SizedBox(width: 4),
+                          Text(
+                            'ESPACE MEMBRE EN LIGNE',
+                            style: TextStyle(
+                              color: Color(0xFF5EEAD4),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      '✦ SecurGYM Web',
+                      style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                const Text(
+                  'Consultez votre profil & votre abonnement',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Scannez le code QR avec votre téléphone pour accéder à votre profil, vérifier la validité de votre abonnement et suivre vos présences en temps réel.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    height: 1.25,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -652,25 +837,25 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     String title;
     String message;
     if (unrecognized) {
-      title = s.text('unrecognized_title');
-      message = s.text('unrecognized_msg');
+      title = 'Empreinte Non Reconnue';
+      message = 'Veuillez vous présenter à la réception pour vérifier votre compte.';
     } else if (person == null) {
-      title = granted ? s.text('legacy_welcome') : s.text('access_denied_short');
-      message = granted ? s.text('motivation_$_quote') : s.text('suspended_msg');
+      title = granted ? 'Bienvenue !' : 'Accès Refusé';
+      message = granted ? _frenchQuotes[_quote % _frenchQuotes.length] : 'Veuillez régulariser votre situation à l\'accueil.';
     } else if (person.isEmployee) {
-      title = granted ? '${s.text('employee_welcome')}, ${person.firstName}!' : '${s.text('access_denied_short')} · ${person.firstName}';
-      message = granted ? s.text('employee_msg') : s.text('suspended_msg');
+      title = granted ? 'Bienvenue, ${person.firstName} !' : 'Accès Refusé · ${person.firstName}';
+      message = granted ? 'Bonne prise de poste et bon travail !' : 'Votre compte employé est suspendu.';
     } else if (granted) {
-      title = '${_greeting(s)}, ${person.firstName}!';
-      message = s.text('motivation_$_quote');
+      title = '${_frenchGreeting()}, ${person.firstName} !';
+      message = _frenchQuotes[_quote % _frenchQuotes.length];
     } else {
-      title = person.reason == 'expired' ? s.text('expired_title') : s.text('access_denied_short');
-      message = s.text(switch (person.reason) {
-        'expired' => 'expired_msg',
-        'pending_payment' => 'pending_msg',
-        'no_subscription' => 'no_sub_msg',
-        _ => 'suspended_msg',
-      });
+      title = person.reason == 'expired' ? 'Abonnement Expiré' : 'Accès Refusé';
+      message = switch (person.reason) {
+        'expired' => 'Votre abonnement est arrivé à échéance. Rendez-vous à la réception.',
+        'pending_payment' => 'Paiement en attente. Veuillez régulariser à l\'accueil.',
+        'no_subscription' => 'Aucun abonnement actif trouvé. Rendez-vous à la réception.',
+        _ => 'Accès non autorisé. Veuillez vous présenter à l\'accueil.',
+      };
     }
 
     final daysLeft = person?.daysLeft;
@@ -678,122 +863,135 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     final warn = granted && daysLeft != null && daysLeft <= 7;
     final sub = person?.entry?.subscription;
     final total = sub == null ? 30 : math.max(1, sub.endDate.difference(sub.startDate).inDays + 1);
-    final locale = Localizations.localeOf(context).languageCode;
-    final isFr = locale == 'fr';
-    final isEn = locale == 'en';
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 980),
       margin: const EdgeInsets.symmetric(horizontal: 32),
       padding: const EdgeInsets.all(36),
       decoration: BoxDecoration(
-        color: Colors.white.withAlpha(14),
+        color: const Color(0xFF0F172A).withOpacity(0.88),
         borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: accent.withAlpha(160), width: 2),
-        boxShadow: [BoxShadow(color: accent.withAlpha(70), blurRadius: 60, spreadRadius: 2)],
-      ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        if (_isCheckOnly) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            margin: const EdgeInsets.only(bottom: 20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0F766E).withAlpha(80),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF2DD4BF)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(LucideIcons.info, color: Color(0xFF2DD4BF), size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  isFr
-                      ? 'Vérification d’abonnement uniquement · Porte non déverrouillée'
-                      : isEn
-                          ? 'Account Check Only · Door Not Unlocked'
-                          : 'Verifikasyon abònman sèlman · Pòt la pa louvri',
-                  style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-              ],
-            ),
-          ),
+        border: Border.all(color: accent.withOpacity(0.65), width: 2),
+        boxShadow: [
+          BoxShadow(color: accent.withOpacity(0.25), blurRadius: 60, spreadRadius: 4),
         ],
-        Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-          _avatar(person, accent, granted, unrecognized),
-          const SizedBox(width: 32),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(color: accent.withAlpha(40), borderRadius: BorderRadius.circular(999)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(granted ? LucideIcons.circleCheck : unrecognized ? LucideIcons.circleAlert : LucideIcons.circleX,
-                      color: accent, size: 18),
-                  const SizedBox(width: 8),
-                  Text(
-                    _isCheckOnly
-                        ? (granted
-                            ? (isFr ? 'Abonnement Valide' : isEn ? 'Subscription Active' : 'Abònman Valab')
-                            : (isFr ? 'Abonnement Invalide' : isEn ? 'Subscription Inactive' : 'Abònman Pa Valab'))
-                        : s.text(granted ? 'access_granted_short' : unrecognized ? 'unrecognized_title' : 'access_denied_short'),
-                    style: TextStyle(color: accent, fontWeight: FontWeight.w700, letterSpacing: .4),
-                  ),
-                ]),
-              ),
-              const SizedBox(height: 14),
-              Text(title,
-                  style: const TextStyle(color: Colors.white, fontSize: 44, fontWeight: FontWeight.w900, height: 1.1)),
-              if (person?.isEmployee == true) ...[
-                const SizedBox(height: 6),
-                Text(
-                  person!.employee?.jobTitle?.isNotEmpty == true
-                      ? person.employee!.jobTitle!
-                      : (person.employee != null ? s.text('job_${person.employee!.jobType}') : 'Anplwaye'),
-                  style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 20, fontWeight: FontWeight.w600),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _avatar(person, accent, granted, unrecognized),
+              const SizedBox(width: 32),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: accent.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: accent.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            granted
+                                ? LucideIcons.circleCheck
+                                : unrecognized
+                                    ? LucideIcons.circleAlert
+                                    : LucideIcons.circleX,
+                            color: accent,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            granted
+                                ? 'Accès Autorisé'
+                                : unrecognized
+                                    ? 'Empreinte Non Reconnue'
+                                    : 'Accès Refusé',
+                            style: TextStyle(color: accent, fontWeight: FontWeight.w700, letterSpacing: .4),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 42,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                      ),
+                    ),
+                    if (person?.isEmployee == true) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        person!.employee?.jobTitle?.isNotEmpty == true
+                            ? person.employee!.jobTitle!
+                            : 'Employé',
+                        style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 20, fontWeight: FontWeight.w600),
+                      ),
+                    ] else if (person?.planName?.isNotEmpty == true) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        person!.planName!,
+                        style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 20, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    Text(
+                      message,
+                      style: const TextStyle(color: Colors.white70, fontSize: 22, height: 1.35),
+                    ),
+                  ],
                 ),
-              ] else if (person?.planName?.isNotEmpty == true) ...[
-                const SizedBox(height: 6),
-                Text(person!.planName!, style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 20, fontWeight: FontWeight.w600)),
+              ),
+              if (showDays) ...[
+                const SizedBox(width: 24),
+                _DaysRing(
+                  daysLeft: granted ? (daysLeft ?? 0) : 0,
+                  total: total,
+                  color: warn || !granted ? (granted ? const Color(0xFFF59E0B) : accent) : const Color(0xFF10B981),
+                  label: (daysLeft ?? 0) <= 1 ? 'Jour restant' : 'Jours restants',
+                  footer: 'Expire le ${DateFormat.yMMMd("fr").format(person.endDate!)}',
+                ),
               ],
-              const SizedBox(height: 14),
-              Text(message, style: const TextStyle(color: Colors.white70, fontSize: 22, height: 1.35)),
-            ]),
+            ],
           ),
-          if (showDays) ...[
-            const SizedBox(width: 24),
-            _DaysRing(
-              daysLeft: granted ? (daysLeft ?? 0) : 0,
-              total: total,
-              color: warn || !granted ? (granted ? const Color(0xFFF59E0B) : accent) : const Color(0xFF10B981),
-              label: s.text((daysLeft ?? 0) == 1 ? 'day_left_label' : 'days_left_label'),
-              footer: '${s.text('ends_on')} ${DateFormat.yMMMd(locale == 'ht' ? 'fr' : locale).format(person.endDate!)}',
+          if (warn) ...[
+            const SizedBox(height: 28),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withOpacity(0.18),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.6)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.hourglass, color: Color(0xFFFBBF24), size: 30),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      daysLeft == 0
+                          ? 'Dernier jour de votre abonnement aujourd’hui !'
+                          : 'Votre abonnement expire dans $daysLeft jour(s) ! Pensez à renouveler.',
+                      style: const TextStyle(color: Color(0xFFFDE68A), fontSize: 20, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
-        ]),
-        if (warn) ...[
-          const SizedBox(height: 28),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B).withAlpha(36),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0xFFF59E0B).withAlpha(150)),
-            ),
-            child: Row(children: [
-              const Icon(LucideIcons.hourglass, color: Color(0xFFFBBF24), size: 30),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  daysLeft == 0 ? s.text('last_day_today') : s.text('expiring_warning').replaceAll('{n}', '$daysLeft'),
-                  style: const TextStyle(color: Color(0xFFFDE68A), fontSize: 22, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ]),
-          ),
         ],
-      ]),
+      ),
     );
   }
 
@@ -801,14 +999,22 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     final photo = _photo;
     final photoUrl = person?.photoUrl;
     final initials = person?.name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join();
-    final hasNetworkImage = photo == null && photoUrl != null && photoUrl.isNotEmpty;
+    final hasNetworkImage = photo == null && photoUrl != null && photoUrl.isNotEmpty && (photoUrl.startsWith('http://') || photoUrl.startsWith('https://'));
+
     return Container(
       width: 180,
       height: 180,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: accent, width: 5),
-        color: accent.withAlpha(40),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withOpacity(0.45),
+            blurRadius: 32,
+            spreadRadius: 4,
+          ),
+        ],
+        color: accent.withOpacity(0.15),
         image: photo != null
             ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
             : (hasNetworkImage ? DecorationImage(image: NetworkImage(photoUrl), fit: BoxFit.cover) : null),
@@ -817,17 +1023,24 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
           ? null
           : Center(
               child: initials != null && initials.isNotEmpty
-                  ? Text(initials, style: TextStyle(color: accent, fontSize: 64, fontWeight: FontWeight.w900))
-                  : Icon(unrecognized ? LucideIcons.fingerprint : granted ? LucideIcons.partyPopper : LucideIcons.ban,
-                      color: accent, size: 84),
+                  ? Text(
+                      initials,
+                      style: TextStyle(color: accent, fontSize: 64, fontWeight: FontWeight.w900),
+                    )
+                  : Icon(
+                      unrecognized
+                          ? LucideIcons.fingerprint
+                          : granted
+                              ? LucideIcons.partyPopper
+                              : LucideIcons.ban,
+                      color: accent,
+                      size: 84,
+                    ),
             ),
     );
   }
 
-  /// Bwat dyalòg pou debloke mòd Kiosk ak PIN oswa anprent pwopriyetè
   Future<void> _promptUnlockKiosk(BuildContext context, AppStrings s) async {
-    final isFr = s.locale.languageCode == 'fr';
-    final isEn = s.locale.languageCode == 'en';
     final pinCtrl = TextEditingController();
     String? errorMsg;
     bool checkingBiometric = false;
@@ -856,139 +1069,111 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
                 }
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(isFr ? 'Kiosque déverrouillé !' : 'Kiosk debloke avèk siksè !'),
-                      backgroundColor: const Color(0xFF059669),
+                    const SnackBar(
+                      content: Text('Kiosque déverrouillé avec succès !'),
+                      backgroundColor: Color(0xFF059669),
                     ),
                   );
                 }
               } else {
                 setDialogState(() {
-                  errorMsg = isFr ? 'PIN incorrect' : isEn ? 'Incorrect PIN' : 'Kòd PIN sa a pa kòrèk';
+                  errorMsg = 'Code PIN incorrect';
+                  pinCtrl.clear();
                 });
               }
             }
 
-          Future<void> attemptUnlockWithFingerprint() async {
-            setDialogState(() {
-              checkingBiometric = true;
-              errorMsg = null;
-            });
-
-            try {
-              final sample = await _biometricService.captureFingerprintSample();
-              final runtime = ref.read(appRuntimeProvider);
-              final employees = await EmployeesRepository(runtime.database!, runtime.session!).all();
-              final staffEmployees = employees.where((e) =>
-                  e.jobType == 'manager' ||
-                  e.jobType == 'reception' ||
-                  e.jobType == 'security').toList();
-
-              bool matched = false;
-              for (final emp in staffEmployees) {
-                for (final tpl in emp.fingerprintTemplates) {
-                  final res = await _biometricService.match1to1(candidateTemplate: sample, enrolledTemplate: tpl);
-                  if (res.isMatch) {
-                    matched = true;
-                    break;
-                  }
-                }
-                if (matched) break;
-              }
-
-              // Si pa gen anplwaye anrejistre, men gen manm pwopriyetè
-              if (!matched && runtime.session?.isOwner == true) {
-                matched = true;
-              }
-
-              if (matched) {
-                setState(() => _kioskLocked = false);
-                if (ctx.mounted) {
-                  Navigator.of(ctx).pop();
-                }
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(isFr ? 'Empreinte reconnue : Kiosque déverrouillé !' : 'Anprent rekonèt : Kiosk debloke !'),
-                      backgroundColor: const Color(0xFF059669),
-                    ),
-                  );
-                }
-              } else {
-                setDialogState(() {
-                  checkingBiometric = false;
-                  errorMsg = isFr ? 'Empreinte non autorisée' : 'Anprent sa a pa otorize pou debloke kiosk la';
-                });
-              }
-            } catch (e) {
+            Future<void> attemptUnlockWithBiometric() async {
               setDialogState(() {
-                checkingBiometric = false;
-                errorMsg = e.toString();
+                checkingBiometric = true;
+                errorMsg = null;
               });
-            }
-          }
 
-          return AlertDialog(
-            backgroundColor: const Color(0xFF0F172A),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-              side: const BorderSide(color: Color(0xFF1E293B), width: 1.5),
-            ),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: const Color(0xFFF59E0B).withAlpha(40), shape: BoxShape.circle),
-                  child: const Icon(LucideIcons.shieldCheck, color: Color(0xFFF59E0B), size: 22),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    isFr ? 'Déverrouiller le Kiosque' : isEn ? 'Unlock Kiosk' : 'Debloke Mòd Kiosk',
-                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              try {
+                final sample = await _biometricService.captureFingerprintSample();
+                final runtime = ref.read(appRuntimeProvider);
+                final membersRepo = MembersRepository(runtime.client, runtime.database!, runtime.session!);
+                final allMembers = await membersRepo.watch().first;
+                final matched = await _biometricService.match1toN(
+                  candidateTemplate: sample,
+                  members: allMembers.map((e) => e.member).toList(),
+                );
+
+                if (matched != null) {
+                  setState(() => _kioskLocked = false);
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Empreinte reconnue : Kiosque déverrouillé !'),
+                        backgroundColor: Color(0xFF059669),
+                      ),
+                    );
+                  }
+                  return;
+                }
+                setDialogState(() {
+                  errorMsg = 'Empreinte non autorisée';
+                  checkingBiometric = false;
+                });
+              } catch (e) {
+                setDialogState(() {
+                  errorMsg = 'Erreur capteur : $e';
+                  checkingBiometric = false;
+                });
+              }
+            }
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0F172A),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: const BorderSide(color: Color(0xFF2DD4BF), width: 1.5),
+              ),
+              title: const Row(
                 children: [
+                  Icon(LucideIcons.shieldCheck, color: Color(0xFF2DD4BF)),
+                  SizedBox(width: 10),
                   Text(
-                    isFr
-                        ? 'Pour quitter ce plein écran ou modifier les paramètres, entrez le code PIN du propriétaire ou posez votre empreinte.'
-                        : 'Pou w ka sòti nan ekran sa a oswa chanje paj, antre kòd PIN pwopriyetè a oswa poze anprent ou.',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    'Déverrouiller le Kiosque',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Pour quitter cet écran ou modifier les réglages, entrez le code PIN administrateur ou scannez votre empreinte.',
+                    style: TextStyle(color: Colors.white70),
                   ),
                   const SizedBox(height: 20),
-                  // Bouton Anprent Pwopriyetè
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF2DD4BF),
-                      side: const BorderSide(color: Color(0xFF14B8A6)),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    onPressed: checkingBiometric ? null : attemptUnlockWithFingerprint,
+                    onPressed: checkingBiometric ? null : attemptUnlockWithBiometric,
                     icon: checkingBiometric
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2DD4BF)))
-                        : const Icon(LucideIcons.fingerprint, size: 20),
-                    label: Text(
-                      isFr ? 'Scanner mon empreinte' : 'Poze anprent pwopriyetè',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(LucideIcons.fingerprint),
+                    label: Text(checkingBiometric ? 'Vérification...' : 'Scanner mon empreinte'),
                   ),
                   const SizedBox(height: 16),
-                  Row(
+                  const Row(
                     children: [
-                      const Expanded(child: Divider(color: Colors.white24)),
+                      Expanded(child: Divider(color: Colors.white24)),
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: Text(isFr ? 'OU' : 'OSWA', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Text('OU CODE PIN', style: TextStyle(color: Colors.white38, fontSize: 12)),
                       ),
-                      const Expanded(child: Divider(color: Colors.white24)),
+                      Expanded(child: Divider(color: Colors.white24)),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -996,295 +1181,39 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
                     controller: pinCtrl,
                     keyboardType: TextInputType.number,
                     obscureText: true,
-                    style: const TextStyle(color: Colors.white, fontSize: 18, letterSpacing: 4),
+                    autofocus: true,
+                    maxLength: 6,
+                    style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8),
                     textAlign: TextAlign.center,
                     decoration: InputDecoration(
+                      counterText: '',
+                      hintText: '••••',
+                      hintStyle: const TextStyle(color: Colors.white24),
                       filled: true,
                       fillColor: const Color(0xFF1E293B),
-                      hintText: 'PIN (ex: 1234)',
-                      hintStyle: const TextStyle(color: Colors.white30, letterSpacing: 1, fontSize: 14),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                      errorText: errorMsg,
                     ),
                     onSubmitted: attemptUnlockWithPin,
                   ),
-                  if (errorMsg != null) ...[
-                    const SizedBox(height: 10),
-                    Text(errorMsg!, style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12), textAlign: TextAlign.center),
-                  ],
                 ],
               ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: Text(isFr ? 'Annuler' : 'Anile', style: const TextStyle(color: Colors.white60)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F766E),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Annuler', style: TextStyle(color: Colors.white60)),
                 ),
-                onPressed: () => attemptUnlockWithPin(pinCtrl.text.trim()),
-                child: Text(isFr ? 'Déverrouiller' : 'Debloke'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-}
-
-  /// Bwat dyalòg ak bèl konsepsyon pou manm yo ka verifye rès tan yo
-  Future<void> _openMembershipInquiryModal(AppStrings s) async {
-    final isFr = s.locale.languageCode == 'fr';
-    final isEn = s.locale.languageCode == 'en';
-    final searchCtrl = TextEditingController();
-    bool scanning = false;
-    String? feedbackMsg;
-    List<MemberListEntry> suggestions = [];
-
-    _inquiryActive = true;
-    try {
-      await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (ctx) {
-          _inquiryContext = ctx;
-          return StatefulBuilder(
-            builder: (ctx, setModalState) {
-              Future<void> onMemberChosen(MemberListEntry entry) async {
-                Uint8List? photo;
-                try {
-                  photo = await _members.photoBytes(entry.member).timeout(const Duration(seconds: 3));
-                } catch (_) {}
-
-                final planName = entry.subscription?.planId;
-                final person = AccessPerson.member(entry, planName: planName);
-
-                if (ctx.mounted) {
-                  Navigator.of(ctx).pop();
-                }
-                _inquiryContext = null;
-                _inquiryActive = false;
-
-                if (mounted) {
-                  setState(() {
-                    _decision = AccessDecision(
-                      person.allowed ? AccessOutcome.granted : AccessOutcome.denied,
-                      person: person,
-                    );
-                    _photo = photo;
-                    _isCheckOnly = true;
-                  });
-                  _scheduleDismiss(const Duration(seconds: 8));
-                }
-              }
-
-              Future<void> scanFingerprintNow() async {
-                setModalState(() {
-                  scanning = true;
-                  feedbackMsg = null;
-                });
-
-                try {
-                  final sample = await _biometricService.captureFingerprintSample();
-                  final allMembers = await _members.watch().first;
-                  final matched = await _biometricService.match1toN(
-                    candidateTemplate: sample,
-                    members: allMembers.map((e) => e.member).toList(),
-                  );
-
-                  if (matched != null) {
-                    final entry = allMembers.firstWhere((e) => e.member.id == matched.id);
-                    await onMemberChosen(entry);
-                  } else {
-                    setModalState(() {
-                      scanning = false;
-                      feedbackMsg = isFr
-                          ? 'Empreinte non reconnue. Réessayez ou cherchez par nom/téléphone.'
-                          : 'Anprent pa rekonèt. Tanpri eseye ankò oswa chèche pa non/telefòn.';
-                    });
-                  }
-                } catch (e) {
-                  setModalState(() {
-                    scanning = false;
-                    feedbackMsg = isFr
-                        ? 'Posez simplement votre doigt sur le terminal de la porte'
-                        : 'Jis poze dwèt ou sou tèminal pòt la pou verifye';
-                  });
-                }
-              }
-
-              return Container(
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-                  top: 24,
-                  left: 24,
-                  right: 24,
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                  onPressed: () => attemptUnlockWithPin(pinCtrl.text),
+                  child: const Text('Déverrouiller'),
                 ),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF0F172A),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-                  border: Border(top: BorderSide(color: Color(0xFF14B8A6), width: 2)),
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 5,
-                        decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            isFr
-                                ? 'Vérifier la validité de mon abonnement'
-                                : isEn
-                                    ? 'Check My Subscription'
-                                    : 'Tcheke Konbyen Tan Ki Rete Sou Abònman W',
-                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                          IconButton(
-                            icon: const Icon(LucideIcons.x, color: Colors.white60),
-                            onPressed: () => Navigator.of(ctx).pop(),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      // Gwo Bouton Anprent pou Klike / Poze dwèt
-                      GestureDetector(
-                        onTap: scanning ? null : scanFingerprintNow,
-                        child: Container(
-                          width: 140,
-                          height: 140,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xFF0F766E).withAlpha(40),
-                            border: Border.all(color: const Color(0xFF2DD4BF), width: 3),
-                            boxShadow: [
-                              BoxShadow(
-                                color: const Color(0xFF2DD4BF).withAlpha(scanning ? 140 : 60),
-                                blurRadius: scanning ? 36 : 20,
-                                spreadRadius: scanning ? 6 : 2,
-                              ),
-                            ],
-                          ),
-                          child: Center(
-                            child: scanning
-                                ? const CircularProgressIndicator(color: Color(0xFF2DD4BF), strokeWidth: 3)
-                                : const Icon(LucideIcons.fingerprint, size: 70, color: Color(0xFF5EEAD4)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        isFr
-                            ? 'Posez votre doigt sur le terminal de porte Suprema'
-                            : 'Poze dwèt ou sou tèminal pòt la (Suprema W2)',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 16, fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        isFr
-                            ? 'Vos informations s’afficheront sans déverrouiller la porte'
-                            : 'Enfòmasyon w ap parèt sou ekran an san pòt la pa louvri',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white60, fontSize: 13),
-                      ),
-                      if (feedbackMsg != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          feedbackMsg!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Color(0xFFFBBF24), fontSize: 13),
-                        ),
-                      ],
-                      const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      const Expanded(child: Divider(color: Colors.white24)),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text(
-                          isFr ? 'OU RECHERCHEZ PAR TÉLÉPHONE / NOM' : 'OSWA CHÈCHE PA TELEFÒN / NON',
-                          style: const TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      const Expanded(child: Divider(color: Colors.white24)),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: searchCtrl,
-                    style: const TextStyle(color: Colors.white, fontSize: 16),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: const Color(0xFF1E293B),
-                      prefixIcon: const Icon(LucideIcons.search, color: Colors.white54, size: 20),
-                      hintText: isFr ? 'Entrez nom ou téléphone...' : 'Tape non oswa nimewo telefòn...',
-                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                    ),
-                    onChanged: (val) async {
-                      if (val.trim().length >= 2) {
-                        final list = await _members.watch(query: val.trim()).first;
-                        setModalState(() {
-                          suggestions = list.take(5).toList();
-                        });
-                      } else {
-                        setModalState(() => suggestions = []);
-                      }
-                    },
-                  ),
-                  if (suggestions.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E293B),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: Column(
-                        children: suggestions.map((entry) {
-                          final m = entry.member;
-                          final phone = m.phone ?? '';
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: const Color(0xFF0F766E),
-                              foregroundColor: Colors.white,
-                              child: Text(m.firstName.isNotEmpty ? m.firstName[0].toUpperCase() : '?'),
-                            ),
-                            title: Text(m.fullName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                            subtitle: phone.isNotEmpty ? Text(phone, style: const TextStyle(color: Colors.white54)) : null,
-                            trailing: const Icon(LucideIcons.chevronRight, color: Colors.white38, size: 18),
-                            onTap: () => onMemberChosen(entry),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    },
-  );
-} finally {
-      _inquiryActive = false;
-      _inquiryContext = null;
-    }
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 }
 
@@ -1297,24 +1226,37 @@ class _DaysRing extends StatelessWidget {
   final String footer;
 
   @override
-  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, children: [
-        SizedBox(
-          width: 180,
-          height: 180,
-          child: CustomPaint(
-            painter: _RingPainter((daysLeft / total).clamp(0.0, 1.0), color),
-            child: Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('$daysLeft', style: TextStyle(color: color, fontSize: 60, fontWeight: FontWeight.w900, height: 1)),
-                const SizedBox(height: 4),
-                Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 15)),
-              ]),
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 180,
+            height: 180,
+            child: CustomPaint(
+              painter: _RingPainter((daysLeft / total).clamp(0.0, 1.0), color),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '$daysLeft',
+                      style: TextStyle(color: color, fontSize: 60, fontWeight: FontWeight.w900, height: 1),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white70, fontSize: 15),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(footer, style: const TextStyle(color: Colors.white60, fontSize: 15)),
-      ]);
+          const SizedBox(height: 10),
+          Text(footer, style: const TextStyle(color: Colors.white60, fontSize: 15)),
+        ],
+      );
 }
 
 class _RingPainter extends CustomPainter {
@@ -1327,8 +1269,16 @@ class _RingPainter extends CustomPainter {
     final rect = Offset.zero & size;
     final stroke = size.width * .09;
     final arcRect = rect.deflate(stroke / 2);
-    canvas.drawArc(arcRect, 0, math.pi * 2, false,
-        Paint()..color = Colors.white12..style = PaintingStyle.stroke..strokeWidth = stroke);
+    canvas.drawArc(
+      arcRect,
+      0,
+      math.pi * 2,
+      false,
+      Paint()
+        ..color = Colors.white12
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke,
+    );
     canvas.drawArc(
       arcRect,
       -math.pi / 2,

@@ -34,12 +34,19 @@ class StaffProfile {
   final String? fingerprintEnrolledAt;
 
   String get jobTitle => permissions['job_title'] as String? ?? (role == 'supervisor' || role == 'manager' ? 'superviseur' : 'reception');
+  bool get isSecretaryOrCashier =>
+      jobTitle.contains('secretaire') ||
+      jobTitle.contains('caissier') ||
+      jobTitle == 'secretaire_caissiere';
+
   bool get canAddMembers => permissions['can_add_members'] as bool? ?? true;
-  bool get canCashier => permissions['can_cashier'] as bool? ?? (role != 'secretaire');
+  bool get canCashier => permissions['can_cashier'] as bool? ?? true;
   bool get canViewPayments => permissions['can_view_payments'] as bool? ?? true;
   bool get canViewReceipts => permissions['can_view_receipts'] as bool? ?? true;
-  bool get canViewReports => permissions['can_view_reports'] as bool? ?? (role == 'manager' || role == 'supervisor');
-  bool get canManagePlans => permissions['can_manage_plans'] as bool? ?? (role == 'manager' || role == 'supervisor');
+  bool get canViewReports =>
+      permissions['can_view_reports'] as bool? ?? (role == 'manager' || role == 'supervisor' || isSecretaryOrCashier);
+  bool get canManagePlans =>
+      permissions['can_manage_plans'] as bool? ?? (role == 'manager' || role == 'supervisor' || isSecretaryOrCashier);
   bool get canAccessControl => permissions['can_access_control'] as bool? ?? true;
 
   factory StaffProfile.fromJson(Json json) => StaffProfile(
