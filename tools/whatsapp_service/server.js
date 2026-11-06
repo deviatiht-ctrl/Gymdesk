@@ -24,24 +24,26 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIs
 
 // Paramèt Delè Sekirite Anti-Spam & Anti-Bann (Human Pacing Entèlijan)
 const PACING_CONFIG = {
-  // Tranzaksyonèl (Enskripsyon & Renouvèlman & Resi & Tès): 3 a 5 minit
-  priorityMinDelayMs: 180000,        // 3 minit minimòm (180 segonn)
-  priorityJitterMs: 120000,          // + 0 a 2 minit varyab (total 3 a 5 minit)
+  // Tranzaksyonèl Priyoritè (Enskripsyon & Renouvèlman & Resi & Tès):
+  // Dwe ale rapid touswit pou manm lan pa tann nan sal la! (30s a 75s)
+  priorityMinDelayMs: 30000,         // 30 segonn minimòm
+  priorityJitterMs: 45000,           // + 0 a 45s varyab (total 30s a 75s)
 
-  // Rapèl Abònman (7j, 2j, Échéance, Ekspire): 8 a 12 minit (Mwayèn 10 minit)
-  // Sa pèmèt distribiye tout rapèl yo dousman sou 24h a 34h san WhatsApp pa janm detekte spam
-  reminderMinDelayMs: 480000,        // 8 minit minimòm (480 segonn)
-  reminderJitterMs: 240000,          // + 0 a 4 minit varyab (total 8 a 12 minit)
+  // Rapèl Abònman Frèt (7j, 2j, Échéance, Ekspire):
+  // Pase dousman chak 10 a 16 minit sou 24h pou anpeche bot ban Meta
+  reminderMinDelayMs: 600000,        // 10 minit minimòm
+  reminderJitterMs: 360000,          // + 0 a 6 minit varyab (total 10 a 16 minit)
 
   // Similasyon moun k ap tape tèks la
   typingDelayMinMs: 3000,            // 3 segonn
-  typingDelayMaxMs: 5500,            // 5.5 segonn
+  typingDelayMaxMs: 5000,            // 5 segonn
 
-  // Poz repo apre 7 mesaj konsekitif sou menm nimewo a
+  // Poz repo apre 5 mesaj rapèl konsekitif
   batchPauseAfterCount: 5,
-  batchPauseDurationMs: 600000,      // Poz 10 minit apre 5 mesaj      // Poz 3 minit pou repoze nimewo a
+  batchPauseDurationMs: 600000,      // Poz 10 minit (aplike SÈLMAN sou rapèl frèt)
 
-  defaultDailyLimit: 25,             // Maksimòm 25 mesaj san danje pa nimewo chak jou             // Maksimòm 40 mesaj san danje pa nimewo chak jou
+  defaultReminderDailyLimit: 25,     // SÈLMAN rapèl frèt ki limite a 25 pa jou
+  maxTransactionalDailyLimit: 200,   // Enskripsyon & Renouvèlman PA GEN LIMIT 25 LA (lib jiska 200/jou)
 };
 
 // 1. Chaje konfigirasyon lokal
@@ -194,8 +196,9 @@ class WhatsAppAccountInstance {
     this.accountIndex = accountIndex;
     this.label = label;
     this.dailyLimit = dailyLimit || 40;
+    this.reminderDailyLimit = 25; // SÈLMAN rapèl frèt ki limite a 25/jou!
     this.client = null;
-    this.status = 'DISCONNECTED'; // DISCONNECTED, INITIALIZING, SCAN_QR, AUTHENTICATED, READY, RESTRICTED, ERROR
+    this.status = 'DISCONNECTED';
     this.rawQrCode = null;
     this.qrCodeDataUrl = null;
     this.phone = null;
@@ -205,6 +208,8 @@ class WhatsAppAccountInstance {
     this.isBusy = false;
     this.lastSentAt = 0;
     this.sentToday = 0;
+    this.sentRemindersToday = 0;
+    this.sentTransactionalToday = 0;
     this.consecutiveSentCount = 0;
     this.restrictedUntil = null;
     this.restrictionReason = null;
@@ -240,25 +245,43 @@ class WhatsAppAccountInstance {
   canSendNow(messageKind = 'reminder') {
     if (!this.isReady) return false;
     if (this.isBusy) return false;
-    if (this.sentToday >= this.dailyLimit) return false;
+
+    const isPriority = ['receipt', 'welcome', 'manual', 'test'].includes(messageKind);
+
+    // 1. LIMIT KANTITE PA JOU (Daily Quota):
+    // Mesaj priyoritè (Enskripsyon ak Renouvèlman) PA GEN LIMIT 25 LA! Yo dwe ale kanmenm!
+    if (!isPriority) {
+      // SÈLMAN rapèl abònman (cold reminders) ki limite a 25 pa jou pou pwoteje kont lan
+      const limit = this.reminderDailyLimit || PACING_CONFIG.defaultReminderDailyLimit || 25;
+      if (this.sentRemindersToday >= limit) {
+        return false; // Limit rapèl frèt rive pou jounen an sou liy sa a
+      }
+    } else {
+      // Enskripsyon ak Renouvèlman se PRIYORITE ABSOLI: YO PA GEN LIMIT 25 LA!
+      // Yo lib pou ale touswit jiska yon plafon sekirite trè elve (200/jou)
+      if (this.sentTransactionalToday >= PACING_CONFIG.maxTransactionalDailyLimit) {
+        return false;
+      }
+    }
 
     // Si se premye mesaj liy lan ap voye, li lib touswit
     if (this.lastSentAt === 0) return true;
 
     const now = Date.now();
-    // 1. Tcheke si l nan poz repo apre 7 mesaj
-    if (this.consecutiveSentCount >= PACING_CONFIG.batchPauseAfterCount) {
+
+    // 2. POZ REPO (Batch Pause):
+    // Poz repo aplike SÈLMAN sou rapèl frèt yo. Yon enskripsyon oswa renouvèlman pa janm bloke nan poz repo!
+    if (!isPriority && this.consecutiveSentCount >= PACING_CONFIG.batchPauseAfterCount) {
       if (now - this.lastSentAt < PACING_CONFIG.batchPauseDurationMs) {
-        return false; // Ap repoze pou evite bot ban
+        return false; // Poz repo pou rapèl yo
       } else {
-        this.consecutiveSentCount = 0; // Fin repoze, rekòmanse
+        this.consecutiveSentCount = 0;
       }
     }
 
-    // 2. Delè dapre kalite mesaj la:
-    // Tranzaksyonèl (Enskripsyon / Renouvèlman / Tès): 3 a 5 minit
-    // Rapèl abònman (Expiration reminders): 8 a 12 minit (mwayèn 10 minit)
-    const isPriority = ['receipt', 'welcome', 'manual', 'test'].includes(messageKind);
+    // 3. DELÈ SEKIRITE ENTÈLIJAN:
+    // Tranzaksyonèl (Enskripsyon / Renouvèlman / Resi): Rapid (30s a 75s avèk 3-5s tape)
+    // Rapèl abònman (Expiration reminders): Dousman (10 a 16 minit)
     const minDelay = isPriority ? PACING_CONFIG.priorityMinDelayMs : PACING_CONFIG.reminderMinDelayMs;
     const jitter = isPriority ? PACING_CONFIG.priorityJitterMs : PACING_CONFIG.reminderJitterMs;
 
@@ -523,7 +546,7 @@ class WhatsAppAccountInstance {
   }
 
   // Voye mesaj ak similasyon moun k ap tape (Human Presence Simulation)
-  async sendWithHumanPresence(chatId, content, options = {}, outboxId = null) {
+  async sendWithHumanPresence(chatId, content, options = {}, outboxId = null, messageKind = 'reminder') {
     if (!this.isReady) {
       throw new Error(`Liy ${this.accountIndex} pa pare oswa li restreint.`);
     }
@@ -591,7 +614,15 @@ class WhatsAppAccountInstance {
       // 5. Mete ajou statistik lokal ak Supabase
       this.lastSentAt = Date.now();
       this.sentToday += 1;
-      this.consecutiveSentCount += 1;
+
+      const isPriority = ['receipt', 'welcome', 'manual', 'test'].includes(messageKind);
+      if (isPriority) {
+        this.sentTransactionalToday += 1;
+        // Enskripsyon ak Renouvèlman pa monte kontè poz repo rapèl frèt yo!
+      } else {
+        this.sentRemindersToday += 1;
+        this.consecutiveSentCount += 1;
+      }
 
       try {
         await fetch(`${SUPABASE_URL}/rest/v1/rpc/platform_whatsapp_account_record_send`, {
@@ -791,9 +822,9 @@ class AccountCluster {
         if (item.pdf_base64 && typeof item.pdf_base64 === 'string') {
           try {
             const media = new MessageMedia('application/pdf', item.pdf_base64, item.pdf_file_name || 'Recu.pdf');
-            sendResult = await assignedAccount.sendWithHumanPresence(chatId, media, { caption: item.message.trim() }, item.id);
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, media, { caption: item.message.trim() }, item.id, item.kind || 'reminder');
           } catch (_) {
-            sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id);
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id, item.kind || 'reminder');
           }
         } else {
           sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id);
@@ -869,9 +900,9 @@ class AccountCluster {
 
     if (mediaBase64) {
       const media = new MessageMedia('application/pdf', mediaBase64, mediaName || 'Document.pdf');
-      return await chosen.sendWithHumanPresence(chatId, media, { caption: message.trim() });
+      return await chosen.sendWithHumanPresence(chatId, media, { caption: message.trim() }, null, 'receipt');
     } else {
-      return await chosen.sendWithHumanPresence(chatId, message.trim());
+      return await chosen.sendWithHumanPresence(chatId, message.trim(), {}, null, 'test');
     }
   }
 
