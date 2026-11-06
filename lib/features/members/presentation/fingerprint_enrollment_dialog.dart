@@ -7,6 +7,7 @@ import '../../../app/providers.dart';
 import '../../../core/access_control/access_monitor.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
+import '../../../core/biometrics/biometric_service.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
 import '../../subscriptions/data/subscriptions_repository.dart';
@@ -172,12 +173,19 @@ class _FingerprintEnrollmentDialogState
 
   Future<void> _startTerminalScan() async {
     if (_busy || _scanningTerminal) return;
+    final bio = ref.read(biometricServiceProvider);
+    if (!bio.terminalAvailable) {
+      setState(() {
+        _scanningTerminal = false;
+        _hint = '⚠️ Lektè sou pòt la (BioEntry W2) pa konekte nan rezo a (192.168.1.41). Tcheke si fil Ethernet la branche oswa itilize BioMini USB.';
+      });
+      return;
+    }
     setState(() {
       _scanningTerminal = true;
       _hint = 'Ap konekte ak pòt la... tann lektè a pare.';
     });
     try {
-      final bio = ref.read(biometricServiceProvider);
       final cap = await bio.captureFromTerminal(
         terminalIp: AccessMonitor.instance.config.terminalIp,
       );
@@ -189,9 +197,10 @@ class _FingerprintEnrollmentDialogState
       await _processCapture(cap.template);
     } catch (e) {
       if (!mounted) return;
+      final msg = e is BiometricUnavailableException ? e.message : '$e';
       setState(() {
         _scanningTerminal = false;
-        _hint = 'Echèk eskan sou pòt la: $e. Klike pou re-eseye.';
+        _hint = '⚠️ $msg (Klike pou re-eseye)';
       });
     }
   }
@@ -326,10 +335,11 @@ class _FingerprintEnrollmentDialogState
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);
+        final msg = e is BiometricUnavailableException ? e.message : '$e';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red,
-            content: Text('${AppStrings.of(context).text('fingerprint_enroll_error')}: $e'),
+            content: Text('${AppStrings.of(context).text('fingerprint_enroll_error')}: $msg'),
           ),
         );
       }
