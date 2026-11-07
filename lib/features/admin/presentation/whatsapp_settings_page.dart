@@ -1978,13 +1978,13 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ),
               child: Row(
                 children: [
-                  _buildStatItem('Liy Aktif', ' / ', readyLines > 0 ? Colors.green.shade700 : Colors.orange.shade800),
+                  _buildStatItem('Liy Aktif', '$readyLines / $totalLines', readyLines > 0 ? Colors.green.shade700 : Colors.orange.shade800),
                   const SizedBox(width: 24),
-                  _buildStatItem('Liy Restreint (24h)', '', restrictedLines > 0 ? Colors.red.shade700 : Colors.grey.shade600),
+                  _buildStatItem('Liy Restreint (24h)', '$restrictedLines', restrictedLines > 0 ? Colors.red.shade700 : Colors.grey.shade600),
                   const SizedBox(width: 24),
-                  _buildStatItem('Mesaj Voye Jodi a', '', Colors.blue.shade700),
+                  _buildStatItem('Mesaj Voye Jodi a', '$totalSentToday', Colors.blue.shade700),
                   const SizedBox(width: 24),
-                  _buildStatItem('Kapasite Sekirize / Jou', readyLines > 0 ? 'Jouk  msg' : '0 msg', Colors.teal.shade800),
+                  _buildStatItem('Kapasite Sekirize / Jou', readyLines > 0 ? 'Jouk $totalDailyCapacity msg' : '0 msg', Colors.teal.shade800),
                 ],
               ),
             ),
@@ -2013,6 +2013,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     final isReady = acc.isReady;
     final isWaitingQr = acc.isWaitingForQr;
     final isRestricted = acc.isRestricted;
+    final isError = acc.isError;
+    final isDisconnected = acc.isDisconnected;
 
     Color cardBorder;
     Color badgeColor;
@@ -2034,6 +2036,16 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       badgeColor = Colors.amber.shade800;
       badgeText = '📷 Eskane Kòd QR';
       badgeIcon = LucideIcons.qrCode;
+    } else if (isError) {
+      cardBorder = Colors.red.shade300;
+      badgeColor = Colors.red.shade800;
+      badgeText = '❌ Erè Koneksyon';
+      badgeIcon = LucideIcons.alertTriangle;
+    } else if (isDisconnected) {
+      cardBorder = Colors.grey.shade400;
+      badgeColor = Colors.grey.shade700;
+      badgeText = '⚪ Dekonekte';
+      badgeIcon = LucideIcons.powerOff;
     } else {
       cardBorder = Colors.blue.shade300;
       badgeColor = Colors.blue.shade700;
@@ -2061,7 +2073,11 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 ? Colors.green.shade50.withOpacity(0.3)
                 : isWaitingQr
                     ? Colors.amber.shade50.withOpacity(0.3)
-                    : theme.colorScheme.surface,
+                    : isError
+                        ? Colors.red.shade50.withOpacity(0.25)
+                        : isDisconnected
+                            ? Colors.grey.shade100.withOpacity(0.5)
+                            : theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: cardBorder, width: 1.5),
       ),
@@ -2111,6 +2127,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             ],
           ),
 
+          // 1. KONT RESTREINT (24H)
           if (isRestricted) ...[
             const SizedBox(height: 10),
             Container(
@@ -2149,7 +2166,115 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             ),
           ],
 
-          // AFICHAJ KÒD QR LA DIRÈKTEMAN SOU KAT LA SI L AP TANN ESKANÈ!
+          // 2. ERÈ KONEKSYON
+          if (isError) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade100.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.alertOctagon, color: Colors.red, size: 16),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'Koneksyon an te rankontre yon pwoblèm :',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.red),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    acc.lastError ?? 'Sesyon WhatsApp sa a bezwen netwaye oswa rekonekte.',
+                    style: TextStyle(fontSize: 12, color: Colors.red.shade900),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () async {
+                          await ref.read(whatsAppClientProvider).resetAccountSession(acc.accountIndex);
+                          await _loadAccountsList();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Sesyon Liy ${acc.accountIndex} netwaye. Nouvo QR ap prepare...'), backgroundColor: Colors.teal),
+                            );
+                          }
+                        },
+                        icon: const Icon(LucideIcons.refreshCw, size: 13),
+                        label: const Text('Reyinisyalize & Eskane Nouvo QR'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.red.shade700,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                          await _loadAccountsList();
+                        },
+                        icon: const Icon(LucideIcons.play, size: 13),
+                        label: const Text('Re-eseye'),
+                        style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // 3. DEKONEKTE (Disponib pou konekte)
+          if (isDisconnected) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.smartphone, color: Colors.grey, size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Liy sa a pare pou konekte yon nimewo WhatsApp. Klike sou bouton an pou w ka eskane yon kòd QR.',
+                      style: TextStyle(fontSize: 12, color: Colors.black87),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton.icon(
+                    onPressed: () async {
+                      await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                      await _loadAccountsList();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Liy ${acc.accountIndex} ap demare pou prepare kòd QR la...'), backgroundColor: Colors.teal),
+                        );
+                      }
+                    },
+                    icon: const Icon(LucideIcons.qrCode, size: 14),
+                    label: const Text('Kòmanse & Eskane QR'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF1EBE5D),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // 4. AFICHAJ KÒD QR LA DIRÈKTEMAN SOU KAT LA SI L AP TANN ESKANÈ!
           if (isWaitingQr) ...[
             const SizedBox(height: 14),
             Container(
@@ -2201,7 +2326,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          '1. Louvri WhatsApp sou telefòn ou.\n2. Klike sou 3 pwen anlè a > "Aparèy Konekte".\n3. Klike "Konekte yon aparèy" epi vize kamera w sou kòd sa a.',
+                          '1. Louvri WhatsApp sou telefòn ou.\n2. Klike 3 pwen anlè a > "Aparèy Konekte".\n3. Verifye ou pa gen plis pase 4 aparèy konekte deja.\n4. Klike "Konekte yon aparèy" epi vize kamera a sou kòd sa a.',
                           style: TextStyle(fontSize: 12, color: Colors.black87, height: 1.4),
                         ),
                         const SizedBox(height: 10),
@@ -2223,6 +2348,19 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                               label: const Text('Rafrechi QR'),
                               style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
                             ),
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                await ref.read(whatsAppClientProvider).resetAccountSession(acc.accountIndex);
+                                await _loadAccountsList();
+                              },
+                              icon: const Icon(LucideIcons.trash2, size: 13, color: Colors.red),
+                              label: const Text('Netwaye', style: TextStyle(color: Colors.red)),
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                side: BorderSide(color: Colors.red.shade200),
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -2239,7 +2377,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           Row(
             children: [
               Text(
-                'Voye jodi a: ${acc.sentToday} / ${acc.dailyLimit} msg  •  Total istorik: ${acc.totalSent}',
+                'Voye jodi a: ${acc.sentToday} / ${acc.dailyLimit} msg  •  Total: ${acc.totalSent}',
                 style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
               ),
               const Spacer(),
@@ -2280,6 +2418,16 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     visualDensity: VisualDensity.compact,
                     side: BorderSide(color: Colors.red.shade300),
                   ),
+                ),
+              ] else if (!isWaitingQr && !isError && !isDisconnected) ...[
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                    await _loadAccountsList();
+                  },
+                  icon: const Icon(LucideIcons.refreshCw, size: 12),
+                  label: const Text('Rafrechi'),
+                  style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
                 ),
               ],
             ],

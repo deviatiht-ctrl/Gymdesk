@@ -259,6 +259,9 @@ class WhatsAppAccountInfo {
   bool get isWaitingForQr =>
       serviceStatus.toUpperCase() == 'SCAN_QR' ||
       (qrCode != null && qrCode!.isNotEmpty && serviceStatus.toUpperCase() != 'READY' && serviceStatus.toUpperCase() != 'RESTRICTED');
+  bool get isError => serviceStatus.toUpperCase() == 'ERROR';
+  bool get isDisconnected => serviceStatus.toUpperCase() == 'DISCONNECTED';
+  bool get isInitializing => serviceStatus.toUpperCase() == 'INITIALIZING';
   bool get isRestricted {
     if (serviceStatus.toUpperCase() == 'RESTRICTED') {
       if (restrictedUntil == null) return true;
@@ -731,24 +734,48 @@ class WhatsAppClient {
 
   /// Rekonekte / Rafrechi kòd QR yon liy espesifik
   Future<bool> restartAccount(int accountIndex) async {
+    bool ok = false;
     try {
       final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/initialize');
-      final res = await http.post(uri).timeout(const Duration(seconds: 10));
-      return res.statusCode == 200;
-    } catch (_) {
-      return false;
+      final res = await http.post(uri).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) ok = true;
+    } catch (_) {}
+
+    if (!ok) {
+      try {
+        await Supabase.instance.client
+            .from('platform_whatsapp_accounts')
+            .update({'service_status': 'RESTART_REQUESTED'})
+            .eq('account_index', accountIndex);
+        ok = true;
+      } catch (e) {
+        debugPrint('[WhatsApp] Erè restartAccount via Supabase: $e');
+      }
     }
+    return ok;
   }
 
   /// Efase sesyon yon liy (Wipe) pou eskane yon lòt nimewo
   Future<bool> resetAccountSession(int accountIndex) async {
+    bool ok = false;
     try {
       final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/reset');
-      final res = await http.post(uri).timeout(const Duration(seconds: 10));
-      return res.statusCode == 200;
-    } catch (_) {
-      return false;
+      final res = await http.post(uri).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) ok = true;
+    } catch (_) {}
+
+    if (!ok) {
+      try {
+        await Supabase.instance.client
+            .from('platform_whatsapp_accounts')
+            .update({'service_status': 'RESET_REQUESTED'})
+            .eq('account_index', accountIndex);
+        ok = true;
+      } catch (e) {
+        debugPrint('[WhatsApp] Erè resetAccountSession via Supabase: $e');
+      }
     }
+    return ok;
   }
 
   /// Debloke manyèlman yon liy ki te an restriksyon 24h

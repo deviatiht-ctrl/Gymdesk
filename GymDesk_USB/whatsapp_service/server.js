@@ -22,12 +22,41 @@ const AUTH_DIR = path.join(__dirname, '.wwebjs_auth');
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://jrhdegdvdqnxstpdzbya.supabase.co';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpyaGRlZ2R2ZHFueHN0cGR6YnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyOTM2NDksImV4cCI6MjEwNjg2OTY0OX0.O8WMsF2z447mdWj6gNMyaJ9Q8eTFQwKZyLMMsxrfx5Y';
 
+// Dènye vèsyon WhatsApp Web HTML pou evite 'Erreur réessayer plus tard'
+let latestWaRemotePath = 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1053557623-alpha.html';
+
+async function fetchLatestWaVersion() {
+  try {
+    const res = await fetch('https://api.github.com/repos/wppconnect-team/wa-version/contents/html', {
+      headers: { 'User-Agent': 'SecurGYM-Cluster' },
+    });
+    if (res.ok) {
+      const files = await res.json();
+      if (Array.isArray(files) && files.length > 0) {
+        const htmlFiles = files
+          .map((f) => f.name)
+          .filter((n) => typeof n === 'string' && n.endsWith('.html') && n.startsWith('2.'))
+          .sort();
+        if (htmlFiles.length > 0) {
+          const newest = htmlFiles[htmlFiles.length - 1];
+          latestWaRemotePath = 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/' + newest;
+          console.log('[WaVersion] Dènye vèsyon WhatsApp Web detekte:', newest);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[WaVersion] N ap itilize fallback vèsyon WhatsApp:', latestWaRemotePath);
+  }
+}
+fetchLatestWaVersion();
+setInterval(fetchLatestWaVersion, 6 * 3600 * 1000);
+
 // Paramèt Delè Sekirite Anti-Spam & Anti-Bann (Human Pacing Entèlijan)
 const PACING_CONFIG = {
   // Tranzaksyonèl Priyoritè (Enskripsyon & Renouvèlman & Resi & Tès):
-  // Dwe ale rapid touswit pou manm lan pa tann nan sal la! (30s a 75s)
-  priorityMinDelayMs: 30000,         // 30 segonn minimòm
-  priorityJitterMs: 45000,           // + 0 a 45s varyab (total 30s a 75s)
+  // Dwe ale rapid touswit pou manm lan pa tann nan sal la! (5s a 15s)
+  priorityMinDelayMs: 5000,          // 5 segonn minimòm
+  priorityJitterMs: 10000,           // + 0 a 10s varyab (total 5s a 15s)
 
   // Rapèl Abònman Frèt (7j, 2j, Échéance, Ekspire):
   // Pase dousman chak 10 a 16 minit sou 24h pou anpeche bot ban Meta
@@ -35,8 +64,8 @@ const PACING_CONFIG = {
   reminderJitterMs: 360000,          // + 0 a 6 minit varyab (total 10 a 16 minit)
 
   // Similasyon moun k ap tape tèks la
-  typingDelayMinMs: 3000,            // 3 segonn
-  typingDelayMaxMs: 5000,            // 5 segonn
+  typingDelayMinMs: 2500,            // 2.5 segonn
+  typingDelayMaxMs: 4500,            // 4.5 segonn
 
   // Poz repo apre 5 mesaj rapèl konsekitif
   batchPauseAfterCount: 5,
@@ -95,11 +124,17 @@ function getBrowserExecutablePath() {
 // 3. Netwaye fichye lock Chromium sèlman nan rasin sesyon an (pa manyen LevelDB!)
 function killOrphanedBrowserForAccount(accountIndex) {
   try {
-    const pattern = `account_${accountIndex}`;
-    execSync(
-      `powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\\"Name = 'msedge.exe'\\\" | Where-Object { $_.CommandLine -like '*${pattern}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
-      { stdio: 'ignore' }
-    );
+    const pattern = "*account_" + accountIndex + "*";
+    const psScript = "Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'msedge.exe' -or $_.Name -eq 'chrome.exe') -and $_.CommandLine -like '" + pattern + "' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }";
+    execSync('powershell -NoProfile -Command "' + psScript + '"', { stdio: 'ignore' });
+  } catch (_) {}
+}
+
+function cleanEntireSessionDir(sessionDirPath) {
+  try {
+    if (fs.existsSync(sessionDirPath)) {
+      fs.rmSync(sessionDirPath, { recursive: true, force: true });
+    }
   } catch (_) {}
 }
 
@@ -372,9 +407,9 @@ class WhatsAppAccountInstance {
         }),
         webVersionCache: {
           type: 'remote',
-          remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1053260417-alpha.html',
+          remotePath: latestWaRemotePath,
         },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         puppeteer: {
           headless: 'new',
           args: [
@@ -387,7 +422,7 @@ class WhatsAppAccountInstance {
             '--disable-extensions',
             '--disable-blink-features=AutomationControlled',
             '--disable-features=Translate,OptimizationHints,MediaRouter',
-            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
           ],
           executablePath: execPath,
         },
@@ -697,17 +732,42 @@ class AccountCluster {
             instance.dailyLimit = row.daily_limit || 40;
             instance.sentToday = row.sent_today || 0;
 
-            // Si kont lan make RESTREINT nan baz done a
+            // 1. Kòmand aksyon depi Cloud Bridge (Web / Tablet)
+            if (row.service_status === 'RESET_REQUESTED') {
+              console.log("[Liy " + idx + "] 🔄 Demann Reyinisyalizasyon (Wipe) depi Cloud Bridge.");
+              instance.destroy().then(() => {
+                cleanEntireSessionDir(instance.sessionDir);
+                instance.status = 'DISCONNECTED';
+                instance.phone = null;
+                instance.pushName = null;
+                instance.lastError = null;
+                instance.rawQrCode = null;
+                instance.qrCodeDataUrl = null;
+                instance.init();
+              });
+              continue;
+            } else if (row.service_status === 'RESTART_REQUESTED') {
+              console.log("[Liy " + idx + "] 🔄 Demann Rekoneksyon / Rafrechi depi Cloud Bridge.");
+              instance.destroy().then(() => {
+                instance.status = 'DISCONNECTED';
+                instance.lastError = null;
+                instance.rawQrCode = null;
+                instance.qrCodeDataUrl = null;
+                instance.init();
+              });
+              continue;
+            }
+
+            // 2. Si kont lan make RESTREINT nan baz done a
             if (row.service_status === 'RESTRICTED' && row.restricted_until) {
               instance.status = 'RESTRICTED';
               instance.restrictedUntil = row.restricted_until;
               instance.restrictionReason = row.restriction_reason;
             }
 
-            // Si kont lan make aktif men li poko lanse epi li pa restreint
-            if (row.is_enabled && !instance.isRestricted && instance.status === 'DISCONNECTED' && !instance.isInitializing) {
-              // Lanse kont lan ak yon ti entèval ant chak pou pa chaje CPU a
-              setTimeout(() => instance.init(), idx * 4000);
+            // 3. Si kont lan make aktif men li poko lanse (DISCONNECTED oswa ERROR) epi li pa restreint
+            if (row.is_enabled && !instance.isRestricted && (instance.status === 'DISCONNECTED' || instance.status === 'ERROR') && !instance.isInitializing && !instance.client) {
+              setTimeout(() => instance.init(), (idx % 3) * 3000);
             }
           }
         }
@@ -1039,17 +1099,16 @@ app.post('/api/accounts/:index/reset', async (req, res) => {
 
   try {
     await acc.destroy();
-    try {
-      if (fs.existsSync(acc.sessionDir)) {
-        fs.rmSync(acc.sessionDir, { recursive: true, force: true });
-      }
-    } catch (_) {}
+    cleanEntireSessionDir(acc.sessionDir);
     acc.status = 'DISCONNECTED';
     acc.phone = null;
     acc.pushName = null;
+    acc.rawQrCode = null;
+    acc.qrCodeDataUrl = null;
+    acc.lastError = null;
     acc.restrictedUntil = null;
     acc.init();
-    res.json({ ok: true, message: `Sesyon Liy ${idx} efase nèt. Nouvo QR ap prepare.` });
+    res.json({ ok: true, message: "Sesyon Liy " + idx + " efase nèt. Nouvo QR ap prepare." });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -1091,7 +1150,7 @@ app.post('/api/send', async (req, res) => {
 });
 
 // 7. Tès voye mesaj
-app.post('/api/test', async (req, res) => {
+app.post(['/api/test', '/api/test-message'], async (req, res) => {
   try {
     const target = req.body.to || config.validNumber;
     const testMsg = req.body.message || `🏋️ *SecurGYM Multi-Kont Cluster*\nMesaj tès distribye avèk siksè !\nDat: ${new Date().toLocaleString()}`;
