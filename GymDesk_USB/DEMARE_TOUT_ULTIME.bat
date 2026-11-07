@@ -26,18 +26,22 @@ if not exist "%~dp0Gadyen_Ultime.ps1" (
     exit /b 1
 )
 
-echo [1/3] Gadyen rezo: IP fiks sou kab W2, Wi-Fi pa touche...
+echo [1/4] Femen ansyen pwosesis background (wscript, access_agent, biostar)...
+taskkill /f /im access_agent.exe >nul 2>&1
+taskkill /f /im biostar_tool.exe >nul 2>&1
+taskkill /f /im wscript.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+echo.
+
+echo [2/4] Gadyen rezo: IP fiks sou kab W2 (dock extender, usb, kat entegre)...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Gadyen_Ultime.ps1" -Enstale
 echo.
 
-echo [2/3] Teminal W2: IP fiks + verifikasyon anprent sou teminal la menm...
-taskkill /f /im access_agent.exe >nul 2>&1
-taskkill /f /im biostar_tool.exe >nul 2>&1
-timeout /t 1 /nobreak >nul
+echo [3/4] Teminal W2: IP fiks + verifikasyon anprent sou teminal la menm...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Gadyen_Ultime.ps1" -Repare -ToolDir "%~dp0."
 echo.
 
-echo [3/3] Lanse SecurGYM...
+echo [4/4] Lanse SecurGYM v3.6.1...
 start "" cmd /c "%~dp0Lancer_SecurGYM.bat"
 
 echo.

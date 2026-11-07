@@ -6,8 +6,13 @@ cd /d "%~dp0"
 rem --- 1. Enregistrement automatique au demarrage de Windows ---
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v "SecurGYM_AccessAgent" /t REG_SZ /d "wscript.exe \"%~dp0Demarrer_Agent_Silencieux.vbs\"" /f >nul 2>&1
 
-rem --- 2. Verifier si l'agent tourne deja en arriere-plan (0 seconde d'attente!) ---
-curl -s -m 1 http://127.0.0.1:47811/health >nul 2>&1 && goto :agent_ready
+rem --- 2. Verifier si l'agent v3.6.1 tourne deja en arriere-plan ---
+curl -s -m 1 http://127.0.0.1:47811/status | findstr /i "3.6.1" >nul 2>&1 && goto :agent_ready
+
+rem Si un vieil agent tourne ou s'il n'est pas a jour, on le tue proprement
+taskkill /f /im access_agent.exe >nul 2>&1
+taskkill /f /im wscript.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
 
 echo Demarrage de l'agent materiel SecurGYM...
 if exist "%~dp0Demarrer_Agent_Silencieux.vbs" (

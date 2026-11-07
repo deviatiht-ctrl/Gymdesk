@@ -14,7 +14,7 @@ import 'suprema_ffi.dart';
 ///   signale honnêtement (`reader_connected: false`) : aucune capture simulée.
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
-const String agentVersion = '3.6.0';
+const String agentVersion = '3.6.1';
 bool _doorConnected = false;
 
 ReaderBackend? _sdk;
@@ -645,7 +645,10 @@ Future<void> _handleRequest(HttpRequest request) async {
     return;
   }
 
-  final path = request.uri.path;
+  final rawPath = request.uri.path;
+  final path = rawPath.length > 1 && rawPath.endsWith('/')
+      ? rawPath.substring(0, rawPath.length - 1)
+      : rawPath;
 
   try {
     // 1. Diagnostics & Statut (valè reyèl SDK a, san bloke repons HTTP a)
@@ -822,8 +825,8 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     // Eskane anprent dirèkteman sou tèminal pòt la (BioEntry W2)
-    if (path == '/api/terminals/scan' && request.method == 'POST') {
-      final body = await _readJson(request);
+    if (path == '/api/terminals/scan') {
+      final body = request.method == 'POST' ? await _readJson(request) : <String, dynamic>{};
       await _handleTerminalScan(body, res);
       return;
     }

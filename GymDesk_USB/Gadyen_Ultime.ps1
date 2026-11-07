@@ -44,10 +44,10 @@ function Get-W2Ip {
 # entenet pa DHCP sou yon LOT rezo (pa 192.168.1.x) pou pa kase yon kab routeur.
 # Si yon kat konekte, se li selman nou konfigire; sinon nou prepare yo tout.
 function Get-W2Adapters {
-  $all = @(Get-NetAdapter -Physical | Where-Object {
+  $all = @(Get-NetAdapter | Where-Object {
     $_.Status -ne 'Disabled' -and
     $_.InterfaceDescription -notmatch 'Wi-?Fi|Wireless|WLAN|802\.11|Bluetooth|Virtual|VPN' -and
-    ($_.PhysicalMediaType -eq '802.3' -or $_.InterfaceDescription -match 'Ethernet|GbE|ASIX|USB')
+    $_.Virtual -ne $true -and ($_.PhysicalMediaType -eq '802.3' -or $_.InterfaceDescription -match 'Ethernet|GbE|ASIX|Realtek|USB|LAN|Dock|Dongle|Type-C')
   } | Where-Object {
     $ipif = Get-NetIPInterface -InterfaceIndex $_.ifIndex -AddressFamily IPv4
     $gw = Get-NetRoute -InterfaceIndex $_.ifIndex -DestinationPrefix '0.0.0.0/0'
@@ -204,8 +204,8 @@ if ($Siveye) {
   while ($true) {
     try {
       # Kab la ka chanje pò (dock, adaptatè USB): IP a dwe sou yon kat ki KONEKTE.
-      $upIdx = @(Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' -and $_.PhysicalMediaType -eq '802.3' } |
-        ForEach-Object { $_.ifIndex })
+      $upAdapters = @(Get-W2Adapters | Where-Object Status -eq 'Up')
+      $upIdx = @($upAdapters | ForEach-Object { $_.ifIndex })
       $need = $upIdx.Count -gt 0 -and (
         -not (Get-NetIPAddress -IPAddress $PcIp -AddressFamily IPv4 | Where-Object { $upIdx -contains $_.InterfaceIndex }) -or
         -not (Get-NetRoute -DestinationPrefix "$w2/32" | Where-Object { $upIdx -contains $_.InterfaceIndex }))
