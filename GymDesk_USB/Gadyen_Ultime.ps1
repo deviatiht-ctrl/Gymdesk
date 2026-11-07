@@ -16,7 +16,6 @@ $EtaFile = Join-Path $Home2 'gadyen_eta.txt'
 $CfgFile = Join-Path $Home2 'gadyen.json'
 $TaskName = 'SecurGYM_Gadyen'
 $PcIp = '192.168.1.50'
-try { $saved = Get-Content $CfgFile -Raw | ConvertFrom-Json; if ($saved.pc_ip) { $PcIp = [string]$saved.pc_ip } } catch {}
 $BioStarIp = '192.168.1.16'
 $Prefix = 24
 
@@ -88,17 +87,21 @@ function Set-W2Network([string]$w2) {
     # Kab la sou routeur jim nan: si yon lot aparey gen deja IP a, Windows
     # pa aktive l (konfli). Lè sa a nou pran yon IP lib (.250 -> .245).
     if ($a.Status -eq 'Up') {
-      Start-Sleep -Milliseconds 1500
-      if (-not (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -AddressFamily IPv4 -PolicyStore ActiveStore |
-                Where-Object { $_.AddressState -eq 'Preferred' })) {
+      $st = ''
+      for ($wait = 0; $wait -lt 7; $wait++) {
+        $st = (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction SilentlyContinue).AddressState
+        if ($st -eq 'Preferred') { break }
+        Start-Sleep -Milliseconds 500
+      }
+      # Selman si Windows detekte yon vre konfli rezo (Duplicate), chwazi yon IP altematif
+      if ($st -eq 'Duplicate') {
         foreach ($alt in 250..245 | ForEach-Object { "192.168.1.$_" }) {
           if ($alt -eq $PcIp) { continue }
           if (Test-Connection -ComputerName $alt -Count 1 -Quiet) { continue }
-          Remove-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -Confirm:$false
+          Remove-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -Confirm:$false -ErrorAction SilentlyContinue
           New-NetIPAddress -InterfaceIndex $i -IPAddress $alt -PrefixLength $Prefix | Out-Null
-          Log ("IP $PcIp an konfli sou rezo a -> $alt")
+          Log ("IP $PcIp an konfli rezo (Duplicate) -> chanje sou $alt")
           $script:PcIp = $alt; $changed = $true
-          (@{ ip = $w2; port = 51211; pc_ip = $alt } | ConvertTo-Json) | Set-Content -Path $CfgFile -Encoding UTF8
           break
         }
       }
