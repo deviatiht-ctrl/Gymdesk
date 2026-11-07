@@ -58,6 +58,7 @@ class AccessMonitor {
     _gymId = session.gymId;
     _service = TerminalAccessService(runtime.client, db, session, agent: agent);
     _events = agent.terminalEvents().listen(_onEvent);
+    agent.status.addListener(_onAgentHealthChanged);
 
     // Siveye tout chanjman lokal (manm, anprent, abònman, peman, anplwaye) pou
     // pouse nouvo anprent ak dat ekspirasyon sou pòt W2 a otomatikman san bouton.
@@ -102,8 +103,19 @@ class AccessMonitor {
     }
   }
 
+  void _onAgentHealthChanged() {
+    final st = agent.status.value;
+    if (st.connected) {
+      agentOnline.value = true;
+      if (st.terminalWatch || st.doorConnected) {
+        terminalOnline.value = true;
+      }
+    }
+  }
+
   void stop() {
     if (_events != null) AccessDisplayBridge.instance.stopHost();
+    agent.status.removeListener(_onAgentHealthChanged);
     _events?.cancel();
     _events = null;
     for (final sub in _dbSubs) {

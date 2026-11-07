@@ -45,6 +45,11 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
   bool _processing = false;
   bool _terminalOnline = false;
+
+  bool get _isTerminalReallyOnline =>
+      _terminalOnline ||
+      AccessMonitor.instance.terminalOnline.value ||
+      _biometricService.terminalAvailable;
   AccessStatus _status = AccessStatus.none;
   Member? _matchedMember;
   String? _matchedName;
@@ -82,7 +87,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       _terminalOnline = monitor.terminalOnline.value;
       monitor.terminalOnline.addListener(_onMonitorStatus);
       monitor.agentOnline.addListener(_onMonitorStatus);
+      _biometricService.agent.status.addListener(_onMonitorStatus);
       _terminalSub = monitor.decisions.listen(_onTerminalDecision);
+      unawaited(_checkTerminalLive());
 
       final gymId = runtime.session?.gymId;
       if (gymId != null) {
@@ -110,10 +117,17 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _checkTerminalLive() async {
+    try {
+      final termOk = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
+      if (mounted) setState(() => _terminalOnline = termOk);
+    } catch (_) {}
+  }
+
   void _onMonitorStatus() {
     if (!mounted) return;
     setState(() {
-      _terminalOnline = AccessMonitor.instance.terminalOnline.value;
+      _terminalOnline = AccessMonitor.instance.terminalOnline.value || _biometricService.terminalAvailable;
     });
   }
 
@@ -607,14 +621,14 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                             Row(
                               children: [
                                 Icon(
-                                  _terminalOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
-                                  color: _terminalOnline ? const Color(0xFF10B981) : Colors.amber,
+                                  _isTerminalReallyOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
+                                  color: _isTerminalReallyOnline ? const Color(0xFF10B981) : Colors.amber,
                                   size: 18,
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    _terminalOnline
+                                    _isTerminalReallyOnline
                                         ? (isFr
                                             ? 'Terminal (${_cfg.terminalIp}) : Connecté'
                                             : 'Tèminal (${_cfg.terminalIp}) : Konekte')
@@ -622,7 +636,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                                             ? 'Terminal (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Non connecté'
                                             : 'Tèminal (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Pa konekte'),
                                     style: TextStyle(
-                                      color: _terminalOnline ? Colors.white70 : Colors.amber.shade200,
+                                      color: _isTerminalReallyOnline ? Colors.white70 : Colors.amber.shade200,
                                       fontSize: 12,
                                       fontWeight: FontWeight.w500,
                                     ),
@@ -688,14 +702,14 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                       : Row(
                           children: [
                             Icon(
-                              _terminalOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
-                              color: _terminalOnline ? const Color(0xFF10B981) : Colors.amber,
+                              _isTerminalReallyOnline ? LucideIcons.shieldCheck : LucideIcons.circleAlert,
+                              color: _isTerminalReallyOnline ? const Color(0xFF10B981) : Colors.amber,
                               size: 20,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                _terminalOnline
+                                _isTerminalReallyOnline
                                     ? (isFr
                                         ? 'Terminal de porte (${_cfg.terminalIp}) : Connecté & Prêt'
                                         : 'Tèminal Pòt (${_cfg.terminalIp}) : Konekte & Pare')
@@ -703,7 +717,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                                         ? 'Terminal de porte (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Non connecté (vérifiez le réseau)'
                                         : 'Tèminal Pòt (${_cfg.terminalIp.isEmpty ? "192.168.1.41" : _cfg.terminalIp}) : Pa konekte (verifye rezo a)'),
                                 style: TextStyle(
-                                  color: _terminalOnline ? Colors.white70 : Colors.amber.shade200,
+                                  color: _isTerminalReallyOnline ? Colors.white70 : Colors.amber.shade200,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -857,7 +871,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            _terminalOnline
+                            _isTerminalReallyOnline
                                 ? (isFr
                                     ? 'Terminal ${_cfg.terminalIp} actif · Détection automatique'
                                     : 'Tèminal ${_cfg.terminalIp} aktif · Deteksyon otomatik')
@@ -866,7 +880,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                                     : 'Tèminal pa konekte · Verifye adrès IP a nan Paramèt'),
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: _terminalOnline ? const Color(0xFF2DD4BF) : Colors.amber.shade200,
+                              color: _isTerminalReallyOnline ? const Color(0xFF2DD4BF) : Colors.amber.shade200,
                               fontSize: 14,
                             ),
                           ),

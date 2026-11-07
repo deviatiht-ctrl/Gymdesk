@@ -37,15 +37,18 @@ jobs:
           name: web-build
           path: build/web
 
-      - name: Update web_deploy directory
+      - name: Update web_deploy and GymDesk_USB/web directories
         run: |
           rm -rf web_deploy/*
           cp -r build/web/* web_deploy/
+          mkdir -p GymDesk_USB/web
+          rm -rf GymDesk_USB/web/*
+          cp -r build/web/* GymDesk_USB/web/
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add web_deploy
+          git add web_deploy GymDesk_USB/web
           if ! git diff --staged --quiet; then
-            git commit -m "build(web): compile web_deploy from flutter build "
+            git commit -m "build(web): compile web_deploy and GymDesk_USB/web from flutter build"
             git push origin main
           fi
 

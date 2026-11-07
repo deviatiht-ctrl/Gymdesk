@@ -23,6 +23,7 @@ Write-Host ""
 # 2. Femen tout ansyen pwosesis ki te ka bloke
 Write-Host "[1/7] Femen tout ansyen pwosesis nan background..." -ForegroundColor Yellow
 Stop-Process -Name access_agent, biostar_tool, wscript, msedge -Force -ErrorAction SilentlyContinue
+taskkill /f /im access_agent.exe /im biostar_tool.exe /im wscript.exe >nul 2>&1
 Start-Sleep -Seconds 1
 Write-Host "      -> Pwosesis femen avek sikse." -ForegroundColor Green
 
@@ -77,7 +78,12 @@ foreach ($f in $filesToUpdate) {
     try {
         Write-Host "      -> Telechaje $(Split-Path $f.Out -Leaf)..." -NoNewline
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $f.Url -OutFile $f.Out -UseBasicParsing -TimeoutSec 30
+        $tmp = "$($f.Out).new"
+        Invoke-WebRequest -Uri $f.Url -OutFile $tmp -UseBasicParsing -TimeoutSec 45
+        if (Test-Path $f.Out) {
+            Remove-Item $f.Out -Force -ErrorAction SilentlyContinue
+        }
+        Move-Item -Path $tmp -Destination $f.Out -Force -ErrorAction SilentlyContinue
         Write-Host " [OK]" -ForegroundColor Green
     } catch {
         Write-Host " [SOTE: Pa gen entenet oubyen fichye a deja la]" -ForegroundColor DarkYellow
@@ -137,16 +143,23 @@ if (-not $target) {
         Where-Object { $_.IPAddress -ne '192.168.1.50' -and $_.IPAddress -ne '192.168.1.16' } |
         ForEach-Object { Remove-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress $_.IPAddress -Confirm:$false -ErrorAction SilentlyContinue }
 
-    # Mete IP 192.168.1.50
+    # Mete IP 192.168.1.50 via netsh (pi djanm sou Windows)
     $hasIp = (Get-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.50' -ErrorAction SilentlyContinue)
     if (-not $hasIp) {
-        New-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.50' -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
+        netsh interface ipv4 set address name="$($target.Name)" static 192.168.1.50 255.255.255.0 none | Out-Null
+        Start-Sleep -Milliseconds 500
     }
 
     # Mete IP BioStar 192.168.1.16
     $hasBio = (Get-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.16' -ErrorAction SilentlyContinue)
     if (-not $hasBio) {
-        New-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.16' -PrefixLength 24 -SkipAsSource $true -ErrorAction SilentlyContinue | Out-Null
+        netsh interface ipv4 add address name="$($target.Name)" 192.168.1.16 255.255.255.0 | Out-Null
+    }
+
+    # Verifye si IP la byen monte
+    $ipOk = (Get-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.50' -ErrorAction SilentlyContinue)
+    if (-not $ipOk) {
+        New-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.50' -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
     }
 
     # Wout direk W2
