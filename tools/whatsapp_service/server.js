@@ -281,48 +281,52 @@ class WhatsAppAccountInstance {
     if (!this.isReady) return false;
     if (this.isBusy) return false;
 
-    const isPriority = ['receipt', 'welcome', 'manual', 'test'].includes(messageKind);
+    // SÈLMAN resi peman renouvèlman/enskripsyon, byenvini, ak tès admin ki tranzaksyonèl priyorite!
+    const isPriority = ['receipt', 'welcome', 'test'].includes(messageKind);
 
     // 1. LIMIT KANTITE PA JOU (Daily Quota):
-    // Mesaj priyoritè (Enskripsyon ak Renouvèlman) PA GEN LIMIT 25 LA! Yo dwe ale kanmenm!
     if (!isPriority) {
-      // SÈLMAN rapèl abònman (cold reminders) ki limite a 25 pa jou pou pwoteje kont lan
+      // SÈLMAN rapèl abònman (cold reminders) ki limite a 25 pa jou pou pwoteje kont lan!
       const limit = this.reminderDailyLimit || PACING_CONFIG.defaultReminderDailyLimit || 25;
       if (this.sentRemindersToday >= limit) {
-        return false; // Limit rapèl frèt rive pou jounen an sou liy sa a
+        return false; // Limit 25 rapèl frèt rive pou jounen an sou liy sa a!
       }
     } else {
       // Enskripsyon ak Renouvèlman se PRIYORITE ABSOLI: YO PA GEN LIMIT 25 LA!
-      // Yo lib pou ale touswit jiska yon plafon sekirite trè elve (200/jou)
       if (this.sentTransactionalToday >= PACING_CONFIG.maxTransactionalDailyLimit) {
         return false;
       }
     }
 
-    // Si se premye mesaj liy lan ap voye, li lib touswit
-    if (this.lastSentAt === 0) return true;
-
     const now = Date.now();
 
-    // 2. POZ REPO (Batch Pause):
-    // Poz repo aplike SÈLMAN sou rapèl frèt yo. Yon enskripsyon oswa renouvèlman pa janm bloke nan poz repo!
-    if (!isPriority && this.consecutiveSentCount >= PACING_CONFIG.batchPauseAfterCount) {
-      if (now - this.lastSentAt < PACING_CONFIG.batchPauseDurationMs) {
-        return false; // Poz repo pou rapèl yo
-      } else {
-        this.consecutiveSentCount = 0;
+    // 2. DELÈ SEKIRITE ENTÈLIJAN SOU RAPÈL FRÈT (10 a 16 minit):
+    if (!isPriority) {
+      // 10 a 16 minit ant chak rapèl! Si liy lan te voye yon mesaj deja (lastReminderSentAt oswa lastSentAt), respekte delè a!
+      const lastSentTime = Math.max(this.lastReminderSentAt || 0, this.lastSentAt || 0);
+      if (lastSentTime > 0) {
+        const requiredReminderDelay = PACING_CONFIG.reminderMinDelayMs + (this._nextReminderJitter || 0);
+        if (now - lastSentTime < requiredReminderDelay) {
+          return false; // Fòk 10 a 16 minit pase nèt anvan pwochen rapèl la!
+        }
       }
-    }
 
-    // 3. DELÈ SEKIRITE ENTÈLIJAN:
-    // Tranzaksyonèl (Enskripsyon / Renouvèlman / Resi): Rapid (30s a 75s avèk 3-5s tape)
-    // Rapèl abònman (Expiration reminders): Dousman (10 a 16 minit)
-    const minDelay = isPriority ? PACING_CONFIG.priorityMinDelayMs : PACING_CONFIG.reminderMinDelayMs;
-    const jitter = isPriority ? PACING_CONFIG.priorityJitterMs : PACING_CONFIG.reminderJitterMs;
-
-    const requiredDelay = minDelay + Math.floor(Math.random() * jitter);
-    if (now - this.lastSentAt < requiredDelay) {
-      return false;
+      // Poz repo apre 5 rapèl
+      if (this.consecutiveSentCount >= PACING_CONFIG.batchPauseAfterCount) {
+        if (now - (this.lastReminderSentAt || this.lastSentAt) < PACING_CONFIG.batchPauseDurationMs) {
+          return false; // Poz 10 minit repo apre 5 rapèl
+        } else {
+          this.consecutiveSentCount = 0;
+        }
+      }
+    } else {
+      // Mesaj tranzaksyonèl (Enskripsyon / Renouvèlman / Resi / Tès): Rapid (5s a 15s)
+      if (this.lastSentAt && this.lastSentAt > 0) {
+        const requiredPriorityDelay = PACING_CONFIG.priorityMinDelayMs + Math.floor(Math.random() * PACING_CONFIG.priorityJitterMs);
+        if (now - this.lastSentAt < requiredPriorityDelay) {
+          return false;
+        }
+      }
     }
 
     return true;
@@ -650,13 +654,18 @@ class WhatsAppAccountInstance {
       this.lastSentAt = Date.now();
       this.sentToday += 1;
 
-      const isPriority = ['receipt', 'welcome', 'manual', 'test'].includes(messageKind);
+      const isPriority = ['receipt', 'welcome', 'test'].includes(messageKind);
       if (isPriority) {
         this.sentTransactionalToday += 1;
-        // Enskripsyon ak Renouvèlman pa monte kontè poz repo rapèl frèt yo!
+        this.lastTransactionalSentAt = Date.now();
+        console.log(`[Liy ${this.accountIndex} - ${this.phone || this.label}] ⚡ Mesaj tranzaksyonèl priyorite voye bay ${chatId}.`);
       } else {
         this.sentRemindersToday += 1;
         this.consecutiveSentCount += 1;
+        this.lastReminderSentAt = Date.now();
+        this._nextReminderJitter = Math.floor(Math.random() * PACING_CONFIG.reminderJitterMs);
+        const waitMin = ((PACING_CONFIG.reminderMinDelayMs + this._nextReminderJitter) / 60000).toFixed(1);
+        console.log(`[Liy ${this.accountIndex} - ${this.phone || this.label}] ⏳ Rapèl abònman voye bay ${chatId} (${this.sentRemindersToday}/${this.reminderDailyLimit || 25} jodi a). Pwochen rapèl ap tann ${waitMin} minit.`);
       }
 
       try {
@@ -799,7 +808,7 @@ class AccountCluster {
       let assignedAccount = null;
 
       // 1. Chèche mesaj tranzaksyonèl priyoritè an premye (Enskripsyon / Renouvèlman / Resi: 3 a 5 minit)
-      const priorityUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=in.(receipt,welcome,manual,test)&order=created_at.asc&limit=1`;
+      const priorityUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=in.(receipt,welcome,test)&order=created_at.asc&limit=1`;
       const pRes = await fetch(priorityUrl, {
         method: 'GET',
         headers: {
@@ -823,7 +832,7 @@ class AccountCluster {
       if (!item) {
         const candidateReminderAcc = this.getNextAvailableAccount('reminder');
         if (candidateReminderAcc) {
-          const reminderUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=not.in.(receipt,welcome,manual,test)&order=created_at.asc&limit=1`;
+          const reminderUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=not.in.(receipt,welcome,test)&order=created_at.asc&limit=1`;
           const rRes = await fetch(reminderUrl, {
             method: 'GET',
             headers: {
@@ -878,16 +887,17 @@ class AccountCluster {
       const chatId = `${cleanPhone}@c.us`;
 
       try {
+        const msgKind = ['receipt', 'welcome', 'test'].includes(item.kind) ? item.kind : 'reminder';
         let sendResult;
         if (item.pdf_base64 && typeof item.pdf_base64 === 'string') {
           try {
             const media = new MessageMedia('application/pdf', item.pdf_base64, item.pdf_file_name || 'Recu.pdf');
-            sendResult = await assignedAccount.sendWithHumanPresence(chatId, media, { caption: item.message.trim() }, item.id, item.kind || 'reminder');
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, media, { caption: item.message.trim() }, item.id, msgKind);
           } catch (_) {
-            sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id, item.kind || 'reminder');
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id, msgKind);
           }
         } else {
-          sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id);
+          sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id, msgKind);
         }
 
         // Siksè voye
