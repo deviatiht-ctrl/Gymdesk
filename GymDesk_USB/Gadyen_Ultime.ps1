@@ -43,84 +43,93 @@ function Get-W2Ip {
 # entenet pa DHCP sou yon LOT rezo (pa 192.168.1.x) pou pa kase yon kab routeur.
 # Si yon kat konekte, se li selman nou konfigire; sinon nou prepare yo tout.
 function Get-W2Adapters {
-  $all = @(Get-NetAdapter | Where-Object {
+  $candidates = @(Get-NetAdapter | Where-Object {
     $_.Status -ne 'Disabled' -and
-    $_.InterfaceDescription -notmatch 'Wi-?Fi|Wireless|WLAN|802\.11|Bluetooth|Virtual|VPN' -and
-    $_.Virtual -ne $true -and ($_.PhysicalMediaType -eq '802.3' -or $_.InterfaceDescription -match 'Ethernet|GbE|ASIX|Realtek|USB|LAN|Dock|Dongle|Type-C')
-  } | Where-Object {
-    $ipif = Get-NetIPInterface -InterfaceIndex $_.ifIndex -AddressFamily IPv4
-    $gw = Get-NetRoute -InterfaceIndex $_.ifIndex -DestinationPrefix '0.0.0.0/0'
-    $other = Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 |
-      Where-Object { $_.IPAddress -notlike '192.168.1.*' -and $_.IPAddress -notlike '169.254.*' }
-    -not ($ipif.Dhcp -eq 'Enabled' -and $gw -and $other)
+    $_.Virtual -ne $true -and
+    $_.InterfaceDescription -notmatch 'Wi-?Fi|Wireless|WLAN|802\.11|Bluetooth|Virtual|VPN|Loopback|Hyper-V|VMware|TAP|WSL'
   })
-  $up = @($all | Where-Object Status -eq 'Up')
-  if ($up.Count -gt 0) { return $up }
-  return $all
+  $up = @($candidates | Where-Object Status -eq 'Up')
+  if ($up.Count -eq 1) { return $up }
+  if ($up.Count -gt 1) {
+    $dock = @($up | Where-Object { $_.InterfaceDescription -match 'USB|Dock|ASIX|LAN|Dongle|Type-C|Realtek USB' })
+    if ($dock.Count -gt 0) { return @($dock[0]) }
+    return @($up[0])
+  }
+  $dock = @($candidates | Where-Object { $_.InterfaceDescription -match 'USB|Dock|ASIX|LAN|Dongle|Type-C|Realtek USB' })
+  if ($dock.Count -gt 0) { return @($dock[0]) }
+  if ($candidates.Count -gt 0) { return @($candidates[0]) }
+  return @()
 }
 
 function Set-W2Network([string]$w2) {
   $changed = $false
   $sel = @(Get-W2Adapters)
-  $ids = @($sel | ForEach-Object { $_.ifIndex })
-  # Yon IP pa ka sou 2 kat: retire 192.168.1.50/.16 sou kat ki pa chwazi yo.
+  if ($sel.Count -eq 0) {
+    Log "Okenn kat rezo filaire/dock pa jwenn."
+    return $false
+  }
+  $target = $sel[0]
+  $i = $target.ifIndex
+
+  # Yon IP pa ka sou 2 kat: retire 192.168.1.50/.16 sou TOUT lot kat yo.
   foreach ($ip in @($PcIp, $BioStarIp)) {
-    Get-NetIPAddress -IPAddress $ip -AddressFamily IPv4 -PolicyStore PersistentStore |
-      Where-Object { $ids -notcontains $_.InterfaceIndex } |
-      ForEach-Object { Remove-NetIPAddress -InterfaceIndex $_.InterfaceIndex -IPAddress $ip -Confirm:$false; $changed = $true }
+    Get-NetIPAddress -IPAddress $ip -AddressFamily IPv4 -PolicyStore PersistentStore -ErrorAction SilentlyContinue |
+      Where-Object { $_.InterfaceIndex -ne $i } |
+      ForEach-Object { Remove-NetIPAddress -InterfaceIndex $_.InterfaceIndex -IPAddress $ip -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
+    Get-NetIPAddress -IPAddress $ip -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
+      Where-Object { $_.InterfaceIndex -ne $i } |
+      ForEach-Object { Remove-NetIPAddress -InterfaceIndex $_.InterfaceIndex -IPAddress $ip -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
   }
   Get-NetRoute -DestinationPrefix "$w2/32" -ErrorAction SilentlyContinue |
-    Where-Object { $ids -notcontains $_.InterfaceIndex } |
+    Where-Object { $_.InterfaceIndex -ne $i } |
     ForEach-Object { Remove-NetRoute -InterfaceIndex $_.InterfaceIndex -DestinationPrefix "$w2/32" -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
-  foreach ($a in $sel) {
-    $i = $a.ifIndex
-    $ipif = Get-NetIPInterface -InterfaceIndex $i -AddressFamily IPv4
-    if ($ipif.Dhcp -ne 'Disabled') { Set-NetIPInterface -InterfaceIndex $i -Dhcp Disabled; $changed = $true }
-    if ($ipif.InterfaceMetric -ne 500) { Set-NetIPInterface -InterfaceIndex $i -InterfaceMetric 500 }
-    $have = @(Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -PolicyStore PersistentStore | ForEach-Object { $_.IPAddress })
-    foreach ($old in $have) {
-      if ($old -ne $PcIp -and $old -ne $BioStarIp) { Remove-NetIPAddress -InterfaceIndex $i -IPAddress $old -Confirm:$false; $changed = $true }
-    }
-    if ($have -notcontains $PcIp) {
-      New-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -PrefixLength $Prefix | Out-Null; $changed = $true
-    }
-    # Kab la sou routeur jim nan: si yon lot aparey gen deja IP a, Windows
-    # pa aktive l (konfli). Lè sa a nou pran yon IP lib (.250 -> .245).
-    if ($a.Status -eq 'Up') {
-      $st = ''
-      for ($wait = 0; $wait -lt 7; $wait++) {
-        $st = (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction SilentlyContinue).AddressState
-        if ($st -eq 'Preferred') { break }
-        Start-Sleep -Milliseconds 500
-      }
-      # Selman si Windows detekte yon vre konfli rezo (Duplicate), chwazi yon IP altematif
-      if ($st -eq 'Duplicate') {
-        foreach ($alt in 250..245 | ForEach-Object { "192.168.1.$_" }) {
-          if ($alt -eq $PcIp) { continue }
-          if (Test-Connection -ComputerName $alt -Count 1 -Quiet) { continue }
-          Remove-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -Confirm:$false -ErrorAction SilentlyContinue
-          New-NetIPAddress -InterfaceIndex $i -IPAddress $alt -PrefixLength $Prefix | Out-Null
-          Log ("IP $PcIp an konfli rezo (Duplicate) -> chanje sou $alt")
-          $script:PcIp = $alt; $changed = $true
-          break
-        }
-      }
-    }
-    if ($have -notcontains $BioStarIp) {
-      New-NetIPAddress -InterfaceIndex $i -IPAddress $BioStarIp -PrefixLength $Prefix -SkipAsSource $true | Out-Null; $changed = $true
-    }
-    Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' | Remove-NetRoute -Confirm:$false
-    Set-DnsClientServerAddress -InterfaceIndex $i -ResetServerAddresses
-    Set-DnsClient -InterfaceIndex $i -RegisterThisConnectionsAddress $false
-    if ($a.Status -eq 'Up') {
-      if (-not (Get-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32")) {
-        New-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -NextHop '0.0.0.0' -RouteMetric 1 | Out-Null; $changed = $true
-      }
-      $p = Get-NetConnectionProfile -InterfaceIndex $i
-      if ($p -and $p.NetworkCategory -ne 'Private') { Set-NetConnectionProfile -InterfaceIndex $i -NetworkCategory Private }
-    }
-    if ($changed) { Log ("Kat '" + $a.Name + "' (" + $a.InterfaceDescription + "): $PcIp/$Prefix + wout $w2/32, san gateway/DNS") }
+
+  # Konfigire selman kat nou chwazi a (Dock oswa Ethernet aktif la)
+  $ipif = Get-NetIPInterface -InterfaceIndex $i -AddressFamily IPv4
+  if ($ipif.Dhcp -ne 'Disabled') { Set-NetIPInterface -InterfaceIndex $i -Dhcp Disabled; $changed = $true }
+  if ($ipif.InterfaceMetric -ne 500) { Set-NetIPInterface -InterfaceIndex $i -InterfaceMetric 500 }
+  $have = @(Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -PolicyStore PersistentStore -ErrorAction SilentlyContinue | ForEach-Object { $_.IPAddress })
+  foreach ($old in $have) {
+    if ($old -ne $PcIp -and $old -ne $BioStarIp) { Remove-NetIPAddress -InterfaceIndex $i -IPAddress $old -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
   }
+  if ($have -notcontains $PcIp) {
+    New-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -PrefixLength $Prefix -ErrorAction SilentlyContinue | Out-Null; $changed = $true
+  }
+
+  if ($target.Status -eq 'Up') {
+    $st = ''
+    for ($wait = 0; $wait -lt 7; $wait++) {
+      $st = (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction SilentlyContinue).AddressState
+      if ($st -eq 'Preferred') { break }
+      Start-Sleep -Milliseconds 500
+    }
+    if ($st -eq 'Duplicate') {
+      foreach ($alt in 250..245 | ForEach-Object { "192.168.1.$_" }) {
+        if ($alt -eq $PcIp) { continue }
+        if (Test-Connection -ComputerName $alt -Count 1 -Quiet) { continue }
+        Remove-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -Confirm:$false -ErrorAction SilentlyContinue
+        New-NetIPAddress -InterfaceIndex $i -IPAddress $alt -PrefixLength $Prefix -ErrorAction SilentlyContinue | Out-Null
+        Log ("IP $PcIp an konfli rezo (Duplicate) -> chanje sou $alt")
+        $script:PcIp = $alt; $changed = $true
+        break
+      }
+    }
+  }
+
+  if ($have -notcontains $BioStarIp) {
+    New-NetIPAddress -InterfaceIndex $i -IPAddress $BioStarIp -PrefixLength $Prefix -SkipAsSource $true -ErrorAction SilentlyContinue | Out-Null; $changed = $true
+  }
+  Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+  Set-DnsClientServerAddress -InterfaceIndex $i -ResetServerAddresses -ErrorAction SilentlyContinue
+  Set-DnsClient -InterfaceIndex $i -RegisterThisConnectionsAddress $false -ErrorAction SilentlyContinue
+
+  if (-not (Get-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -ErrorAction SilentlyContinue)) {
+    New-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null; $changed = $true
+  }
+  $p = Get-NetConnectionProfile -InterfaceIndex $i -ErrorAction SilentlyContinue
+  if ($p -and $p.NetworkCategory -ne 'Private') { Set-NetConnectionProfile -InterfaceIndex $i -NetworkCategory Private -ErrorAction SilentlyContinue }
+
+  if ($changed) { Log ("Kat '" + $target.Name + "' (" + $target.InterfaceDescription + "): $PcIp/$Prefix + wout $w2/32, san gateway/DNS") }
   return $changed
 }
 
