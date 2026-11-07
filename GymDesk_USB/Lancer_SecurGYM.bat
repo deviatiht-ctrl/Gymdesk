@@ -29,6 +29,11 @@ for /l %%i in (1,1,20) do (
 :agent_ready
 set "DATA_DIR=%~dp0data\profile"
 
+rem Nettoyer les caches de scripts pour garantir la derniere version de l'interface
+if exist "%DATA_DIR%\Default\Cache" rmdir /s /q "%DATA_DIR%\Default\Cache" >nul 2>&1
+if exist "%DATA_DIR%\Default\Code Cache" rmdir /s /q "%DATA_DIR%\Default\Code Cache" >nul 2>&1
+if exist "%DATA_DIR%\Default\Service Worker" rmdir /s /q "%DATA_DIR%\Default\Service Worker" >nul 2>&1
+
 rem --- 2b. Demarrage automatique du service WhatsApp (whatsapp-web.js) ---
 curl -s -m 1 http://127.0.0.1:47812/health >nul 2>&1 || (
     if exist "%~dp0Demarrer_WhatsApp_Silencieux.vbs" (
