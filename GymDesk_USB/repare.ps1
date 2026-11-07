@@ -22,6 +22,7 @@ Write-Host ""
 
 # 2. Femen tout ansyen pwosesis ki te ka bloke
 Write-Host "[1/7] Femen tout ansyen pwosesis nan background..." -ForegroundColor Yellow
+Stop-ScheduledTask -TaskName 'SecurGYM_Gadyen' -ErrorAction SilentlyContinue
 Stop-Process -Name access_agent, biostar_tool, wscript, msedge -Force -ErrorAction SilentlyContinue
 taskkill /f /im access_agent.exe /im biostar_tool.exe /im wscript.exe >nul 2>&1
 Start-Sleep -Seconds 1
@@ -138,28 +139,19 @@ if (-not $target) {
     # Konfigire kat sib la
     Set-NetIPInterface -InterfaceIndex $target.ifIndex -Dhcp Disabled -InterfaceMetric 500 -ErrorAction SilentlyContinue
     
-    # Netwaye ansyen IP sou kat sa a
+    # Netwaye ansyen IP altènativ (tankou .249, .250) sou kat la pou kenbe sèlman 192.168.1.50
     Get-NetIPAddress -InterfaceIndex $target.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.IPAddress -ne '192.168.1.50' -and $_.IPAddress -ne '192.168.1.16' } |
         ForEach-Object { Remove-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress $_.IPAddress -Confirm:$false -ErrorAction SilentlyContinue }
 
-    # Mete IP 192.168.1.50 via netsh (pi djanm sou Windows)
-    $hasIp = (Get-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.50' -ErrorAction SilentlyContinue)
-    if (-not $hasIp) {
-        netsh interface ipv4 set address name="$($target.Name)" static 192.168.1.50 255.255.255.0 none | Out-Null
-        Start-Sleep -Milliseconds 500
-    }
+    # Mete IP 192.168.1.50 fiks pèmanan via netsh
+    netsh interface ipv4 set address name="$($target.Name)" static 192.168.1.50 255.255.255.0 none | Out-Null
+    Start-Sleep -Milliseconds 500
 
     # Mete IP BioStar 192.168.1.16
     $hasBio = (Get-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.16' -ErrorAction SilentlyContinue)
     if (-not $hasBio) {
         netsh interface ipv4 add address name="$($target.Name)" 192.168.1.16 255.255.255.0 | Out-Null
-    }
-
-    # Verifye si IP la byen monte
-    $ipOk = (Get-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.50' -ErrorAction SilentlyContinue)
-    if (-not $ipOk) {
-        New-NetIPAddress -InterfaceIndex $target.ifIndex -IPAddress '192.168.1.50' -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
     }
 
     # Wout direk W2
@@ -174,13 +166,13 @@ if (-not $target) {
     netsh advfirewall firewall add rule name=SecurGYM_W2_TCP dir=in action=allow protocol=TCP localport=51211,51212,51213 profile=any | Out-Null
     netsh advfirewall firewall add rule name=SecurGYM_W2_UDP dir=in action=allow protocol=UDP localport=51210,51211 profile=any | Out-Null
 
-    Write-Host "      -> IP 192.168.1.50 fiks sou kat la avek sikse!" -ForegroundColor Green
+    Write-Host "      -> IP 192.168.1.50 fiks pèmanan sou kat la avek sikse!" -ForegroundColor Green
 }
 
 # 7. Tcheke tèminal W2 a
 Write-Host "[6/7] Tcheke repons tèminal BioEntry W2 (192.168.1.41)..." -ForegroundColor Yellow
 $w2Online = $false
-for ($attempt = 1; $attempt -le 4; $attempt++) {
+for ($attempt = 1; $attempt -le 6; $attempt++) {
     if (Test-Connection -ComputerName '192.168.1.41' -Count 1 -Quiet) {
         $w2Online = $true
         break
@@ -190,7 +182,6 @@ for ($attempt = 1; $attempt -le 4; $attempt++) {
 
 if ($w2Online) {
     Write-Host "      -> W2 AP REPONN (192.168.1.41 [ONLINE])!" -ForegroundColor Green
-    # Fose verifikasyon otonom
     if (Test-Path "$gymDir\biostar_tool.exe") {
         $dll = "$gymDir\Lib\Window\lib\x64"
         if (Test-Path $dll) {
@@ -216,7 +207,7 @@ Write-Host ""
 Write-Host "========================================================================" -ForegroundColor Green
 Write-Host "  [SIKSE TOTAL] TOUT BAGAY FIN ANALIZE EPI KORIJE!" -ForegroundColor Green
 Write-Host "  - Ajan SecurGYM  : v3.6.1 [AKTIF]" -ForegroundColor Green
-Write-Host "  - Kat Reseau     : $($target.Name) -> 192.168.1.50 [FIKS]" -ForegroundColor Green
+Write-Host "  - Kat Reseau     : $($target.Name) -> 192.168.1.50 [FIKS PÈMANAN]" -ForegroundColor Green
 Write-Host "  - Teminal W2     : $(if ($w2Online) { '192.168.1.41 [KONEKTE]' } else { '192.168.1.41 [Tcheke fil kab la]' })" -ForegroundColor $(if ($w2Online) { "Green" } else { "Yellow" })
 Write-Host "  - Kach Navigatè  : Netwaye nèt (Nouvo entèfas la ap louvri)" -ForegroundColor Green
 Write-Host "========================================================================" -ForegroundColor Green

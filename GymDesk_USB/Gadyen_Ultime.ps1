@@ -1,13 +1,13 @@
 # Gadyen_Ultime.ps1 - kenbe koneksyon kab W2 a (BioEntry) fiks pou SecurGYM.
 #  -Enstale    : kopye gadyen an nan C:\ProgramData\SecurGYM, aplike rezo a,
 #                firewall, epi kreye tach SYSTEM "SecurGYM_Gadyen" (demaraj Windows).
-#  -Siveye     : bouk background (tach la): re-aplike IP a si l disparet.
+#  -Siveye     : bouk background (tach la): re-aplike IP a SI L PA LA SELMAN (pa janm kase koneksyon aktif).
 #  -Repare     : jwenn W2 a sou kab la, remete IP li fiks, fose l verifye
 #                anprent yo li menm (san Server Matching), afiche konfigirasyon an.
 #  -Dezenstale : retire tach la (IP yo rete).
 # Kat Wi-Fi a PA janm touche: kab W2 a pa gen gateway ni DNS, metrik li wo,
 # epi se selman yon wout /32 pou W2 a ki pase sou kab la -> entenet rete sou Wi-Fi.
-param([switch]$Enstale, [switch]$Siveye, [switch]$Dezenstale, [switch]$Repare, [string]$ToolDir = $PSScriptRoot, [int]$IntervalMs = 2000)
+param([switch]$Enstale, [switch]$Siveye, [switch]$Dezenstale, [switch]$Repare, [string]$ToolDir = $PSScriptRoot, [int]$IntervalMs = 5000)
 
 $ErrorActionPreference = 'SilentlyContinue'
 $Home2   = 'C:\ProgramData\SecurGYM'
@@ -39,9 +39,7 @@ function Get-W2Ip {
   return '192.168.1.41'
 }
 
-# Kat kab (802.3) fizik: USB (ASIX...) oswa PCIe. Nou sote yon kat ki gen
-# entenet pa DHCP sou yon LOT rezo (pa 192.168.1.x) pou pa kase yon kab routeur.
-# Si yon kat konekte, se li selman nou konfigire; sinon nou prepare yo tout.
+# Kat kab (802.3) fizik: USB (ASIX...) oswa PCIe.
 function Get-W2Adapters {
   $candidates = @(Get-NetAdapter | Where-Object {
     $_.Status -ne 'Disabled' -and
@@ -62,75 +60,53 @@ function Get-W2Adapters {
 }
 
 function Set-W2Network([string]$w2) {
-  $changed = $false
   $sel = @(Get-W2Adapters)
   if ($sel.Count -eq 0) {
-    Log "Okenn kat rezo filaire/dock pa jwenn."
     return $false
   }
   $target = $sel[0]
   $i = $target.ifIndex
 
+  # Si kat la genyen 192.168.1.50 deja, PA KASE ANYEN, PA TOUCHE L!
+  $targetHasIp = (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -ErrorAction SilentlyContinue)
+  if ($targetHasIp) {
+    # Asire selman ke wout direk la toujou prezan
+    if (-not (Get-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -ErrorAction SilentlyContinue)) {
+      New-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
+    }
+    return $false
+  }
+
   # Yon IP pa ka sou 2 kat: retire 192.168.1.50/.16 sou TOUT lot kat yo.
   foreach ($ip in @($PcIp, $BioStarIp)) {
-    Get-NetIPAddress -IPAddress $ip -AddressFamily IPv4 -PolicyStore PersistentStore -ErrorAction SilentlyContinue |
+    Get-NetIPAddress -IPAddress $ip -AddressFamily IPv4 -ErrorAction SilentlyContinue |
       Where-Object { $_.InterfaceIndex -ne $i } |
-      ForEach-Object { Remove-NetIPAddress -InterfaceIndex $_.InterfaceIndex -IPAddress $ip -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
-    Get-NetIPAddress -IPAddress $ip -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction SilentlyContinue |
-      Where-Object { $_.InterfaceIndex -ne $i } |
-      ForEach-Object { Remove-NetIPAddress -InterfaceIndex $_.InterfaceIndex -IPAddress $ip -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
+      ForEach-Object { Remove-NetIPAddress -InterfaceIndex $_.InterfaceIndex -IPAddress $ip -Confirm:$false -ErrorAction SilentlyContinue }
   }
   Get-NetRoute -DestinationPrefix "$w2/32" -ErrorAction SilentlyContinue |
     Where-Object { $_.InterfaceIndex -ne $i } |
-    ForEach-Object { Remove-NetRoute -InterfaceIndex $_.InterfaceIndex -DestinationPrefix "$w2/32" -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
+    ForEach-Object { Remove-NetRoute -InterfaceIndex $_.InterfaceIndex -DestinationPrefix "$w2/32" -Confirm:$false -ErrorAction SilentlyContinue }
 
-  # Konfigire selman kat nou chwazi a (Dock oswa Ethernet aktif la)
-  $ipif = Get-NetIPInterface -InterfaceIndex $i -AddressFamily IPv4
-  if ($ipif.Dhcp -ne 'Disabled') { Set-NetIPInterface -InterfaceIndex $i -Dhcp Disabled; $changed = $true }
-  if ($ipif.InterfaceMetric -ne 500) { Set-NetIPInterface -InterfaceIndex $i -InterfaceMetric 500 }
-  $have = @(Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -PolicyStore PersistentStore -ErrorAction SilentlyContinue | ForEach-Object { $_.IPAddress })
-  foreach ($old in $have) {
-    if ($old -ne $PcIp -and $old -ne $BioStarIp) { Remove-NetIPAddress -InterfaceIndex $i -IPAddress $old -Confirm:$false -ErrorAction SilentlyContinue; $changed = $true }
-  }
-  if ($have -notcontains $PcIp) {
-    New-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -PrefixLength $Prefix -ErrorAction SilentlyContinue | Out-Null; $changed = $true
-  }
+  # Konfigire kat la ak netsh (fiks pèmanan nan rejis Windows)
+  netsh interface ipv4 set address name="$($target.Name)" static $PcIp 255.255.255.0 none | Out-Null
+  Start-Sleep -Milliseconds 400
+  netsh interface ipv4 add address name="$($target.Name)" $BioStarIp 255.255.255.0 | Out-Null
 
-  if ($target.Status -eq 'Up') {
-    $st = ''
-    for ($wait = 0; $wait -lt 7; $wait++) {
-      $st = (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction SilentlyContinue).AddressState
-      if ($st -eq 'Preferred') { break }
-      Start-Sleep -Milliseconds 500
-    }
-    if ($st -eq 'Duplicate') {
-      foreach ($alt in 250..245 | ForEach-Object { "192.168.1.$_" }) {
-        if ($alt -eq $PcIp) { continue }
-        if (Test-Connection -ComputerName $alt -Count 1 -Quiet) { continue }
-        Remove-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -Confirm:$false -ErrorAction SilentlyContinue
-        New-NetIPAddress -InterfaceIndex $i -IPAddress $alt -PrefixLength $Prefix -ErrorAction SilentlyContinue | Out-Null
-        Log ("IP $PcIp an konfli rezo (Duplicate) -> chanje sou $alt")
-        $script:PcIp = $alt; $changed = $true
-        break
-      }
-    }
-  }
-
-  if ($have -notcontains $BioStarIp) {
-    New-NetIPAddress -InterfaceIndex $i -IPAddress $BioStarIp -PrefixLength $Prefix -SkipAsSource $true -ErrorAction SilentlyContinue | Out-Null; $changed = $true
-  }
+  # Asire pa gen wout default (gateway) sou kab W2 a pou entenet la rete sou Wi-Fi
   Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
   Set-DnsClientServerAddress -InterfaceIndex $i -ResetServerAddresses -ErrorAction SilentlyContinue
   Set-DnsClient -InterfaceIndex $i -RegisterThisConnectionsAddress $false -ErrorAction SilentlyContinue
 
+  # Wout direk pou W2 a
   if (-not (Get-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -ErrorAction SilentlyContinue)) {
-    New-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null; $changed = $true
+    New-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
   }
+
   $p = Get-NetConnectionProfile -InterfaceIndex $i -ErrorAction SilentlyContinue
   if ($p -and $p.NetworkCategory -ne 'Private') { Set-NetConnectionProfile -InterfaceIndex $i -NetworkCategory Private -ErrorAction SilentlyContinue }
 
-  if ($changed) { Log ("Kat '" + $target.Name + "' (" + $target.InterfaceDescription + "): $PcIp/$Prefix + wout $w2/32, san gateway/DNS") }
-  return $changed
+  Log "Kat '$($target.Name)' ($($target.InterfaceDescription)): $PcIp/$Prefix fiks pèmanan pou W2 ($w2)."
+  return $true
 }
 
 function Set-Firewall {
@@ -143,11 +119,13 @@ function Write-Eta([string]$w2) {
   $up = Get-W2Adapters | Where-Object Status -eq 'Up' | Select-Object -First 1
   $ok = $false
   if ($up) { $ok = Test-Connection -ComputerName $w2 -Count 1 -Quiet }
-  $txt = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + "`r`n" +
-    'Kab W2      : ' + $(if ($up) { $up.Name + ' (konekte)' } else { 'PA KONEKTE' }) + "`r`n" +
-    "IP PC       : $PcIp (+ $BioStarIp BioStar)`r`n" +
-    "Teminal W2  : $w2 -> " + $(if ($ok) { 'REPONN' } else { 'pa reponn' }) + "`r`n" +
-    "Anprent yo verifye sou W2 a menm (dat fen abonman), menm si kab la dekonekte.`r`n"
+  $nom = if ($up) { "$($up.Name) ($($up.InterfaceDescription))" } else { 'Okenn (ploge kab la nan USB)' }
+  $txt = "=== ETA GADYEN SECERGYM ===`r`n" +
+    "Dat     : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`r`n" +
+    "Kat     : $nom`r`n" +
+    "PC IP   : $PcIp/$Prefix`r`n" +
+    "W2 IP   : $w2`r`n" +
+    "Konekte : $(if ($ok) { 'WI (W2 sou liy, pare)' } else { 'NON (verifye kab la ak kouran)' })`r`n"
   Set-Content -Path $EtaFile -Value $txt -Encoding UTF8
 }
 
@@ -200,34 +178,32 @@ if ($Repare) {
       Start-Sleep -Seconds 5
     }
   }
-  Write-Host "Fose W2 verifye anprent yo li menm + 1 kontak (kapte toujou limen, LFD etenn)..."
+  Write-Host "Fose W2 verifye anprent yo li menm + 1 kontak..."
   $r = & $tool $dll fpfix $w2 51211
   Write-Host ("  " + ($r -join ' '))
   if ($r -match 'fixed') { Log ("W2 fpfix: " + ($r -join ' ')) }
-  & $tool $dll netcfg $w2 51211 | ForEach-Object { Write-Host ("  " + $_) }
   Pop-Location
   Write-Eta $w2
   exit 0
 }
 
 if ($Siveye) {
-  Log "Gadyen demare (chak $IntervalMs ms), W2 = $w2"
+  Log "Gadyen demare (veye W2), W2 = $w2"
   $tick = 0
   while ($true) {
     try {
-      # Kab la ka chanje pò (dock, adaptatè USB): IP a dwe sou yon kat ki KONEKTE.
       $upAdapters = @(Get-W2Adapters | Where-Object Status -eq 'Up')
       $upIdx = @($upAdapters | ForEach-Object { $_.ifIndex })
-      $need = $upIdx.Count -gt 0 -and (
-        -not (Get-NetIPAddress -IPAddress $PcIp -AddressFamily IPv4 | Where-Object { $upIdx -contains $_.InterfaceIndex }) -or
-        -not (Get-NetRoute -DestinationPrefix "$w2/32" | Where-Object { $upIdx -contains $_.InterfaceIndex }))
-      if ($need -or ($tick % 30) -eq 0) {
-        if (Set-W2Network $w2) { Log 'Rezo W2 re-aplike.' }
+      if ($upIdx.Count -gt 0) {
+        $hasIp = (Get-NetIPAddress -IPAddress $PcIp -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $upIdx -contains $_.InterfaceIndex })
+        if (-not $hasIp) {
+          if (Set-W2Network $w2) { Log 'Rezo W2 aplike sou nouvo pò USB konekte.' }
+        }
       }
-      if (($tick % 15) -eq 0) { Write-Eta $w2 }
+      if (($tick % 12) -eq 0) { Write-Eta $w2 }
     } catch { Log ('Ere: ' + $_.Exception.Message) }
     $tick++
-    Start-Sleep -Milliseconds $IntervalMs
+    Start-Sleep -Seconds 5
   }
 }
 
