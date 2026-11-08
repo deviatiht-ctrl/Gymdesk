@@ -254,6 +254,7 @@ class WhatsAppAccountInstance {
   get isReady() {
     return (
       this.status === 'READY' &&
+      Boolean(this.phone) &&
       this.client !== null &&
       this.client.pupPage !== null &&
       this.client.pupPage !== undefined &&
@@ -452,18 +453,36 @@ class WhatsAppAccountInstance {
       });
 
       this.client.on('ready', async () => {
-        console.log(`[Liy ${this.accountIndex}] ✅ Kliyan WhatsApp pare nèt pou voye mesaj!`);
-        this.status = 'READY';
-        try { await this.ensureInjected(); } catch (_) {}
-        this.isInitializing = false;
-        this.lastError = null;
         try {
           if (this.client && this.client.info) {
             this.phone = this.client.info.wid ? this.client.info.wid.user : null;
             this.pushName = this.client.info.pushname || null;
-            console.log(`[Liy ${this.accountIndex}] Konekte kòm: ${this.pushName || 'Enkoni'} (${this.phone})`);
           }
         } catch (_) {}
+
+        if (!this.phone) {
+          console.warn(`[Liy ${this.accountIndex}] 'ready' resevwa men nimewo telefòn nan poko disponib. N ap tann...`);
+          setTimeout(async () => {
+            try {
+              if (this.client && this.client.info && this.client.info.wid) {
+                this.phone = this.client.info.wid.user;
+                this.pushName = this.client.info.pushname || null;
+                this.status = 'READY';
+                this.isInitializing = false;
+                this.lastError = null;
+                console.log(`[Liy ${this.accountIndex}] ✅ Konekte kòm: ${this.pushName || 'Enkoni'} (${this.phone})`);
+                this.sendHeartbeat();
+              }
+            } catch (_) {}
+          }, 2000);
+          return;
+        }
+
+        console.log(`[Liy ${this.accountIndex}] ✅ Kliyan WhatsApp pare nèt pou voye mesaj! Konekte kòm: ${this.pushName || 'Enkoni'} (${this.phone})`);
+        this.status = 'READY';
+        try { await this.ensureInjected(); } catch (_) {}
+        this.isInitializing = false;
+        this.lastError = null;
         this.sendHeartbeat();
       });
 
@@ -490,14 +509,6 @@ class WhatsAppAccountInstance {
       });
 
       await this.client.initialize();
-      if (this.client && this.client.pupPage) {
-        this.client.pupPage.on('framenavigated', async () => {
-          try {
-            const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
-            await this.client.pupPage.evaluate(LoadUtils);
-          } catch (_) {}
-        });
-      }
     } catch (err) {
       console.error(`[Liy ${this.accountIndex}] Erè inisyalizasyon:`, err.message);
       this.status = 'ERROR';
@@ -513,57 +524,52 @@ class WhatsAppAccountInstance {
       throw new Error(`Navigatè pou Liy ${this.accountIndex} pa pare.`);
     }
 
-
-      // Maske navigator.webdriver pou Meta pa detekte ke se yon bot
+    // Maske navigator.webdriver pou Meta pa detekte ke se yon bot
+    try {
       await this.client.pupPage.evaluate(() => {
         try {
           Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
           if (!window.chrome) window.chrome = { runtime: {} };
           Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'] });
         } catch (_) {}
-      }).catch(() => {});
+      });
+    } catch (_) {}
 
-    let isReady = await this.client.pupPage.evaluate(() => {
-      return (
-        typeof window.WWebJS !== 'undefined' &&
-        typeof window.WWebJS.getChat === 'function' &&
-        typeof window.WWebJS.sendMessage === 'function'
-      );
-    }).catch(() => false);
+    let isReady = false;
+    try {
+      isReady = await this.client.pupPage.evaluate(() => {
+        return Boolean(
+          typeof window.WWebJS !== 'undefined' &&
+          typeof window.WWebJS.getChat === 'function' &&
+          typeof window.WWebJS.sendMessage === 'function'
+        );
+      });
+    } catch (_) {}
 
-    if (!isReady) {
-      console.log(`[Liy ${this.accountIndex}] 🔄 window.WWebJS pa pare nan paj la. Re-injeksyon LoadUtils...`);
+    if (isReady) return true;
+
+    console.log(`[Liy ${this.accountIndex}] 🔄 window.WWebJS pa pare nan paj la. Re-injeksyon LoadUtils...`);
+    try {
       const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
       const { ExposeAuthStore } = require('whatsapp-web.js/src/util/Injected/AuthStore/AuthStore');
-
-      try {
-        await this.client.pupPage.evaluate(ExposeAuthStore);
-      } catch (_) {}
-
-      try {
-        await this.client.pupPage.evaluate(LoadUtils);
-      } catch (e) {
-        console.warn(`[Liy ${this.accountIndex}] Erè evaluate LoadUtils:`, e.message);
-      }
-
-      for (let i = 0; i < 25; i++) {
-        isReady = await this.client.pupPage.evaluate(() => {
-          return (
-            typeof window.WWebJS !== 'undefined' &&
-            typeof window.WWebJS.getChat === 'function' &&
-            typeof window.WWebJS.sendMessage === 'function'
-          );
-        }).catch(() => false);
-        if (isReady) break;
-        await new Promise((r) => setTimeout(r, 200));
-      }
-
-      if (!isReady) {
-        throw new Error(`Kòd entèn WWebJS pa t ka chaje sou Liy ${this.accountIndex}`);
-      }
-      console.log(`[Liy ${this.accountIndex}] ✅ window.WWebJS reyinjekte avèk siksè.`);
+      await this.client.pupPage.evaluate(ExposeAuthStore).catch(() => {});
+      await this.client.pupPage.evaluate(LoadUtils).catch(() => {});
+      await new Promise((r) => setTimeout(r, 400));
+    } catch (e) {
+      console.warn(`[Liy ${this.accountIndex}] ensureInjected erè:`, e.message);
     }
-    return true;
+
+    try {
+      isReady = await this.client.pupPage.evaluate(() => {
+        return Boolean(
+          typeof window.WWebJS !== 'undefined' &&
+          typeof window.WWebJS.getChat === 'function' &&
+          typeof window.WWebJS.sendMessage === 'function'
+        );
+      });
+    } catch (_) {}
+
+    return isReady;
   }
 
   async destroy() {
