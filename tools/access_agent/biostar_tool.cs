@@ -1,4 +1,4 @@
-// Zouti pou tèminal Suprema sou rezo a (BioEntry W2 elatriye) atravè
+﻿// Zouti pou tèminal Suprema sou rezo a (BioEntry W2 elatriye) atravè
 // BioStar Device SDK (BS_SDK_V2.dll, Cdecl). Chak apèl se yon pwosesis:
 //   biostar_tool.exe <dllDir> search              -> count\tN, apre device\tid\ttype\tip\tport
 //   biostar_tool.exe <dllDir> ping <ip> [port]    -> ok\t<id>\t<type>\t<ip> | err\t<code>\t<msg>
@@ -11,7 +11,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 static class Native
 {
@@ -195,11 +197,42 @@ public struct BS2UserBlob
 static class Program
 {
     static IntPtr ctx = IntPtr.Zero;
+    static string sdkDllDir = null;
+    static volatile bool netChanged = false;
+    static bool netHooked = false;
     const uint DefaultStart = 978307200;   // 2001-01-01 00:00:00
     const uint DefaultEnd = 1924991999;    // 2030-12-31 23:59:59
 
+    static void HookNetworkEvents()
+    {
+        if (netHooked) return;
+        netHooked = true;
+        try
+        {
+            NetworkChange.NetworkAvailabilityChanged += (s, e) => { netChanged = true; };
+            NetworkChange.NetworkAddressChanged += (s, e) => { netChanged = true; };
+        }
+        catch { }
+    }
+
+    static bool FastPing(string ip, int timeoutMs = 120)
+    {
+        try
+        {
+            IPAddress addr;
+            if (!IPAddress.TryParse(ip, out addr)) return false;
+            using (var p = new Ping())
+            {
+                var r = p.Send(addr, timeoutMs);
+                return r != null && r.Status == IPStatus.Success;
+            }
+        }
+        catch { return false; }
+    }
+
     static int Init(string dllDir)
     {
+        sdkDllDir = dllDir;
         try { Native.SetDllDirectory(dllDir); } catch { }
         ctx = Native.BS2_AllocateContext();
         if (ctx == IntPtr.Zero) { Console.WriteLine("err\tsdk_init\tBS2_AllocateContext retounen null"); return -1; }
@@ -793,72 +826,287 @@ static class Program
     // pa gen evènman ki pèdi). Rezilta a ekri nan <non>.res.
     static int Watch(string ip, ushort port, int seconds, string cmdDir)
     {
-        uint id;
-        var rc = Connect(ip, port, out id);
-        if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
-        var cbPtr = Marshal.GetFunctionPointerForDelegate(logCb);
-        rc = Native.BS2_StartMonitoringLog(ctx, id, cbPtr);
-        if (rc <= 0) { Console.WriteLine("err\twatch\tStartMonitoringLog: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
-        int doorId = 0;
-        IntPtr doorObj; uint numDoor;
-        if (Native.BS2_GetAllDoor(ctx, id, out doorObj, out numDoor) >= 0 && numDoor > 0)
-        {
-            doorId = Marshal.ReadInt32(doorObj, 0);
-            Native.BS2_ReleaseObject(doorObj);
-        }
-        Console.WriteLine("watching\t" + id + "\tdoor=" + doorId);
-        Console.WriteLine("standalone\t" + EnsureStandalone(id).Replace('\t', ' '));
-        Console.WriteLine("fpconfig\t" + EnsureFingerConfig(id).Replace('\t', ' '));
-        Console.Out.Flush();
-        Console.Error.WriteLine("[watch] Siveyan aktive" + (seconds > 0 ? " pandan " + seconds + "s" : "") + " — eskane dwèt la sou W2 a kounye a...");
+        HookNetworkEvents();
+        bool persistent = seconds <= 0;
         var started = DateTime.UtcNow;
-        var lastBeat = DateTime.UtcNow;
-        var lastStandalone = DateTime.UtcNow;
-        var exitCode = 0;
-        while (seconds <= 0 || (DateTime.UtcNow - started).TotalSeconds < seconds)
+        if (!persistent)
         {
-            System.Threading.Thread.Sleep(50);
-            if (cmdDir != null && System.IO.Directory.Exists(cmdDir))
+            uint id;
+            var rc = Connect(ip, port, out id);
+            if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
+            var cbPtr = Marshal.GetFunctionPointerForDelegate(logCb);
+            rc = Native.BS2_StartMonitoringLog(ctx, id, cbPtr);
+            if (rc <= 0) { Console.WriteLine("err\twatch\tStartMonitoringLog: " + rc); Native.BS2_DisconnectDevice(ctx, id); return rc; }
+            int doorId = 0;
+            IntPtr doorObj; uint numDoor;
+            if (Native.BS2_GetAllDoor(ctx, id, out doorObj, out numDoor) >= 0 && numDoor > 0)
             {
-                foreach (var file in System.IO.Directory.GetFiles(cmdDir, "*.cmd"))
+                doorId = Marshal.ReadInt32(doorObj, 0);
+                Native.BS2_ReleaseObject(doorObj);
+            }
+            Console.WriteLine("watching\t" + id + "\tdoor=" + doorId);
+            Console.Out.Flush();
+            Console.WriteLine("standalone\t" + EnsureStandalone(id).Replace('\t', ' '));
+            Console.WriteLine("fpconfig\t" + EnsureFingerConfig(id).Replace('\t', ' '));
+            Console.Out.Flush();
+            Console.Error.WriteLine("[watch] Siveyan aktive pandan " + seconds + "s — eskane dwèt la sou W2 a kounye a...");
+            var lastBeat = DateTime.UtcNow;
+            var lastStandalone = DateTime.UtcNow;
+            var exitCode = 0;
+            while ((DateTime.UtcNow - started).TotalSeconds < seconds)
+            {
+                Thread.Sleep(50);
+                if (cmdDir != null && System.IO.Directory.Exists(cmdDir))
                 {
-                    string cmd;
-                    try { cmd = System.IO.File.ReadAllText(file).Trim(); System.IO.File.Delete(file); }
-                    catch { continue; }
-                    var resFile = System.IO.Path.ChangeExtension(file, ".res");
-                    var capturedDoor = doorId;
-                    var deviceId = id;
-                    var capturedIp = ip;
-                    var capturedPort = port;
-                    new System.Threading.Thread(() => RunDoorCommand(deviceId, capturedDoor, cmd, resFile, capturedIp, capturedPort)) { IsBackground = true }.Start();
+                    foreach (var file in System.IO.Directory.GetFiles(cmdDir, "*.cmd"))
+                    {
+                        string cmd;
+                        try { cmd = System.IO.File.ReadAllText(file).Trim(); System.IO.File.Delete(file); }
+                        catch { continue; }
+                        var resFile = System.IO.Path.ChangeExtension(file, ".res");
+                        var capturedDoor = doorId;
+                        var deviceId = id;
+                        var capturedIp = ip;
+                        var capturedPort = port;
+                        new Thread(() => RunDoorCommand(deviceId, capturedDoor, cmd, resFile, capturedIp, capturedPort)) { IsBackground = true }.Start();
+                    }
+                }
+                if ((DateTime.UtcNow - lastStandalone).TotalMinutes >= 5)
+                {
+                    lastStandalone = DateTime.UtcNow;
+                    if (Monitor.TryEnter(cmdLock, 0))
+                    {
+                        try
+                        {
+                            string fix = EnsureStandalone(id) + " | " + EnsureFingerConfig(id);
+                            if (fix.Contains("fixed")) { Console.WriteLine("standalone\t" + fix.Replace('\t', ' ')); Console.Out.Flush(); }
+                        }
+                        finally { Monitor.Exit(cmdLock); }
+                    }
+                }
+                if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 5)
+                {
+                    lastBeat = DateTime.UtcNow;
+                    if (Monitor.TryEnter(cmdLock, 0))
+                    {
+                        int pingRc = 1;
+                        try { BS2SimpleDeviceInfo info; pingRc = Native.BS2_GetDeviceInfo(ctx, id, out info); }
+                        finally { Monitor.Exit(cmdLock); }
+                        if (pingRc <= 0)
+                        {
+                            Console.WriteLine("err\tdisconnected\tTèminal la pa reponn ankò");
+                            Console.Out.Flush();
+                            exitCode = 2;
+                            break;
+                        }
+                    }
                 }
             }
-            if ((DateTime.UtcNow - lastStandalone).TotalMinutes >= 5)
+            Native.BS2_StopMonitoringLog(ctx, id);
+            Native.BS2_DisconnectDevice(ctx, id);
+            return exitCode;
+        }
+
+        // Mòd pèmanan (seconds == 0): deteksyon dekoneksyon ak rekoneksyon vitès limyè (< 300ms)
+        bool disconnectedPrinted = false;
+        int reinitTries = 0;
+        var lastNeedSearch = DateTime.UtcNow;
+        while (true)
+        {
+            // Tann jiskaske IP W2 a reponn ping nan < 60ms anvan apèl Connect (evite bloke SDK 5-8s)
+            if (!FastPing(ip, 120))
             {
-                lastStandalone = DateTime.UtcNow;
-                string fix;
-                lock (cmdLock) { fix = EnsureStandalone(id) + " | " + EnsureFingerConfig(id); }
-                if (fix.Contains("fixed")) { Console.WriteLine("standalone\t" + fix.Replace('\t', ' ')); Console.Out.Flush(); }
-            }
-            if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 20)
-            {
-                lastBeat = DateTime.UtcNow;
-                BS2SimpleDeviceInfo info;
-                int pingRc;
-                lock (cmdLock) { pingRc = Native.BS2_GetDeviceInfo(ctx, id, out info); }
-                if (pingRc <= 0)
+                if (!disconnectedPrinted)
                 {
-                    // Tèminal la dekonekte: kite ajan an relanse siveyan an.
-                    Console.WriteLine("err\tdisconnected\tTèminal la pa reponn ankò");
+                    Console.WriteLine("disconnected\twaiting");
                     Console.Out.Flush();
-                    exitCode = 2;
-                    break;
+                    disconnectedPrinted = true;
+                }
+                lastNeedSearch = DateTime.UtcNow;
+                while (true)
+                {
+                    Thread.Sleep(60);
+                    if (netChanged)
+                    {
+                        netChanged = false;
+                        if (FastPing(ip, 120)) break;
+                    }
+                    else if (FastPing(ip, 80))
+                    {
+                        break;
+                    }
+                    if ((DateTime.UtcNow - lastNeedSearch).TotalSeconds >= 15)
+                    {
+                        lastNeedSearch = DateTime.UtcNow;
+                        Console.WriteLine("need_search\t" + ip);
+                        Console.Out.Flush();
+                    }
+                }
+            }
+
+            uint id;
+            var rc = Connect(ip, port, out id);
+            if (rc < 0)
+            {
+                if (++reinitTries >= 2 && sdkDllDir != null)
+                {
+                    try { if (ctx != IntPtr.Zero) Native.BS2_ReleaseContext(ctx); } catch { }
+                    ctx = IntPtr.Zero;
+                    Init(sdkDllDir);
+                    reinitTries = 0;
+                }
+                if (!disconnectedPrinted)
+                {
+                    Console.WriteLine("disconnected\tconnect_err_" + rc);
+                    Console.Out.Flush();
+                    disconnectedPrinted = true;
+                }
+                Thread.Sleep(180);
+                continue;
+            }
+            reinitTries = 0;
+            var cbPtr = Marshal.GetFunctionPointerForDelegate(logCb);
+            rc = Native.BS2_StartMonitoringLog(ctx, id, cbPtr);
+            if (rc <= 0)
+            {
+                Native.BS2_DisconnectDevice(ctx, id);
+                if (!disconnectedPrinted)
+                {
+                    Console.WriteLine("disconnected\twatch_err_" + rc);
+                    Console.Out.Flush();
+                    disconnectedPrinted = true;
+                }
+                Thread.Sleep(180);
+                continue;
+            }
+
+            disconnectedPrinted = false;
+            netChanged = false;
+            int doorId = 0;
+            IntPtr doorObj; uint numDoor;
+            if (Native.BS2_GetAllDoor(ctx, id, out doorObj, out numDoor) >= 0 && numDoor > 0)
+            {
+                doorId = Marshal.ReadInt32(doorObj, 0);
+                Native.BS2_ReleaseObject(doorObj);
+            }
+            Console.WriteLine("watching\t" + id + "\tdoor=" + doorId);
+            Console.WriteLine("standalone\t" + EnsureStandalone(id).Replace('\t', ' '));
+            Console.WriteLine("fpconfig\t" + EnsureFingerConfig(id).Replace('\t', ' '));
+            Console.Out.Flush();
+            Console.Error.WriteLine("[watch] Siveyan pèmanan aktive sou " + ip + " (rekoneksyon enstantane pare)...");
+
+            var lastPingCheck = DateTime.UtcNow;
+            var lastBeat = DateTime.UtcNow;
+            var lastStandalone = DateTime.UtcNow;
+            int pingFails = 0;
+
+            while (true)
+            {
+                Thread.Sleep(40);
+                if (cmdDir != null && System.IO.Directory.Exists(cmdDir))
+                {
+                    foreach (var file in System.IO.Directory.GetFiles(cmdDir, "*.cmd"))
+                    {
+                        string cmd;
+                        try { cmd = System.IO.File.ReadAllText(file).Trim(); System.IO.File.Delete(file); }
+                        catch { continue; }
+                        var resFile = System.IO.Path.ChangeExtension(file, ".res");
+                        var capturedDoor = doorId;
+                        var deviceId = id;
+                        var capturedIp = ip;
+                        var capturedPort = port;
+                        new Thread(() => RunDoorCommand(deviceId, capturedDoor, cmd, resFile, capturedIp, capturedPort)) { IsBackground = true }.Start();
+                    }
+                }
+                if ((DateTime.UtcNow - lastStandalone).TotalMinutes >= 5)
+                {
+                    lastStandalone = DateTime.UtcNow;
+                    if (Monitor.TryEnter(cmdLock, 0))
+                    {
+                        try
+                        {
+                            string fix = EnsureStandalone(id) + " | " + EnsureFingerConfig(id);
+                            if (fix.Contains("fixed")) { Console.WriteLine("standalone\t" + fix.Replace('\t', ' ')); Console.Out.Flush(); }
+                        }
+                        finally { Monitor.Exit(cmdLock); }
+                    }
+                }
+
+                // Deteksyon koupe kab / tèminal an < 300ms (oswa enstantane sou evenman rezo Windows)
+                bool doPing = netChanged || (DateTime.UtcNow - lastPingCheck).TotalMilliseconds >= 200;
+                bool wasNetEvent = netChanged;
+                if (doPing)
+                {
+                    netChanged = false;
+                    lastPingCheck = DateTime.UtcNow;
+                    if (FastPing(ip, 120))
+                    {
+                        pingFails = 0;
+                        if (wasNetEvent && Monitor.TryEnter(cmdLock, 0))
+                        {
+                            int infoRc = 1;
+                            try { BS2SimpleDeviceInfo info; infoRc = Native.BS2_GetDeviceInfo(ctx, id, out info); }
+                            finally { Monitor.Exit(cmdLock); }
+                            if (infoRc <= 0)
+                            {
+                                Console.WriteLine("disconnected\tsocket_reset_" + infoRc);
+                                Console.Out.Flush();
+                                disconnectedPrinted = true;
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        pingFails++;
+                        if (pingFails >= 2 || wasNetEvent)
+                        {
+                            Console.WriteLine("disconnected\tlink_lost");
+                            Console.Out.Flush();
+                            disconnectedPrinted = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Verifikasyon SDK chak 4 segonn
+                if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 4)
+                {
+                    lastBeat = DateTime.UtcNow;
+                    if (Monitor.TryEnter(cmdLock, 0))
+                    {
+                        int pingRc = 1;
+                        try { BS2SimpleDeviceInfo info; pingRc = Native.BS2_GetDeviceInfo(ctx, id, out info); }
+                        finally { Monitor.Exit(cmdLock); }
+                        if (pingRc <= 0)
+                        {
+                            Console.WriteLine("disconnected\tdev_lost_" + pingRc);
+                            Console.Out.Flush();
+                            disconnectedPrinted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            try { Native.BS2_StopMonitoringLog(ctx, id); } catch { }
+            try { Native.BS2_DisconnectDevice(ctx, id); } catch { }
+            // Refreschi kontèks SDK a pou pwochen rekoneksyon an fèt ak yon socket tou nèf
+            if (sdkDllDir != null)
+            {
+                bool locked = Monitor.TryEnter(cmdLock, 2000);
+                try
+                {
+                    try { if (ctx != IntPtr.Zero) Native.BS2_ReleaseContext(ctx); } catch { }
+                    ctx = IntPtr.Zero;
+                    Init(sdkDllDir);
+                }
+                finally
+                {
+                    if (locked) Monitor.Exit(cmdLock);
                 }
             }
         }
-        Native.BS2_StopMonitoringLog(ctx, id);
-        Native.BS2_DisconnectDevice(ctx, id);
-        return exitCode;
     }
 
     static readonly object cmdLock = new object();

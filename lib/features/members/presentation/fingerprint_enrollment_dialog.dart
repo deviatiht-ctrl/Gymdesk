@@ -96,7 +96,8 @@ class _FingerprintEnrollmentDialogState
     final defaultReader = AccessMonitor.instance.config.defaultEnrollmentReader;
     final bio = ref.read(biometricServiceProvider);
 
-    final isTerminalOnline = bio.terminalAvailable;
+    final isTerminalOnline = AccessMonitor.instance.terminalOnline.value || bio.terminalAvailable;
+    AccessMonitor.instance.terminalOnline.addListener(_onTerminalOnlineChanged);
 
     if (defaultReader == 'terminal_bew2') {
       _useTerminal = true;
@@ -125,8 +126,15 @@ class _FingerprintEnrollmentDialogState
     _updateHint();
   }
 
+  void _onTerminalOnlineChanged() {
+    if (!mounted) return;
+    unawaited(ref.read(biometricServiceProvider).agent.checkHealth());
+    _updateHint();
+  }
+
   @override
   void dispose() {
+    AccessMonitor.instance.terminalOnline.removeListener(_onTerminalOnlineChanged);
     _eventSub?.cancel();
     ref.read(biometricServiceProvider).stopCapture();
     super.dispose();
@@ -136,7 +144,9 @@ class _FingerprintEnrollmentDialogState
     setState(() {
       if (_useTerminal) {
         final bio = ref.read(biometricServiceProvider);
-        final isOnline = bio.terminalAvailable;
+        final isOnline = AccessMonitor.instance.active
+            ? AccessMonitor.instance.terminalOnline.value
+            : (AccessMonitor.instance.terminalOnline.value || bio.terminalAvailable);
         if (!isOnline) {
           _hint = '⚠️ Lektè sou pòt la (BioEntry W2) pa konekte nan rezo a (192.168.1.41). Tcheke fil rezo a oswa konekte BioMini USB.';
         } else {

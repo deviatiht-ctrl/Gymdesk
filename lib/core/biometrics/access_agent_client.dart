@@ -34,6 +34,35 @@ class AccessAgentStatus {
         doorConnected: false,
         terminalWatch: false,
       );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AccessAgentStatus &&
+          connected == other.connected &&
+          readerConnected == other.readerConnected &&
+          doorConnected == other.doorConnected &&
+          readerName == other.readerName &&
+          readerSerial == other.readerSerial &&
+          sdkError == other.sdkError &&
+          doorName == other.doorName &&
+          version == other.version &&
+          terminalWatch == other.terminalWatch &&
+          terminalIp == other.terminalIp;
+
+  @override
+  int get hashCode => Object.hash(
+        connected,
+        readerConnected,
+        doorConnected,
+        readerName,
+        readerSerial,
+        sdkError,
+        doorName,
+        version,
+        terminalWatch,
+        terminalIp,
+      );
 }
 
 class AccessAgentClient {

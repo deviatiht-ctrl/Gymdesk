@@ -14,7 +14,7 @@ import 'suprema_ffi.dart';
 ///   signale honnêtement (`reader_connected: false`) : aucune capture simulée.
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
-const String agentVersion = '3.6.1';
+const String agentVersion = '3.6.2';
 bool _doorConnected = false;
 
 ReaderBackend? _sdk;
@@ -104,11 +104,10 @@ void _ensureWatchLoop() {
 }
 
 Future<void> _watchLoop() async {
-  var backoff = 2;
   var failCount = 0;
   while (true) {
     if (_watchPaused || _biostarTool() == null) {
-      await Future<void>.delayed(const Duration(seconds: 1));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
       continue;
     }
     final cfg = _biostarTool()!;
@@ -132,10 +131,20 @@ Future<void> _watchLoop() async {
           _watchReady = true;
           _doorConnected = true;
           _watchError = null;
-          backoff = 2;
           failCount = 0;
           print('[W2] Siveyan aktif sou ${term['ip']} (${f.length > 1 ? f[1] : '?'})');
           broadcastEvent({'type': 'terminal_watch', 'online': true, 'ip': term['ip']});
+        } else if (f.first == 'disconnected') {
+          final wasReady = _watchReady;
+          _watchReady = false;
+          _doorConnected = false;
+          _watchError = f.length > 1 ? f.skip(1).join(': ') : 'disconnected';
+          if (wasReady) {
+            print('[W2] Kab/tèminal dekonekte (${_watchError}) — rekoneksyon enstantane ap tann...');
+            broadcastEvent({'type': 'terminal_watch', 'online': false, 'ip': term['ip']});
+          }
+        } else if (f.first == 'need_search') {
+          unawaited(_autoDiscoverOrConfigureTerminal());
         } else if (f.first == 'ready') {
           broadcastEvent({'type': 'terminal_ready_to_scan', 'source': 'terminal'});
         } else if (f.first == 'evt' && f.length >= 7) {
@@ -173,11 +182,10 @@ Future<void> _watchLoop() async {
     if (wasReady) broadcastEvent({'type': 'terminal_watch', 'online': false});
     if (!_watchPaused) {
       failCount++;
-      if (failCount >= 2) {
-        await _autoDiscoverOrConfigureTerminal();
+      if (failCount >= 5) {
+        unawaited(_autoDiscoverOrConfigureTerminal());
       }
-      await Future<void>.delayed(Duration(seconds: backoff));
-      backoff = (backoff * 2).clamp(2, 12);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
   }
 }

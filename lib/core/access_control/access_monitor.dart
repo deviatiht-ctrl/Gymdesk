@@ -58,6 +58,7 @@ class AccessMonitor {
     _gymId = session.gymId;
     _service = TerminalAccessService(runtime.client, db, session, agent: agent);
     _events = agent.terminalEvents().listen(_onEvent);
+    agent.startMonitoring();
     agent.status.addListener(_onAgentHealthChanged);
 
     // Siveye tout chanjman lokal (manm, anprent, abònman, peman, anplwaye) pou
@@ -93,7 +94,8 @@ class AccessMonitor {
   Future<void> _initConnection(AppRuntime runtime) async {
     final session = runtime.session;
     if (session == null) return;
-    final running = await ensureAccessAgentRunning();
+    final running = await ensureAccessAgentRunning() ||
+        (await agent.checkHealth()).connected;
     agentOnline.value = running;
     config = await TerminalAccessService.loadConfig(runtime.client, session);
     if (running) {
@@ -105,11 +107,11 @@ class AccessMonitor {
 
   void _onAgentHealthChanged() {
     final st = agent.status.value;
+    agentOnline.value = st.connected;
     if (st.connected) {
-      agentOnline.value = true;
-      if (st.terminalWatch || st.doorConnected) {
-        terminalOnline.value = true;
-      }
+      terminalOnline.value = st.terminalWatch || st.doorConnected;
+    } else {
+      terminalOnline.value = false;
     }
   }
 
@@ -179,9 +181,10 @@ class AccessMonitor {
         final nowWatch = event['terminal_watch'] == true;
         agentOnline.value = online;
         terminalOnline.value = nowWatch;
-        if (!online || !nowWatch) {
+        if (!online) {
           unawaited(_relaunch());
         } else if (!wasWatch && nowWatch) {
+          unawaited(agent.checkHealth());
           unawaited(syncNow());
         }
         return;
@@ -189,6 +192,7 @@ class AccessMonitor {
         final wasWatch = terminalOnline.value;
         final nowWatch = event['online'] == true;
         terminalOnline.value = nowWatch;
+        unawaited(agent.checkHealth());
         if (!wasWatch && nowWatch) {
           unawaited(syncNow());
         }

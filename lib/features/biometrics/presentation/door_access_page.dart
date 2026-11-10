@@ -46,10 +46,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   bool _processing = false;
   bool _terminalOnline = false;
 
-  bool get _isTerminalReallyOnline =>
-      _terminalOnline ||
-      AccessMonitor.instance.terminalOnline.value ||
-      _biometricService.terminalAvailable;
+  bool get _isTerminalReallyOnline => AccessMonitor.instance.active
+      ? AccessMonitor.instance.terminalOnline.value
+      : (_terminalOnline || _biometricService.terminalAvailable);
   AccessStatus _status = AccessStatus.none;
   Member? _matchedMember;
   String? _matchedName;
@@ -127,7 +126,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   void _onMonitorStatus() {
     if (!mounted) return;
     setState(() {
-      _terminalOnline = AccessMonitor.instance.terminalOnline.value || _biometricService.terminalAvailable;
+      _terminalOnline = AccessMonitor.instance.active
+          ? AccessMonitor.instance.terminalOnline.value
+          : (AccessMonitor.instance.terminalOnline.value || _biometricService.terminalAvailable);
     });
   }
 

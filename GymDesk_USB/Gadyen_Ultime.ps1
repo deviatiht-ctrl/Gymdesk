@@ -1,23 +1,24 @@
-# Gadyen_Ultime.ps1 - kenbe koneksyon kab W2 a (BioEntry) fiks pou SecurGYM.
-#  -Enstale    : kopye gadyen an nan C:\ProgramData\SecurGYM, aplike rezo a,
-#                firewall, epi kreye tach SYSTEM "SecurGYM_Gadyen" (demaraj Windows).
-#  -Siveye     : bouk background (tach la): re-aplike IP a SI L PA LA SELMAN (pa janm kase koneksyon aktif).
-#  -Repare     : jwenn W2 a sou kab la, remete IP li fiks, fose l verifye
-#                anprent yo li menm (san Server Matching), afiche konfigirasyon an.
+# Gadyen_Ultime.ps1 - kenbe koneksyon kab W2 a (BioEntry) PEMANAN + DETEKSYON ENSTANTANE (< 0.2s)
+#  -Enstale    : kopye gadyen an nan C:\ProgramData\SecurGYM, koupe tout ekonomizasyon eneji USB/rezo,
+#                aktive DisableDHCPMediaSense=1 ak DadTransmits=0 (0ms le kab reploge), aplike rezo a,
+#                firewall, epi kreye tach SYSTEM "SecurGYM_Gadyen" (Startup + Logon + verifikasyon chak 2 min).
+#  -Siveye     : bouk ultra-rapid (150ms) an .NET natif: detekte nenpot kab oswa dock extender ki ploge nan
+#                nenpot po USB an mwens ke 0.2 segonn, san l pa janm kase yon koneksyon ki deja aktif.
+#  -Repare     : jwenn W2 a sou kab la, remete IP li fiks, fose l verifye anprent yo li menm.
 #  -Dezenstale : retire tach la (IP yo rete).
-# Kat Wi-Fi a PA janm touche: kab W2 a pa gen gateway ni DNS, metrik li wo,
-# epi se selman yon wout /32 pou W2 a ki pase sou kab la -> entenet rete sou Wi-Fi.
-param([switch]$Enstale, [switch]$Siveye, [switch]$Dezenstale, [switch]$Repare, [string]$ToolDir = $PSScriptRoot, [int]$IntervalMs = 5000)
+param([switch]$Enstale, [switch]$Siveye, [switch]$Dezenstale, [switch]$Repare, [string]$ToolDir = $PSScriptRoot, [int]$IntervalMs = 150)
 
 $ErrorActionPreference = 'SilentlyContinue'
-$Home2   = 'C:\ProgramData\SecurGYM'
-$LogFile = Join-Path $Home2 'gadyen_ultime.log'
-$EtaFile = Join-Path $Home2 'gadyen_eta.txt'
-$CfgFile = Join-Path $Home2 'gadyen.json'
+$Home2    = 'C:\ProgramData\SecurGYM'
+$LogFile  = Join-Path $Home2 'gadyen_ultime.log'
+$EtaFile  = Join-Path $Home2 'gadyen_eta.txt'
+$CfgFile  = Join-Path $Home2 'gadyen.json'
 $TaskName = 'SecurGYM_Gadyen'
-$PcIp = '192.168.1.50'
+$PcIp     = '192.168.1.50'
 $BioStarIp = '192.168.1.16'
-$Prefix = 24
+$Prefix   = 24
+$DockRegex = 'USB|Dock|ASIX|AX88|RTL815|LAN|Dongle|Type-C|Realtek USB|DisplayLink|SMSC|Gigabit USB'
+$SkipNicRegex = 'Wi-?Fi|Wireless|WLAN|802\.11|Bluetooth|Virtual|VPN|Loopback|Hyper-V|VMware|TAP|WSL|vEthernet|WAN Miniport'
 
 New-Item -ItemType Directory -Force -Path $Home2 | Out-Null
 
@@ -39,21 +40,97 @@ function Get-W2Ip {
   return '192.168.1.41'
 }
 
-# Kat kab (802.3) fizik: USB (ASIX...) oswa PCIe.
+# Koupe tout fom domi USB / ekonomizasyon eneji / Media Sense / DAD 3s sou Windows
+function Disable-PowerSaving([object]$adapter) {
+  # 1. USB Selective Suspend = Disabled (AC ak Batri sou tout plan eneji)
+  foreach ($scheme in @('SCHEME_CURRENT', 'SCHEME_BALANCED', 'SCHEME_MIN', 'SCHEME_MAX')) {
+    powercfg /setacvalueindex $scheme 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0 | Out-Null
+    powercfg /setdcvalueindex $scheme 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0 | Out-Null
+  }
+  powercfg /setactive SCHEME_CURRENT | Out-Null
+
+  # 2. DHCP Media Sense = Disabled (kenbe IP 192.168.1.50 fiks nan memwa menm si kab la souke)
+  $tcpKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters'
+  Set-ItemProperty -Path $tcpKey -Name 'DisableDHCPMediaSense' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+
+  # 3. Koupe "Allow computer to turn off this device" sou tout USB Root Hubs, Dock Hubs, Host Controllers + USB NIC la
+  $powerIds = New-Object 'System.Collections.Generic.List[string]'
+  foreach ($usbDev in @(Get-PnpDevice -Class USB -PresentOnly -ErrorAction SilentlyContinue)) {
+    if ($usbDev.InstanceId -and ($usbDev.FriendlyName -match 'Hub|Controller|Extensible|Dock|Composite' -or $usbDev.Service -match 'USBHUB|USBXHCI' -or $usbDev.InstanceId -match 'ROOT_HUB')) {
+      $powerIds.Add($usbDev.InstanceId)
+    }
+  }
+  $pnp = if ($adapter) { $adapter.PnPDeviceID } else { $null }
+  if ($pnp) {
+    $powerIds.Add($pnp)
+    # Remonte chenn paran USB a (eg. ASIX USB NIC -> Dock Internal Hub -> Root Hub -> Host Controller)
+    $curId = $pnp
+    for ($depth = 0; $depth -lt 4 -and $curId; $depth++) {
+      $parentProp = Get-PnpDeviceProperty -InstanceId $curId -KeyName 'DEVPKEY_Device_Parent' -ErrorAction SilentlyContinue
+      if ($parentProp -and $parentProp.Data -and $parentProp.Data -match '^(USB|PCI)\\') {
+        $powerIds.Add([string]$parentProp.Data)
+        $curId = [string]$parentProp.Data
+      } else {
+        break
+      }
+    }
+  }
+
+  Get-CimInstance -Namespace 'root\wmi' -ClassName 'MSPower_DeviceEnable' -ErrorAction SilentlyContinue | Where-Object {
+    if ($_.Enable -ne $true) { return $false }
+    if ($_.InstanceName -match 'USB\\ROOT_HUB|ASIX|AX88|RTL815|VID_0B95|VID_0BDA&PID_815|VID_2357|VID_17E9') { return $true }
+    foreach ($pidPrefix in $powerIds) {
+      if ($_.InstanceName.StartsWith($pidPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+  } | ForEach-Object {
+    $_ | Set-CimInstance -Property @{ Enable = $false } -ErrorAction SilentlyContinue
+  }
+
+  if ($adapter) {
+    # 4. Registry NIC: PnPCapabilities=24 ak tout EEE/GreenEthernet=0 san redemare kat la
+    if ($adapter.InterfaceGuid) {
+      $guid = $adapter.InterfaceGuid.ToString()
+      $classKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e972-e325-11ce-bfc1-08002be10318}'
+      Get-ChildItem $classKey -ErrorAction SilentlyContinue | ForEach-Object {
+        $props = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+        if ($props.NetCfgInstanceId -eq $guid) {
+          Set-ItemProperty -Path $_.PSPath -Name 'PnPCapabilities' -Value 24 -Type DWord -Force -ErrorAction SilentlyContinue
+          foreach ($eee in @('*EEE', 'EEE', 'EEELinkAdvertisement', '*GreenEthernet', 'GreenEthernet', 'EnableGreenEthernet', 'GigaLite', 'PowerSavingMode', 'PowerSave', '*SelectiveSuspend', 'SelectiveSuspend', 'AdvancedEEE', 'ULPMode')) {
+            if ($null -ne $props.$eee) {
+              Set-ItemProperty -Path $_.PSPath -Name $eee -Value '0' -Force -ErrorAction SilentlyContinue
+            }
+          }
+        }
+      }
+    }
+    Disable-NetAdapterPowerManagement -Name $adapter.Name -NoRestart -ErrorAction SilentlyContinue
+    # 5. DadTransmits = 0 pou IP monte an 0ms (pa tann 3 segonn Tentative)
+    Set-NetIPInterface -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -Dhcp Disabled -InterfaceMetric 500 -DadTransmits 0 -RouterDiscovery Disabled -ErrorAction SilentlyContinue
+    netsh interface ipv4 set interface $adapter.ifIndex dadtransmits=0 | Out-Null
+  }
+}
+
+# Kat kab (802.3) fizik: USB (ASIX...) oswa PCIe. Sote kat entegre ki gen internet pa DHCP sou lot rezo.
 function Get-W2Adapters {
   $candidates = @(Get-NetAdapter | Where-Object {
     $_.Status -ne 'Disabled' -and
     $_.Virtual -ne $true -and
-    $_.InterfaceDescription -notmatch 'Wi-?Fi|Wireless|WLAN|802\.11|Bluetooth|Virtual|VPN|Loopback|Hyper-V|VMware|TAP|WSL'
+    $_.InterfaceDescription -notmatch $SkipNicRegex
   })
   $up = @($candidates | Where-Object Status -eq 'Up')
   if ($up.Count -eq 1) { return $up }
   if ($up.Count -gt 1) {
-    $dock = @($up | Where-Object { $_.InterfaceDescription -match 'USB|Dock|ASIX|LAN|Dongle|Type-C|Realtek USB' })
+    $dock = @($up | Where-Object { $_.InterfaceDescription -match $DockRegex })
     if ($dock.Count -gt 0) { return @($dock[0]) }
+    $noGw = @($up | Where-Object {
+      $gw = @(Get-NetRoute -InterfaceIndex $_.ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)
+      $gw.Count -eq 0
+    })
+    if ($noGw.Count -gt 0) { return @($noGw[0]) }
     return @($up[0])
   }
-  $dock = @($candidates | Where-Object { $_.InterfaceDescription -match 'USB|Dock|ASIX|LAN|Dongle|Type-C|Realtek USB' })
+  $dock = @($candidates | Where-Object { $_.InterfaceDescription -match $DockRegex })
   if ($dock.Count -gt 0) { return @($dock[0]) }
   if ($candidates.Count -gt 0) { return @($candidates[0]) }
   return @()
@@ -67,10 +144,14 @@ function Set-W2Network([string]$w2) {
   $target = $sel[0]
   $i = $target.ifIndex
 
-  # Si kat la genyen 192.168.1.50 deja, PA KASE ANYEN, PA TOUCHE L!
+  # Si kat la genyen 192.168.1.50 deja, PA KASE KONEKSYON AN! Verifye wout ak DadTransmits selman.
   $targetHasIp = (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -ErrorAction SilentlyContinue)
   if ($targetHasIp) {
-    # Asire selman ke wout direk la toujou prezan
+    $ipif = Get-NetIPInterface -InterfaceIndex $i -AddressFamily IPv4 -ErrorAction SilentlyContinue
+    if ($ipif -and $ipif.DadTransmits -ne 0) {
+      Set-NetIPInterface -InterfaceIndex $i -AddressFamily IPv4 -DadTransmits 0 -RouterDiscovery Disabled -ErrorAction SilentlyContinue
+      netsh interface ipv4 set interface $i dadtransmits=0 | Out-Null
+    }
     if (-not (Get-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -ErrorAction SilentlyContinue)) {
       New-NetRoute -InterfaceIndex $i -DestinationPrefix "$w2/32" -NextHop '0.0.0.0' -RouteMetric 1 -ErrorAction SilentlyContinue | Out-Null
     }
@@ -87,12 +168,24 @@ function Set-W2Network([string]$w2) {
     Where-Object { $_.InterfaceIndex -ne $i } |
     ForEach-Object { Remove-NetRoute -InterfaceIndex $_.InterfaceIndex -DestinationPrefix "$w2/32" -Confirm:$false -ErrorAction SilentlyContinue }
 
-  # Konfigire kat la ak netsh (fiks pèmanan nan rejis Windows)
+  # Netwaye nenpot ansyen IP (tankou APIPA 169.254.x.x oswa .249)
+  Get-NetIPAddress -InterfaceIndex $i -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -ne $PcIp -and $_.IPAddress -ne $BioStarIp } |
+    ForEach-Object { Remove-NetIPAddress -InterfaceIndex $i -IPAddress $_.IPAddress -Confirm:$false -ErrorAction SilentlyContinue }
+
+  # Koup eneji + DadTransmits=0 + MediaSense=0 ANVAN mete IP pou IP a monte an 0ms
+  Disable-PowerSaving $target
+
+  # Konfigire IP fiks ak netsh
   netsh interface ipv4 set address name="$($target.Name)" static $PcIp 255.255.255.0 none | Out-Null
-  Start-Sleep -Milliseconds 400
   netsh interface ipv4 add address name="$($target.Name)" $BioStarIp 255.255.255.0 | Out-Null
 
-  # Asire pa gen wout default (gateway) sou kab W2 a pou entenet la rete sou Wi-Fi
+  # Fallback New-NetIPAddress si netsh pat pran
+  if (-not (Get-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -ErrorAction SilentlyContinue)) {
+    New-NetIPAddress -InterfaceIndex $i -IPAddress $PcIp -PrefixLength $Prefix -ErrorAction SilentlyContinue | Out-Null
+  }
+
+  # Asire pa gen wout default (gateway) ni DNS sou kab W2 a pou entenet la rete sou Wi-Fi
   Get-NetRoute -InterfaceIndex $i -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
   Set-DnsClientServerAddress -InterfaceIndex $i -ResetServerAddresses -ErrorAction SilentlyContinue
   Set-DnsClient -InterfaceIndex $i -RegisterThisConnectionsAddress $false -ErrorAction SilentlyContinue
@@ -105,7 +198,7 @@ function Set-W2Network([string]$w2) {
   $p = Get-NetConnectionProfile -InterfaceIndex $i -ErrorAction SilentlyContinue
   if ($p -and $p.NetworkCategory -ne 'Private') { Set-NetConnectionProfile -InterfaceIndex $i -NetworkCategory Private -ErrorAction SilentlyContinue }
 
-  Log "Kat '$($target.Name)' ($($target.InterfaceDescription)): $PcIp/$Prefix fiks pèmanan pou W2 ($w2)."
+  Log "Kat '$($target.Name)' ($($target.InterfaceDescription)): $PcIp/$Prefix fiks pemanan (0ms DAD, san sleep USB)."
   return $true
 }
 
@@ -118,14 +211,21 @@ function Set-Firewall {
 function Write-Eta([string]$w2) {
   $up = Get-W2Adapters | Where-Object Status -eq 'Up' | Select-Object -First 1
   $ok = $false
-  if ($up) { $ok = Test-Connection -ComputerName $w2 -Count 1 -Quiet }
+  if ($up) {
+    try {
+      $ping = New-Object System.Net.NetworkInformation.Ping
+      $rep = $ping.Send($w2, 150)
+      $ok = ($rep -and $rep.Status -eq 'Success')
+      $ping.Dispose()
+    } catch {}
+  }
   $nom = if ($up) { "$($up.Name) ($($up.InterfaceDescription))" } else { 'Okenn (ploge kab la nan USB)' }
   $txt = "=== ETA GADYEN SECERGYM ===`r`n" +
     "Dat     : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`r`n" +
     "Kat     : $nom`r`n" +
     "PC IP   : $PcIp/$Prefix`r`n" +
     "W2 IP   : $w2`r`n" +
-    "Konekte : $(if ($ok) { 'WI (W2 sou liy, pare)' } else { 'NON (verifye kab la ak kouran)' })`r`n"
+    "Konekte : $(if ($ok) { 'WI (W2 sou liy, vites limye)' } else { 'NON (verifye kab la ak kouran)' })`r`n"
   Set-Content -Path $EtaFile -Value $txt -Encoding UTF8
 }
 
@@ -140,20 +240,34 @@ $w2 = Get-W2Ip
 if ($Enstale) {
   $src = $MyInvocation.MyCommand.Path
   $dst = Join-Path $Home2 'Gadyen_Ultime.ps1'
-  if ($src -ne $dst) { Copy-Item $src $dst -Force }
+  if ($src -and ($src -ne $dst)) { Copy-Item $src $dst -Force }
   (@{ ip = $w2; port = 51211 } | ConvertTo-Json) | Set-Content -Path $CfgFile -Encoding UTF8
   Set-Firewall
+  Disable-PowerSaving $null
+  # Konfigire tout kat wired ki deja prezan (menm sa ki pa gen kab ploge ladan l kounye a)
+  Get-NetAdapter | Where-Object {
+    $_.Status -ne 'Disabled' -and $_.Virtual -ne $true -and
+    $_.InterfaceDescription -notmatch $SkipNicRegex
+  } | ForEach-Object { Disable-PowerSaving $_ }
   Set-W2Network $w2 | Out-Null
+
+  # Femen nenpot ansyen enstans -Siveye pou nouvo vesyon an demare pwop
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'Gadyen_Ultime\.ps1' } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
   $act = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$dst`" -Siveye"
-  $trg = New-ScheduledTaskTrigger -AtStartup
+  $trgStart = New-ScheduledTaskTrigger -AtStartup
+  $trgLogon = New-ScheduledTaskTrigger -AtLogOn
+  $trgWatch = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 2) -RepetitionDuration (New-TimeSpan -Days 3650)
   $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
   $pr = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-  Register-ScheduledTask -TaskName $TaskName -Action $act -Trigger $trg -Settings $set -Principal $pr -Force | Out-Null
-  Stop-ScheduledTask -TaskName $TaskName
+  Register-ScheduledTask -TaskName $TaskName -Action $act -Trigger @($trgStart, $trgLogon, $trgWatch) -Settings $set -Principal $pr -Force | Out-Null
   Start-ScheduledTask -TaskName $TaskName
   Write-Eta $w2
-  Log "Gadyen enstale: tach $TaskName (SYSTEM, demaraj Windows), W2 = $w2"
+  Log "Gadyen enstale: tach $TaskName (SYSTEM, demaraj + logon + watchdog chak 2m), W2 = $w2"
   Get-Content $EtaFile
   exit 0
 }
@@ -188,22 +302,46 @@ if ($Repare) {
 }
 
 if ($Siveye) {
-  Log "Gadyen demare (veye W2), W2 = $w2"
+  Log "Gadyen vites limye demare (verifikasyon .NET chak ${IntervalMs}ms), W2 = $w2"
   $tick = 0
   while ($true) {
     try {
-      $upAdapters = @(Get-W2Adapters | Where-Object Status -eq 'Up')
-      $upIdx = @($upAdapters | ForEach-Object { $_.ifIndex })
-      if ($upIdx.Count -gt 0) {
-        $hasIp = (Get-NetIPAddress -IPAddress $PcIp -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $upIdx -contains $_.InterfaceIndex })
-        if (-not $hasIp) {
-          if (Set-W2Network $w2) { Log 'Rezo W2 aplike sou nouvo pò USB konekte.' }
+      $wiredUp = @()
+      foreach ($ni in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+        if ($ni.OperationalStatus -eq [System.Net.NetworkInformation.OperationalStatus]::Up -and
+            $ni.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback -and
+            $ni.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Wireless80211 -and
+            $ni.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Tunnel -and
+            $ni.NetworkInterfaceType -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Ppp -and
+            $ni.Description -notmatch $SkipNicRegex) {
+          $wiredUp += $ni
         }
       }
-      if (($tick % 12) -eq 0) { Write-Eta $w2 }
+
+      if ($wiredUp.Count -gt 0) {
+        # Chwazi kat sib la: Dock/USB an premye, oswa yon kat ki pa gen gateway routeur entenet
+        $targetNi = $wiredUp | Where-Object { $_.Description -match $DockRegex } | Select-Object -First 1
+        if (-not $targetNi) {
+          $targetNi = $wiredUp | Where-Object {
+            $props = $_.GetIPProperties()
+            $extGw = @($props.GatewayAddresses | Where-Object { $_.Address.AddressFamily -eq 'InterNetwork' -and $_.Address.ToString() -notlike '192.168.1.*' -and $_.Address.ToString() -ne '0.0.0.0' })
+            $extGw.Count -eq 0
+          } | Select-Object -First 1
+        }
+        if ($targetNi) {
+          $hasPcIp = $false
+          foreach ($u in $targetNi.GetIPProperties().UnicastAddresses) {
+            if ($u.Address.ToString() -eq $PcIp) { $hasPcIp = $true; break }
+          }
+          if (-not $hasPcIp) {
+            if (Set-W2Network $w2) { Log "Rezo W2 ($($targetNi.Name)) aplike an vites limye!" }
+          }
+        }
+      }
+      if (($tick % 100) -eq 0) { Write-Eta $w2 }
     } catch { Log ('Ere: ' + $_.Exception.Message) }
     $tick++
-    Start-Sleep -Seconds 5
+    Start-Sleep -Milliseconds $IntervalMs
   }
 }
 

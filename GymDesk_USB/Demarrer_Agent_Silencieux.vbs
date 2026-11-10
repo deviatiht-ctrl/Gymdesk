@@ -20,5 +20,5 @@ Do
       sh.Run """" & exe & """", 0, True
     End If
   End If
-  WScript.Sleep 4000
+  WScript.Sleep 600
 Loop
