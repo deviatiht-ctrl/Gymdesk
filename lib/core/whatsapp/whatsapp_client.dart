@@ -285,6 +285,116 @@ class WhatsAppAccessCheckResult {
   }
 }
 
+/// Statistik itilizasyon yon kle API CVISUAL
+class GatewayApiUsage {
+  const GatewayApiUsage({
+    this.sentToday = 0,
+    this.sentThisMonth = 0,
+    this.reservedToday = 0,
+    this.reservedThisMonth = 0,
+  });
+
+  final int sentToday;
+  final int sentThisMonth;
+  final int reservedToday;
+  final int reservedThisMonth;
+
+  factory GatewayApiUsage.fromJson(Map<String, dynamic>? json) {
+    if (json == null) return const GatewayApiUsage();
+    return GatewayApiUsage(
+      sentToday: (json['sent_today'] as num?)?.toInt() ?? 0,
+      sentThisMonth: (json['sent_this_month'] as num?)?.toInt() ?? 0,
+      reservedToday: (json['reserved_today'] as num?)?.toInt() ?? 0,
+      reservedThisMonth: (json['reserved_this_month'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// Modèl yon lokatè / kle API CVISUAL (Master oswa Sit Web Ekstèn)
+class GatewayApiTenant {
+  const GatewayApiTenant({
+    required this.id,
+    required this.name,
+    this.email,
+    required this.apiKey,
+    this.planTier = 'starter',
+    this.dailyQuota = 15,
+    this.monthlyQuota = 300,
+    this.isActive = false,
+    this.isMasterAdmin = false,
+    this.createdAt,
+    this.usage = const GatewayApiUsage(),
+  });
+
+  final String id;
+  final String name;
+  final String? email;
+  final String apiKey;
+  final String planTier;
+  final int dailyQuota;
+  final int monthlyQuota;
+  final bool isActive;
+  final bool isMasterAdmin;
+  final DateTime? createdAt;
+  final GatewayApiUsage usage;
+
+  factory GatewayApiTenant.fromJson(Map<String, dynamic> json) {
+    return GatewayApiTenant(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? 'Integration',
+      email: json['email']?.toString(),
+      apiKey: json['api_key']?.toString() ?? '',
+      planTier: json['plan_tier']?.toString() ?? 'starter',
+      dailyQuota: (json['daily_quota'] as num?)?.toInt() ?? 15,
+      monthlyQuota: (json['monthly_quota'] as num?)?.toInt() ?? 300,
+      isActive: json['is_active'] as bool? ?? false,
+      isMasterAdmin: json['is_master_admin'] as bool? ?? false,
+      createdAt: json['created_at'] != null ? DateTime.tryParse(json['created_at'].toString()) : null,
+      usage: json['usage'] is Map
+          ? GatewayApiUsage.fromJson(Map<String, dynamic>.from(json['usage'] as Map))
+          : const GatewayApiUsage(),
+    );
+  }
+}
+
+/// Enfòmasyon Master API Key + lyen dokimantasyon
+class GatewayMasterKeyInfo {
+  const GatewayMasterKeyInfo({
+    required this.tenant,
+    required this.usage,
+    required this.baseUrl,
+    required this.docsUrl,
+    required this.llmsUrl,
+    required this.openapiUrl,
+  });
+
+  final GatewayApiTenant tenant;
+  final GatewayApiUsage usage;
+  final String baseUrl;
+  final String docsUrl;
+  final String llmsUrl;
+  final String openapiUrl;
+
+  factory GatewayMasterKeyInfo.fromJson(Map<String, dynamic> json) {
+    final integ = json['integration'] is Map
+        ? Map<String, dynamic>.from(json['integration'] as Map)
+        : const <String, dynamic>{};
+    final base = integ['base_url']?.toString() ?? WhatsAppClient.defaultCloudGatewayUrl;
+    return GatewayMasterKeyInfo(
+      tenant: GatewayApiTenant.fromJson(
+        Map<String, dynamic>.from((json['tenant'] as Map?) ?? const <String, dynamic>{}),
+      ),
+      usage: json['usage'] is Map
+          ? GatewayApiUsage.fromJson(Map<String, dynamic>.from(json['usage'] as Map))
+          : const GatewayApiUsage(),
+      baseUrl: base,
+      docsUrl: integ['docs_url']?.toString() ?? '$base/api/v1/docs',
+      llmsUrl: integ['llms_url']?.toString() ?? '$base/llms.txt',
+      openapiUrl: integ['openapi_url']?.toString() ?? '$base/api/v1/openapi.json',
+    );
+  }
+}
+
 /// Kliyan HTTP ak Cloud Bridge pou kominike ak WhatsApp Web
 
 /// Modèl pou yon kont nan Cluster Multi-Kont WhatsApp la
@@ -1129,6 +1239,184 @@ class WhatsAppClient {
       return WhatsAppChatMessage.fromJson(Map<String, dynamic>.from(remote['message'] as Map));
     }
     return null;
+  }
+
+  /// Jenere yon Prompt konplè ki gen tout detay API a pou nenpòt IA (ChatGPT, Claude, Cursor, Gemini)
+  static String buildAiIntegrationPrompt({
+    required String baseUrl,
+    required String apiKey,
+  }) {
+    final cleanUrl = normalizeGatewayUrl(baseUrl);
+    final safeKey = apiKey.trim().isNotEmpty ? apiKey.trim() : '<VOTRE_CLE_API>';
+    return '''Tu dois intégrer l'API REST CVISUAL WhatsApp Gateway dans mon application / site web backend.
+
+=== 1. PARAMÈTRES DE CONNEXION ===
+- Base URL : $cleanUrl
+- Documentation IA (/llms.txt) : $cleanUrl/llms.txt
+- OpenAPI 3.1 JSON : $cleanUrl/api/v1/openapi.json
+- Documentation HTML : $cleanUrl/api/v1/docs
+- Clé API : $safeKey
+- En-têtes requis :
+  Authorization: Bearer $safeKey
+  Content-Type: application/json
+  (ou X-API-Key: $safeKey)
+
+RÈGLE DE SÉCURITÉ OBLIGATOIRE :
+- Stocke la clé API côté serveur dans une variable d'environnement (.env : CVISUAL_WA_API_KEY=$safeKey).
+- N'expose JAMAIS cette clé côté navigateur/frontend.
+
+=== 2. ROUTAGE DUAL-LANE & ANTI-BAN META ===
+1) FAST LANE (Instantané ~2.5s-6.5s, prioritaire, sans limite 25/jour) :
+   - kind : "receipt", "welcome", "otp", "test", "manual_direct"
+   - mode="sync" -> HTTP 200 (envoi immédiat si connecté, sinon 503 WHATSAPP_OFFLINE)
+   - mode="async" (défaut recommandé) -> HTTP 202 (file prioritaire Fast Lane)
+2) SLOW LANE (Relances & Campagnes 10-16 min + pauses + max 25/jour/SIM) :
+   - kind : "reminder", "reminder_7d", "reminder_2d", "marketing", "manual"
+   - DOIT utiliser mode="async" (HTTP 422 si mode="sync").
+
+=== 3. FORMAT TÉLÉPHONE, SPINTAX, PDF & IDEMPOTENCE ===
+- Téléphones : 8 chiffres locaux (ex: 31234567 -> auto +509) ou E.164 sans "+" (ex: 50931234567). 8 à 15 chiffres.
+- Spintax intégré : "{Bonjour|Salut} Jean, votre reçu est prêt."
+- PDF Base64 : "pdf_base64" (max 10 MB) + "pdf_file_name": "Recu.pdf".
+- Anti-doublon : en-tête "Idempotency-Key: <id-unique>" (cache 15 min).
+
+=== 4. ENDPOINTS REST (/api/v1) ===
+- GET  $cleanUrl/health
+- GET  $cleanUrl/api/v1/me
+- GET  $cleanUrl/api/v1/status
+- POST $cleanUrl/api/v1/numbers/check        { "phones": ["50931234567"] }
+- POST $cleanUrl/api/v1/messages/send        { "to", "message", "kind", "mode", "pdf_base64", "pdf_file_name" }
+- POST $cleanUrl/api/v1/messages/send-bulk   { "messages": [ ... ] }
+- GET  $cleanUrl/api/v1/messages
+- GET  $cleanUrl/api/v1/messages/:id/status
+- POST $cleanUrl/api/v1/messages/:id/cancel
+- POST $cleanUrl/api/v1/messages/:id/retry
+- GET  $cleanUrl/api/v1/webhooks
+- POST $cleanUrl/api/v1/webhooks/register    { "url": "https://...", "events": ["message.sent", "message.failed"] }
+- POST $cleanUrl/api/v1/webhooks/:id/test
+- DELETE $cleanUrl/api/v1/webhooks/:id
+
+=== 5. WEBHOOK HMAC-SHA256 ===
+Vérifie X-CVISUAL-Signature = "sha256=" + HMAC_SHA256(secret, timestamp + "." + rawBody) avec timingSafeEqual.
+
+Tâche demandée :
+Crée le client HTTP backend complet avec CVISUAL_WA_API_KEY, vérification GET /api/v1/me, gestion des erreurs 400/401/413/422/429/503 et séparation Fast Lane vs Slow Lane.''';
+  }
+
+  Map<String, String> _adminHeaders({bool includeJson = false}) {
+    final token = Supabase.instance.client.auth.currentSession?.accessToken;
+    if (token == null || token.isEmpty) {
+      throw Exception('Session Super Admin expirée ou non authentifiée.');
+    }
+    return {
+      if (includeJson) 'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  Map<String, dynamic> _decodeJsonResponse(http.Response res) {
+    final body = res.body.trim();
+    if (body.isEmpty) return <String, dynamic>{};
+    final decoded = jsonDecode(body);
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+    return <String, dynamic>{};
+  }
+
+  Future<GatewayMasterKeyInfo> fetchMasterApiKey() async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/master-key');
+    final res = await http
+        .get(uri, headers: _adminHeaders())
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
+    return GatewayMasterKeyInfo.fromJson(data);
+  }
+
+  Future<List<GatewayApiTenant>> listApiTenants() async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/api-keys');
+    final res = await http
+        .get(uri, headers: _adminHeaders())
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
+    final list = data['tenants'] as List? ?? const [];
+    return list
+        .map((e) => GatewayApiTenant.fromJson(Map<String, dynamic>.from(e as Map)))
+        .toList();
+  }
+
+  Future<GatewayApiTenant> createExternalApiKey({
+    required String name,
+    String? email,
+    String planTier = 'pro',
+    int? dailyQuota,
+    int? monthlyQuota,
+  }) async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/api-keys');
+    final res = await http
+        .post(
+          uri,
+          headers: _adminHeaders(includeJson: true),
+          body: jsonEncode({
+            'name': name.trim(),
+            if (email != null && email.trim().isNotEmpty) 'email': email.trim(),
+            'plan_tier': planTier,
+            if (dailyQuota != null) 'daily_quota': dailyQuota,
+            if (monthlyQuota != null) 'monthly_quota': monthlyQuota,
+            'is_active': true,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true || data['tenant'] is! Map) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
+    return GatewayApiTenant.fromJson(Map<String, dynamic>.from(data['tenant'] as Map));
+  }
+
+  Future<GatewayApiTenant> rotateApiKey(String tenantId) async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/api-keys/$tenantId/rotate');
+    final res = await http
+        .post(uri, headers: _adminHeaders(includeJson: true))
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true || data['tenant'] is! Map) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
+    return GatewayApiTenant.fromJson(Map<String, dynamic>.from(data['tenant'] as Map));
+  }
+
+  Future<GatewayApiTenant> toggleApiTenantActive(String tenantId, bool isActive) async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/tenants/$tenantId');
+    final res = await http
+        .patch(
+          uri,
+          headers: _adminHeaders(includeJson: true),
+          body: jsonEncode({'is_active': isActive}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true || data['tenant'] is! Map) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
+    return GatewayApiTenant.fromJson(Map<String, dynamic>.from(data['tenant'] as Map));
+  }
+
+  Future<void> deleteApiTenant(String tenantId) async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/tenants/$tenantId');
+    final res = await http
+        .delete(uri, headers: _adminHeaders())
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
   }
 
 }

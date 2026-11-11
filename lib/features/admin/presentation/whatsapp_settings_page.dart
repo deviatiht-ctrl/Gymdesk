@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -36,7 +38,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   );
   final _gymSearchController = TextEditingController();
 
-  int _selectedTabIndex = 0; // 0: Konfigirasyon & Nimewo, 1: Aksè Gym yo, 2: Contrôle des messages
+  int _selectedTabIndex = 0; // 0: Konfigirasyon & Nimewo, 1: Aksè Gym yo, 2: Contrôle des messages, 3: API & Entegrasyon
 
   bool _autoSendWelcome = true;
   bool _autoSendReceipts = true;
@@ -60,6 +62,15 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   bool _controlAutoVerifyEnabled = true;
   Map<String, dynamic>? _controlData;
   Timer? _controlAutoTimer;
+
+  // Super Admin: CVISUAL API Keys & Entegrasyon sou lòt sit
+  bool _loadingApiKeys = false;
+  bool _rotatingMasterKey = false;
+  String? _apiKeysError;
+  GatewayMasterKeyInfo? _masterKeyInfo;
+  List<GatewayApiTenant> _apiTenants = [];
+  bool _masterKeyVisible = false;
+  final Set<String> _revealedTenantIds = {};
 
   @override
   void initState() {
@@ -828,7 +839,12 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             onPressed: _loading ? null : () async {
               await _checkStatus();
               await _checkCurrentGymAccess();
-              if (isSuperAdmin) await _loadGymsAccessList();
+              if (isSuperAdmin) {
+                await _loadGymsAccessList();
+                if (_selectedTabIndex == 3) {
+                  await _loadApiIntegrationData();
+                }
+              }
             },
           ),
         ],
@@ -880,6 +896,16 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                         }
                       },
                     ),
+                    const SizedBox(width: 10),
+                    ChoiceChip(
+                      label: Text(s.text('whatsapp_tab_api_integration')),
+                      selected: _selectedTabIndex == 3,
+                      onSelected: (val) {
+                        _controlAutoTimer?.cancel();
+                        setState(() => _selectedTabIndex = 3);
+                        _loadApiIntegrationData();
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -887,11 +913,13 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           ],
 
           Expanded(
-            child: _selectedTabIndex == 2 && isSuperAdmin
-                ? _buildControlOverviewView(s, theme)
-                : _selectedTabIndex == 1 && isSuperAdmin
-                    ? _buildSuperAdminGymsView(s, theme)
-                    : _buildSettingsView(s, theme),
+            child: _selectedTabIndex == 3 && isSuperAdmin
+                ? _buildSuperAdminApiIntegrationView(s, theme)
+                : _selectedTabIndex == 2 && isSuperAdmin
+                    ? _buildControlOverviewView(s, theme)
+                    : _selectedTabIndex == 1 && isSuperAdmin
+                        ? _buildSuperAdminGymsView(s, theme)
+                        : _buildSettingsView(s, theme),
           ),
         ],
       ),
@@ -3232,6 +3260,796 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     );
   }
 
+  String _maskApiKey(String raw) {
+    final v = raw.trim();
+    if (v.length <= 16) return v;
+    return '${v.substring(0, 12)}••••••••••••${v.substring(v.length - 4)}';
+  }
+
+  Future<void> _copyTextWithToast(String text, String label) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label copié dans le presse-papiers.')),
+    );
+  }
+
+  Future<void> _openExternalDoc(String url) async {
+    final opened = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+    ).catchError((_) => false);
+    if (!opened && mounted) {
+      await _copyTextWithToast(url, 'Lien documentation');
+    }
+  }
+
+  Future<void> _loadApiIntegrationData({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loadingApiKeys = true;
+        _apiKeysError = null;
+      });
+    }
+    try {
+      final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+      final results = await Future.wait<Object>([
+        client.fetchMasterApiKey(),
+        client.listApiTenants(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _masterKeyInfo = results[0] as GatewayMasterKeyInfo;
+        _apiTenants = results[1] as List<GatewayApiTenant>;
+        _loadingApiKeys = false;
+        _apiKeysError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final cleanErr = e.toString().replaceFirst('Exception: ', '');
+      setState(() {
+        _loadingApiKeys = false;
+        _apiKeysError = cleanErr;
+      });
+    }
+  }
+
+  Future<void> _confirmAndRotateTenantKey(GatewayApiTenant tenant, {bool isMaster = false}) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(LucideIcons.rotateCw, color: Colors.orange, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isMaster
+                    ? 'Régénérer la Master Clé API ?'
+                    : 'Régénérer la Clé API (${tenant.name}) ?',
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'L\'ancienne clé cessera immédiatement de fonctionner sur tous les sites externes qui l\'utilisent. '
+          'Vous devrez mettre à jour la variable d\'environnement avec la nouvelle clé.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade800),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Oui, Régénérer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    if (isMaster) {
+      setState(() => _rotatingMasterKey = true);
+    }
+    try {
+      final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+      final updated = await client.rotateApiKey(tenant.id);
+      if (!mounted) return;
+      setState(() {
+        if (isMaster) {
+          _masterKeyVisible = true;
+        } else {
+          _revealedTenantIds.add(updated.id);
+        }
+      });
+      await _loadApiIntegrationData(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Nouvelle clé API générée pour ${updated.name}.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red,
+          content: Text('Erreur rotation clé: ${e.toString().replaceFirst('Exception: ', '')}'),
+        ),
+      );
+    } finally {
+      if (mounted && isMaster) {
+        setState(() => _rotatingMasterKey = false);
+      }
+    }
+  }
+
+  Future<void> _toggleExternalTenantActive(GatewayApiTenant tenant) async {
+    try {
+      final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+      await client.toggleApiTenantActive(tenant.id, !tenant.isActive);
+      await _loadApiIntegrationData(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            !tenant.isActive
+                ? 'Clé API "${tenant.name}" activée.'
+                : 'Clé API "${tenant.name}" désactivée.',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(backgroundColor: Colors.red, content: Text('Erreur: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Future<void> _confirmAndDeleteExternalTenant(GatewayApiTenant tenant) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer cette clé API ?'),
+        content: Text('Supprimer définitivement la clé API de "${tenant.name}" ? Cette action est irréversible.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Annuler')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+      await client.deleteApiTenant(tenant.id);
+      _revealedTenantIds.remove(tenant.id);
+      await _loadApiIntegrationData(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Clé API "${tenant.name}" supprimée.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(backgroundColor: Colors.red, content: Text('Erreur: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    }
+  }
+
+  Future<void> _showCreateApiKeyDialog() async {
+    final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+    final created = await showDialog<GatewayApiTenant>(
+      context: context,
+      builder: (ctx) => _CreateExternalApiKeyDialog(client: client),
+    );
+    if (created == null || !mounted) return;
+    _revealedTenantIds.add(created.id);
+    await _loadApiIntegrationData(silent: true);
+    if (!mounted) return;
+    await _showCreatedKeyResultDialog(created);
+  }
+
+  Future<void> _showCreatedKeyResultDialog(GatewayApiTenant created) async {
+    final baseUrl = _masterKeyInfo?.baseUrl ?? WhatsAppClient.normalizeGatewayUrl(_gatewayUrlController.text.trim());
+    final prompt = WhatsAppClient.buildAiIntegrationPrompt(
+      baseUrl: baseUrl,
+      apiKey: created.apiKey,
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(LucideIcons.circleCheck, color: Colors.green, size: 20),
+            SizedBox(width: 8),
+            Expanded(child: Text('Nouvelle Clé API Prête')),
+          ],
+        ),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Site / Application : ${created.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text('Forfait ${created.planTier.toUpperCase()} • ${created.dailyQuota}/jour • ${created.monthlyQuota}/mois',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                ),
+                child: SelectableText(
+                  created.apiKey,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Donnez ensuite le Prompt Complet pour IA ci-dessous à ChatGPT, Claude, Cursor ou Gemini sur votre autre site.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fermer'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _copyTextWithToast(created.apiKey, 'Clé API (${created.name})'),
+            icon: const Icon(LucideIcons.copy, size: 15),
+            label: const Text('Copier Clé'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => _copyTextWithToast(prompt, 'Prompt Complet pour IA'),
+            icon: const Icon(LucideIcons.sparkles, size: 15),
+            label: const Text('Copier Prompt Complet pour IA'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAiPromptDialog(String apiKey, String label) {
+    final baseUrl = _masterKeyInfo?.baseUrl ?? WhatsAppClient.normalizeGatewayUrl(_gatewayUrlController.text.trim());
+    final prompt = WhatsAppClient.buildAiIntegrationPrompt(
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+    );
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(LucideIcons.bot, color: Color(0xFF0F766E), size: 20),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Prompt Complet pour IA — $label')),
+          ],
+        ),
+        content: SizedBox(
+          width: (MediaQuery.of(ctx).size.width * 0.85).clamp(300.0, 680.0),
+          height: (MediaQuery.of(ctx).size.height * 0.55).clamp(240.0, 430.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Copiez ce prompt complet et collez-le dans une IA (ChatGPT, Claude, Cursor, Gemini, Antigravity) pour qu\'elle intègre l\'API WhatsApp automatiquement :',
+                style: TextStyle(fontSize: 12.5, color: Colors.grey),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      prompt,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.45),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fermer'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => _openExternalDoc('$baseUrl/llms.txt'),
+            icon: const Icon(LucideIcons.externalLink, size: 14),
+            label: const Text('Ouvrir /llms.txt'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () => _copyTextWithToast(prompt, 'Prompt Complet pour IA'),
+            icon: const Icon(LucideIcons.copy, size: 15),
+            label: const Text('Copier Tout le Prompt'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Onglet 4 (Super Admin) : Clés API & Documentation complète pour intégrer le système sur d'autres sites
+  Widget _buildSuperAdminApiIntegrationView(AppStrings s, ThemeData theme) {
+    final baseUrl = _masterKeyInfo?.baseUrl ?? WhatsAppClient.normalizeGatewayUrl(_gatewayUrlController.text.trim());
+    final docsUrl = _masterKeyInfo?.docsUrl ?? '$baseUrl/api/v1/docs';
+    final llmsUrl = _masterKeyInfo?.llmsUrl ?? '$baseUrl/llms.txt';
+    final openapiUrl = _masterKeyInfo?.openapiUrl ?? '$baseUrl/api/v1/openapi.json';
+    final master = _masterKeyInfo?.tenant;
+    final masterUsage = _masterKeyInfo?.usage ?? const GatewayApiUsage();
+
+    return RefreshIndicator(
+      onRefresh: _loadApiIntegrationData,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        children: [
+          // 1. BANYÈ DOKIMANTASYON AK BASE URL
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: theme.dividerColor),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.server, color: Color(0xFF0F766E), size: 22),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'API REST Complète & Intégration sur d\'Autres Sites',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      if (_loadingApiKeys)
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        OutlinedButton.icon(
+                          onPressed: _loadApiIntegrationData,
+                          icon: const Icon(LucideIcons.refreshCw, size: 14),
+                          label: const Text('Actualiser'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Connectez n\'importe quel site web, e-commerce, CRM ou application mobile au même moteur WhatsApp Cloud 24h/24 '
+                    'avec routage Dual-Lane (Fast Lane instantané & Slow Lane Anti-Ban 10-16 min), support PDF Base64 et Webhooks HMAC-SHA256.',
+                    style: theme.textTheme.bodySmall?.copyWith(height: 1.45),
+                  ),
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: theme.dividerColor),
+                    ),
+                    child: Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text('Base URL API :', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5)),
+                        SelectableText(
+                          baseUrl,
+                          style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, fontWeight: FontWeight.bold),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _copyTextWithToast(baseUrl, 'Base URL API'),
+                          icon: const Icon(LucideIcons.copy, size: 13),
+                          label: const Text('Copier URL'),
+                          style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () => _openExternalDoc(docsUrl),
+                        icon: const Icon(LucideIcons.fileText, size: 15),
+                        label: const Text('Documentation HTML (/api/v1/docs)'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _openExternalDoc(llmsUrl),
+                        icon: const Icon(LucideIcons.bot, size: 15),
+                        label: const Text('Spécification IA (/llms.txt)'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _openExternalDoc(openapiUrl),
+                        icon: const Icon(LucideIcons.fileCheck2, size: 15),
+                        label: const Text('OpenAPI 3.1 JSON'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          if (_apiKeysError != null) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.red.withOpacity(0.35)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.alertCircle, color: Colors.red, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Impossible de charger les clés API : $_apiKeysError',
+                      style: const TextStyle(color: Colors.red, fontSize: 13),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _loadApiIntegrationData,
+                    child: const Text('Réessayer'),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
+          // 2. KAT MASTER ADMIN API KEY
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: const BorderSide(color: Color(0xFF0F766E), width: 1.4),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Icon(LucideIcons.key, color: Color(0xFF0F766E), size: 20),
+                      const Text(
+                        'Clé API Principale (Master Admin)',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      if (master != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${master.planTier.toUpperCase()} • ${master.isActive ? 'ACTIF' : 'INACTIF'}',
+                            style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Stockez toujours la clé API côté serveur (.env backend). Ne l\'exposez jamais dans le frontend d\'un site web.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 14),
+                  if (master == null)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Text('Chargement de la Master Clé API...', style: TextStyle(color: Colors.grey)),
+                    )
+                  else ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: SelectableText(
+                        _masterKeyVisible ? master.apiKey : _maskApiKey(master.apiKey),
+                        style: const TextStyle(fontFamily: 'monospace', fontSize: 13.5, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () => setState(() => _masterKeyVisible = !_masterKeyVisible),
+                          icon: Icon(_masterKeyVisible ? LucideIcons.eyeOff : LucideIcons.eye, size: 15),
+                          label: Text(_masterKeyVisible ? 'Masquer' : 'Afficher'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _copyTextWithToast(master.apiKey, 'Master Clé API'),
+                          icon: const Icon(LucideIcons.copy, size: 15),
+                          label: const Text('Copier Clé'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: _rotatingMasterKey ? null : () => _confirmAndRotateTenantKey(master, isMaster: true),
+                          icon: const Icon(LucideIcons.rotateCw, size: 15, color: Colors.orange),
+                          label: Text(
+                            _rotatingMasterKey ? 'Rotation...' : 'Régénérer',
+                            style: const TextStyle(color: Colors.orange),
+                          ),
+                        ),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                          onPressed: () => _copyTextWithToast(
+                            WhatsAppClient.buildAiIntegrationPrompt(baseUrl: baseUrl, apiKey: master.apiKey),
+                            'Prompt Complet pour IA',
+                          ),
+                          icon: const Icon(LucideIcons.sparkles, size: 15),
+                          label: const Text('Copier Prompt Complet pour IA'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => _showAiPromptDialog(master.apiKey, master.name),
+                          icon: const Icon(LucideIcons.bot, size: 15),
+                          label: const Text('Aperçu Prompt IA'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 16,
+                      runSpacing: 6,
+                      children: [
+                        Text(
+                          'Aujourd\'hui : ${masterUsage.sentToday} / ${master.dailyQuota} msg',
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                        ),
+                        Text(
+                          'Ce mois : ${masterUsage.sentThisMonth} / ${master.monthlyQuota} msg',
+                          style: const TextStyle(fontSize: 12.5, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // 3. LIS AK KREYASYON KLE API POU LÒT SIT EKSTÈN
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: theme.dividerColor),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.shieldCheck, color: Colors.indigo, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Clés API des Sites & Applications Externes',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      FilledButton.icon(
+                        onPressed: _showCreateApiKeyDialog,
+                        icon: const Icon(LucideIcons.plusCircle, size: 15),
+                        label: const Text('Créer Clé API (Nouveau Site)'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Générez une clé isolée avec quotas sur mesure pour chaque autre site web, puis copiez son Prompt IA en 1 clic.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 14),
+                  if (_apiTenants.isEmpty)
+                    _emptyInfoCard('Aucune clé API enregistrée pour le moment.')
+                  else
+                    for (final tenant in _apiTenants) ...[
+                      _buildTenantApiKeyTile(tenant, theme),
+                      const SizedBox(height: 10),
+                    ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTenantApiKeyTile(GatewayApiTenant tenant, ThemeData theme) {
+    final isRevealed = _revealedTenantIds.contains(tenant.id);
+    final displayKey = isRevealed ? tenant.apiKey : _maskApiKey(tenant.apiKey);
+    final statusColor = tenant.isActive ? Colors.green : Colors.orange;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceVariant.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: tenant.isMasterAdmin ? const Color(0xFF0F766E).withOpacity(0.45) : theme.dividerColor,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(tenant.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              if (tenant.isMasterAdmin)
+                Chip(
+                  label: const Text('MASTER', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold)),
+                  backgroundColor: Colors.teal.withOpacity(0.14),
+                  visualDensity: VisualDensity.compact,
+                ),
+              Chip(
+                label: Text(tenant.planTier.toUpperCase(), style: const TextStyle(fontSize: 10.5)),
+                backgroundColor: Colors.indigo.withOpacity(0.1),
+                visualDensity: VisualDensity.compact,
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  tenant.isActive ? 'Actif' : 'Désactivé',
+                  style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 14,
+            runSpacing: 4,
+            children: [
+              if (tenant.email != null && tenant.email!.isNotEmpty)
+                Text('Email : ${tenant.email}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              Text(
+                'Jour : ${tenant.usage.sentToday} / ${tenant.dailyQuota}',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+              Text(
+                'Mois : ${tenant.usage.sentThisMonth} / ${tenant.monthlyQuota}',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: theme.dividerColor),
+            ),
+            child: SelectableText(
+              displayKey,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    if (isRevealed) {
+                      _revealedTenantIds.remove(tenant.id);
+                    } else {
+                      _revealedTenantIds.add(tenant.id);
+                    }
+                  });
+                },
+                icon: Icon(isRevealed ? LucideIcons.eyeOff : LucideIcons.eye, size: 13),
+                label: Text(isRevealed ? 'Masquer' : 'Afficher'),
+                style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _copyTextWithToast(tenant.apiKey, 'Clé API (${tenant.name})'),
+                icon: const Icon(LucideIcons.copy, size: 13),
+                label: const Text('Copier Clé'),
+                style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
+              FilledButton.tonalIcon(
+                onPressed: () => _showAiPromptDialog(tenant.apiKey, tenant.name),
+                icon: const Icon(LucideIcons.sparkles, size: 13),
+                label: const Text('Prompt IA'),
+                style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _confirmAndRotateTenantKey(tenant, isMaster: tenant.isMasterAdmin),
+                icon: const Icon(LucideIcons.rotateCw, size: 13),
+                label: const Text('Régénérer'),
+                style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => _toggleExternalTenantActive(tenant),
+                icon: Icon(LucideIcons.power, size: 13, color: tenant.isActive ? Colors.orange : Colors.green),
+                label: Text(tenant.isActive ? 'Désactiver' : 'Activer'),
+                style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
+              if (!tenant.isMasterAdmin)
+                OutlinedButton.icon(
+                  onPressed: () => _confirmAndDeleteExternalTenant(tenant),
+                  icon: const Icon(LucideIcons.trash2, size: 13, color: Colors.red),
+                  label: const Text('Supprimer', style: TextStyle(color: Colors.red)),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(color: Colors.red.shade200),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
 }
 
 /// Fenêtre Agrandie Interactive pou wè ak reponn mesaj WhatsApp dirèkteman sou liy konekte a
@@ -3713,3 +4531,173 @@ class _WhatsAppChatViewerDialogState extends State<_WhatsAppChatViewerDialog> {
   }
 }
 
+
+/// Dyalòg dedye pou kreye yon nouvo kle API pou yon lòt sit web ekstèn
+class _CreateExternalApiKeyDialog extends StatefulWidget {
+  const _CreateExternalApiKeyDialog({required this.client});
+
+  final WhatsAppClient client;
+
+  @override
+  State<_CreateExternalApiKeyDialog> createState() => _CreateExternalApiKeyDialogState();
+}
+
+class _CreateExternalApiKeyDialogState extends State<_CreateExternalApiKeyDialog> {
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _dailyCtrl = TextEditingController(text: '100');
+  final _monthlyCtrl = TextEditingController(text: '3000');
+  String _planTier = 'pro';
+  bool _submitting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _dailyCtrl.dispose();
+    _monthlyCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onPlanChanged(String? val) {
+    if (val == null) return;
+    setState(() {
+      _planTier = val;
+      if (val == 'starter') {
+        _dailyCtrl.text = '15';
+        _monthlyCtrl.text = '300';
+      } else if (val == 'pro') {
+        _dailyCtrl.text = '100';
+        _monthlyCtrl.text = '3000';
+      } else {
+        _dailyCtrl.text = '5000';
+        _monthlyCtrl.text = '100000';
+      }
+    });
+  }
+
+  Future<void> _submit() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Le nom du site ou de l\'application est obligatoire.');
+      return;
+    }
+    final daily = int.tryParse(_dailyCtrl.text.trim()) ?? 100;
+    final monthly = int.tryParse(_monthlyCtrl.text.trim()) ?? 3000;
+    if (daily < 1 || monthly < 1) {
+      setState(() => _error = 'Les quotas doivent être supérieurs à 0.');
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+
+    try {
+      final created = await widget.client.createExternalApiKey(
+        name: name,
+        email: _emailCtrl.text.trim().isEmpty ? null : _emailCtrl.text.trim(),
+        planTier: _planTier,
+        dailyQuota: daily,
+        monthlyQuota: monthly,
+      );
+      if (!mounted) return;
+      Navigator.pop(context, created);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(LucideIcons.keyRound, color: Color(0xFF0F766E), size: 20),
+          SizedBox(width: 8),
+          Expanded(child: Text('Créer une Clé API Externe')),
+        ],
+      ),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: _nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Nom du Site / Application *',
+                  hintText: 'Ex: Boutique Haïti / Portail Client',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Email associé (Optionnel)',
+                  hintText: 'dev@monsite.com',
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: _planTier,
+                decoration: const InputDecoration(labelText: 'Forfait'),
+                items: const [
+                  DropdownMenuItem(value: 'starter', child: Text('Starter (15 / jour • 300 / mois)')),
+                  DropdownMenuItem(value: 'pro', child: Text('Pro Business (100 / jour • 3 000 / mois)')),
+                  DropdownMenuItem(value: 'enterprise', child: Text('Enterprise (5 000 / jour • 100 000 / mois)')),
+                ],
+                onChanged: _submitting ? null : _onPlanChanged,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _dailyCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Quota / Jour'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _monthlyCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Quota / Mois'),
+                    ),
+                  ),
+                ],
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.pop(context),
+          child: const Text('Annuler'),
+        ),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+          onPressed: _submitting ? null : _submit,
+          icon: const Icon(LucideIcons.key, size: 15),
+          label: Text(_submitting ? 'Génération...' : 'Générer la Clé API'),
+        ),
+      ],
+    );
+  }
+}

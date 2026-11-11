@@ -2497,6 +2497,7 @@ class AppStrings {
     'whatsapp_tab_settings': ['Konfigirasyon & Nimewo', 'Configuration & Numéros', 'Configuration & Numbers'],
     'whatsapp_tab_super_admin': ['👑 Aksè WhatsApp Gym yo', '👑 Accès WhatsApp des Salles', '👑 Gym WhatsApp Access'],
     'whatsapp_tab_message_control': ['🤖 Kontwòl Mesaj yo', '🤖 Contrôle des Messages', '🤖 Message Control'],
+    'whatsapp_tab_api_integration': ['🔑 API & Entegrasyon', '🔑 API & Intégration', '🔑 API & Integration'],
     'whatsapp_gym_access_title': ['Jesyon Aksè Abònman WhatsApp pou Gym yo', 'Gestion des Abonnements WhatsApp des Salles', 'Gym WhatsApp Subscription Management'],
     'whatsapp_gym_access_desc': [
       'Sèlman Super Admin SecurGYM ka bay aksè, mete peryòd valab, sispann oswa renouvle sèvis WhatsApp pou chak gym.',
