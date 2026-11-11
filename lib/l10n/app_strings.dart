@@ -2549,9 +2549,9 @@ class AppStrings {
       '💡 If the browser is stuck, click the "Reset Session" button above to clear lock files and restart.',
     ],
     'whatsapp_offline_guide': [
-      'Sèvis WhatsApp la poko kòmanse sou machin sa a.\n👉 Pou demare l: Fè yon doub klik sou fichye "Lancer_WhatsApp.bat" ki nan dosye GymDesk la.\nDepi l demare, klike sou bouton "Rafrechi / Rekonekte" anwo a pou konekte l.',
-      'Le service WhatsApp n\'est pas encore démarré sur cette machine.\n👉 Pour le démarrer : Double-cliquez sur le fichier "Lancer_WhatsApp.bat" situé dans le dossier GymDesk.\nDès son démarrage, cliquez sur le bouton "Rafraîchir / Reconnecter" ci-dessus pour le connecter.',
-      'The WhatsApp service is not running on this machine yet.\n👉 To launch it: Double-click "Lancer_WhatsApp.bat" located in the GymDesk folder.\nOnce running, click "Refresh / Reconnect" above to connect.',
+      'Sèvis WhatsApp Cloud 24h/24 la ap demare oswa l ap tann koneksyon QR sou Liy 1.\n👉 Klike sou bouton "Kòmanse & Eskane QR" nan kat Liy 1 an oswa verifye UptimeRobot (/health) pou kenbe sèvè Render Cloud la aktif 24h/24.',
+      'Le service WhatsApp Cloud 24h/24 est en cours de réveil ou attend le scan QR sur la Ligne 1.\n👉 Cliquez sur "Kòmanse & Eskane QR" sur la Ligne 1 et vérifiez UptimeRobot (/health) pour maintenir le serveur Render Cloud actif 24h/24.',
+      'The 24/7 Cloud WhatsApp gateway is waking up or awaiting QR pairing on Line 1.\n👉 Click "Start & Scan QR" on Line 1 and keep UptimeRobot pinging /health to keep the Render Cloud server active 24/7.',
     ],
     'whatsapp_enable_service_label': ['Aktive Sèvis WhatsApp pou gym sa a', 'Activer le Service WhatsApp pour cette salle', 'Enable WhatsApp Service for this gym'],
     'whatsapp_access_open': ['Aksè ouvri', 'Accès ouvert', 'Access open'],

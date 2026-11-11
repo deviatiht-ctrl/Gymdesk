@@ -26,7 +26,7 @@ class WhatsAppSettingsPage extends ConsumerStatefulWidget {
 
 class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   final _formKey = GlobalKey<FormState>();
-  final _gatewayUrlController = TextEditingController(text: 'http://127.0.0.1:47812');
+  final _gatewayUrlController = TextEditingController(text: WhatsAppClient.defaultCloudGatewayUrl);
   final _validNumberController = TextEditingController(text: '50932986751');
   final _backupNumberController = TextEditingController();
   final _countryCodeController = TextEditingController(text: '509');
@@ -110,7 +110,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
         final reminders = cfg['auto_send_reminders'] as bool?;
         final welcome = cfg['auto_send_welcome'] as bool?;
 
-        if (gateway != null && gateway.isNotEmpty) _gatewayUrlController.text = gateway;
+        if (gateway != null && gateway.isNotEmpty) {
+          _gatewayUrlController.text = WhatsAppClient.normalizeGatewayUrl(gateway);
+        }
         if (valid != null && valid.isNotEmpty) {
           _validNumberController.text = valid;
           _testNumberController.text = valid;
@@ -128,9 +130,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     // 2. Tcheke aksè abònman gym aktyèl la
     await _checkCurrentGymAccess();
 
-    // 3. Tcheke estati sèvis WhatsApp lokal la
-    await _checkStatus();
+    // 3. Tcheke estati sèvis WhatsApp Cloud la ak lis liy yo
     await _loadAccountsList();
+    await _checkStatus();
 
     // 4. Si se Super Admin, chaje lis gym yo
     final runtime = ref.read(appRuntimeProvider);
@@ -175,9 +177,14 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       _autoSendReminders = state.autoSendReminders;
     });
 
+    final anyAccountPending = _accountsList.any(
+      (a) => a.isWaitingForQr || a.isInitializing || a.isError,
+    );
     if (state.status == WhatsAppStatus.scanQr ||
         state.status == WhatsAppStatus.initializing ||
-        state.status == WhatsAppStatus.error) {
+        state.status == WhatsAppStatus.authenticated ||
+        state.status == WhatsAppStatus.error ||
+        anyAccountPending) {
       _startPolling();
     } else {
       _stopPolling();
@@ -189,20 +196,28 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     final state = await client.checkStatus(validNumberFallback: _validNumberController.text.trim());
     if (!mounted) return;
 
+    final anyAccountPending = _accountsList.any(
+      (a) => a.isWaitingForQr || a.isInitializing,
+    );
+
     if (state.status != _state.status ||
         state.connectedPhone != _state.connectedPhone ||
         state.rawQr != _state.rawQr ||
+        state.qrDataUrl != _state.qrDataUrl ||
         state.lastError != _state.lastError) {
+      final wasReady = _state.status == WhatsAppStatus.ready;
       setState(() => _state = state);
-      if (state.status == WhatsAppStatus.ready) {
+      if (state.status == WhatsAppStatus.ready && !anyAccountPending) {
         _stopPolling();
-        final s = AppStrings.of(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(s.text('whatsapp_connected')),
-            backgroundColor: Colors.green,
-          ),
-        );
+        if (!wasReady) {
+          final s = AppStrings.of(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(s.text('whatsapp_connected')),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       }
     }
   }
@@ -263,7 +278,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     final s = AppStrings.of(context);
     setState(() => _saving = true);
 
-    final gateway = _gatewayUrlController.text.trim();
+    final gateway = WhatsAppClient.normalizeGatewayUrl(_gatewayUrlController.text.trim());
+    _gatewayUrlController.text = gateway;
     final validNumber = _validNumberController.text.trim();
     final backupNumber = _backupNumberController.text.trim();
     final cc = _countryCodeController.text.trim();
@@ -1099,7 +1115,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                               const Icon(LucideIcons.cloud, size: 14, color: Colors.teal),
                               const SizedBox(width: 4),
                               Text(
-                                'Cloud Bridge Aktif (Senkronize ak sèvis PC a)',
+                                'Cloud Bridge 24h/24 Aktif (Sèvè Cloud Render)',
                                 style: TextStyle(color: Colors.teal.shade700, fontSize: 12, fontWeight: FontWeight.bold),
                               ),
                             ],
@@ -1194,7 +1210,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                                   height: 220,
                                 )
                               : Image.network(
-                                  '${_gatewayUrlController.text.trim()}/api/qr.png',
+                                  '${WhatsAppClient.normalizeGatewayUrl(_gatewayUrlController.text.trim())}/api/qr.png',
                                   width: 220,
                                   height: 220,
                                   errorBuilder: (context, error, stackTrace) => const SizedBox(
@@ -1404,7 +1420,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                       controller: _gatewayUrlController,
                       decoration: InputDecoration(
                         labelText: s.text('whatsapp_gateway_url_label'),
-                        helperText: 'Pa defo: http://127.0.0.1:47812',
+                        helperText: 'Pa defo: ${WhatsAppClient.defaultCloudGatewayUrl}',
                         prefixIcon: const Icon(LucideIcons.server),
                         border: const OutlineInputBorder(),
                       ),
@@ -1856,7 +1872,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     setState(() => _checkingExpirations = true);
     final s = AppStrings.of(context);
     try {
-      final res = await ref.read(whatsAppClientProvider).triggerExpirationCheck();
+      final res = await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).triggerExpirationCheck();
       if (res != null && mounted) {
         final queued = (res['queued_count'] as num?)?.toInt() ?? 0;
         final gyms = (res['gyms_processed'] as num?)?.toInt() ?? 0;
@@ -1881,7 +1897,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
 
   Future<void> _triggerExpirationCheckForGym(String gymId, String gymName) async {
     try {
-      final res = await ref.read(whatsAppClientProvider).triggerExpirationCheck(targetGymId: gymId);
+      final res = await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).triggerExpirationCheck(targetGymId: gymId);
       if (res != null && mounted) {
         final queued = (res['queued_count'] as num?)?.toInt() ?? 0;
         if (queued > 0) {
@@ -1902,7 +1918,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
 
   Future<void> _loadAccountsList() async {
     try {
-      final list = await ref.read(whatsAppClientProvider).fetchAccountsList();
+      final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+      final list = await client.fetchAccountsList();
       if (mounted) {
         setState(() => _accountsList = list);
       }
@@ -1983,7 +2000,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Distribye mesaj yo sou plizyè nimewo avèk delè sekirite (25s-50s) pou evite WhatsApp bloke nimewo.',
+                        'Fonksyone 24h/24 sou Cloud la avèk pwoteksyon Anti-Bann strik (10-16 min ant rapèl, max 25/jou ; enskripsyon ak resi PDF voye imedyatman).',
                         style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                       ),
                     ],
@@ -2183,7 +2200,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   const SizedBox(width: 8),
                   TextButton(
                     onPressed: () async {
-                      final ok = await ref.read(whatsAppClientProvider).unrestrictAccount(acc.accountIndex);
+                      final ok = await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).unrestrictAccount(acc.accountIndex);
                       if (ok) {
                         await _loadAccountsList();
                         if (mounted) {
@@ -2233,7 +2250,9 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                     children: [
                       FilledButton.icon(
                         onPressed: () async {
-                          await ref.read(whatsAppClientProvider).resetAccountSession(acc.accountIndex);
+                          final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+                          await client.resetAccountSession(acc.accountIndex);
+                          _startPolling();
                           await _loadAccountsList();
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -2251,7 +2270,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
                         onPressed: () async {
-                          await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                          await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).restartAccount(acc.accountIndex);
+                          _startPolling();
                           await _loadAccountsList();
                         },
                         icon: const Icon(LucideIcons.play, size: 13),
@@ -2288,11 +2308,20 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   const SizedBox(width: 10),
                   FilledButton.icon(
                     onPressed: () async {
-                      await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                      final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+                      final started = await client.restartAccount(acc.accountIndex);
+                      _startPolling();
                       await _loadAccountsList();
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Liy ${acc.accountIndex} ap demare pou prepare kòd QR la...'), backgroundColor: Colors.teal),
+                          SnackBar(
+                            content: Text(
+                              started
+                                  ? 'Liy ${acc.accountIndex} ap demare pou prepare kòd QR la...'
+                                  : 'Itilize Liy 1 sou sèvè Cloud la (1 liy aktif pou stabilite).',
+                            ),
+                            backgroundColor: started ? Colors.teal : Colors.orange.shade800,
+                          ),
                         );
                       }
                     },
@@ -2375,7 +2404,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                             const SizedBox(width: 8),
                             OutlinedButton.icon(
                               onPressed: () async {
-                                await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                                await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).restartAccount(acc.accountIndex);
+                                _startPolling();
                                 await _loadAccountsList();
                               },
                               icon: const Icon(LucideIcons.refreshCw, size: 13),
@@ -2385,7 +2415,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                             const SizedBox(width: 8),
                             OutlinedButton.icon(
                               onPressed: () async {
-                                await ref.read(whatsAppClientProvider).resetAccountSession(acc.accountIndex);
+                                await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).resetAccountSession(acc.accountIndex);
+                                _startPolling();
                                 await _loadAccountsList();
                               },
                               icon: const Icon(LucideIcons.trash2, size: 13, color: Colors.red),
@@ -2428,7 +2459,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: () async {
-                    final ok = await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                    final ok = await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).restartAccount(acc.accountIndex);
+                    _startPolling();
                     if (ok) {
                       await _loadAccountsList();
                     }
@@ -2452,7 +2484,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                       ),
                     );
                     if (confirm == true) {
-                      await ref.read(whatsAppClientProvider).resetAccountSession(acc.accountIndex);
+                      await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).resetAccountSession(acc.accountIndex);
+                      _startPolling();
                       await _loadAccountsList();
                     }
                   },
@@ -2466,7 +2499,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ] else if (!isWaitingQr && !isError && !isDisconnected) ...[
                 OutlinedButton.icon(
                   onPressed: () async {
-                    await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
+                    await WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()).restartAccount(acc.accountIndex);
+                    _startPolling();
                     await _loadAccountsList();
                   },
                   icon: const Icon(LucideIcons.refreshCw, size: 12),
@@ -2851,7 +2885,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             icon: LucideIcons.userPlus,
             color: Colors.indigo,
             title: 'Inscriptions récentes sans message ($missedCount)',
-            subtitle: 'Membres inscrits pendant que le PC était éteint — vérifiés anti-doublon.',
+            subtitle: 'Membres inscrits pendant une coupure ou hors ligne — vérifiés anti-doublon.',
             action: missed.isNotEmpty
                 ? FilledButton.tonalIcon(
                     onPressed: _dispatchingControlBatch
@@ -2963,7 +2997,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             icon: LucideIcons.listOrdered,
             color: Colors.amber.shade800,
             title: 'File prioritaire & Échecs (${priority.length})',
-            subtitle: 'Messages à envoyer en priorité dès que la passerelle PC est allumée.',
+            subtitle: 'Messages envoyés automatiquement 24h/24 par le serveur Cloud (inscriptions & reçus prioritaires, rappels protégés Anti-Ban).',
             action: failedCount > 0
                 ? OutlinedButton.icon(
                     onPressed: _dispatchingControlBatch

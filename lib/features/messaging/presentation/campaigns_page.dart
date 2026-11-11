@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -436,7 +435,6 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     );
 
     int sentCount = 0;
-    final random = Random();
     for (int i = 0; i < recipients.length; i++) {
       if (!mounted) break;
       final m = recipients[i];
@@ -453,14 +451,17 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
           .replaceAll('{gym_name}', gymName);
       final fullMsg = '*$title*\n\n$personalizedBody$footer';
 
-      final res = await waClient.sendMessage(to: phone, message: fullMsg);
+      final res = await waClient.sendMessage(
+        to: phone,
+        message: fullMsg,
+        kind: 'marketing',
+        gymId: gymId,
+      );
       if (res.success) {
         sentCount++;
       }
       if (i < recipients.length - 1) {
-        // Delè sekirite anti-spam ant 2.5 a 4 segonn pou evite WhatsApp sispèk spam
-        final delayMs = 2500 + random.nextInt(1500);
-        await Future<void>.delayed(Duration(milliseconds: delayMs));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
       }
     }
 

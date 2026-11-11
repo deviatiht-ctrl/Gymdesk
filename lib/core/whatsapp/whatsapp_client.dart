@@ -387,10 +387,30 @@ class WhatsAppAccountInfo {
 }
 
 class WhatsAppClient {
-  WhatsAppClient({this.baseUrl = 'http://127.0.0.1:47812'});
+  static const String defaultCloudGatewayUrl = 'https://cvisual-whatsapp-gateway.onrender.com';
+
+  WhatsAppClient({this.baseUrl = defaultCloudGatewayUrl});
 
   final String baseUrl;
-  static bool _lastUsedCloudBridge = false;
+
+  /// Normalise URL sèvis WhatsApp la: ranplase ansyen adrès lokal (127.0.0.1/localhost) ak Cloud 24/7 la
+  static String normalizeGatewayUrl(String raw) {
+    final cleaned = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    if (cleaned.isEmpty) return defaultCloudGatewayUrl;
+    final lower = cleaned.toLowerCase();
+    if (lower == 'http://127.0.0.1:47812' ||
+        lower == 'http://localhost:47812' ||
+        (kIsWeb && (lower.contains('127.0.0.1') || lower.contains('localhost')))) {
+      return defaultCloudGatewayUrl;
+    }
+    return cleaned;
+  }
+
+  String get effectiveBaseUrl => normalizeGatewayUrl(baseUrl);
+
+  static bool isFastLaneKind(String kind) {
+    return const {'receipt', 'welcome', 'otp', 'test', 'manual_direct'}.contains(kind.trim().toLowerCase());
+  }
 
   /// Netwaye epi mete nimewo nan bon fòma entènasyonal (egz: 50937001122)
   static String normalizePhone(String raw, {String defaultCountryCode = '509'}) {
@@ -402,12 +422,13 @@ class WhatsAppClient {
     return digits;
   }
 
-  /// Verifye estati sèvis WhatsApp la (Lokal premye, oswa Cloud Bridge Supabase si sou Web/Tablet)
+  /// Verifye estati sèvis WhatsApp la (Render Cloud HTTP premye, ak fallback Cloud Bridge Supabase)
   Future<WhatsAppState> checkStatus({String? validNumberFallback}) async {
-    // 1. Eseye kominike dirèkteman ak sèvis lokal la (si nou sou PC)
+    final targetBase = effectiveBaseUrl;
+    // 1. Kominike dirèkteman ak sèvè Cloud 24h/24 la (oswa sèvis konfigire a)
     try {
-      final uri = Uri.parse('$baseUrl/api/status');
-      final response = await http.get(uri).timeout(const Duration(milliseconds: 1800));
+      final uri = Uri.parse('$targetBase/api/status');
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final rawStatus = data['status'] as String? ?? 'DISCONNECTED';
@@ -422,7 +443,7 @@ class WhatsAppClient {
           _ => WhatsAppStatus.disconnected,
         };
 
-        _lastUsedCloudBridge = false;
+        final isCloud = data['securgym'] != null || targetBase.contains('onrender.com');
         return WhatsAppState(
           status: status,
           qrDataUrl: data['qr'] as String?,
@@ -439,14 +460,14 @@ class WhatsAppClient {
           queueLength: (data['queueLength'] as num?)?.toInt() ?? 0,
           lastError: data['lastError'] as String?,
           lastChecked: DateTime.now(),
-          isCloudBridge: false,
+          isCloudBridge: isCloud,
         );
       }
     } catch (_) {
-      // Sèvis lokal la pa reponn (egz: nou sou yon Tablet, Telefòn, oswa Vercel Web)
+      // Fallback via Supabase si HTTP Render pa disponib tanporèman
     }
 
-    // 2. Cloud Bridge: Rale estati a depi Supabase kote sèvis background lan voye heartbeat
+    // 2. Cloud Bridge: Rale estati a depi Supabase kote sèvis la voye heartbeat
     return await _checkStatusFromSupabase(validNumberFallback: validNumberFallback);
   }
 
@@ -464,11 +485,11 @@ class WhatsAppClient {
           'SCAN_QR' => isOnline ? WhatsAppStatus.scanQr : WhatsAppStatus.offline,
           'AUTHENTICATED' => isOnline ? WhatsAppStatus.authenticated : WhatsAppStatus.offline,
           'INITIALIZING' => isOnline ? WhatsAppStatus.initializing : WhatsAppStatus.offline,
+          'DISCONNECTED' => isOnline ? WhatsAppStatus.disconnected : WhatsAppStatus.offline,
           'ERROR' => WhatsAppStatus.error,
           _ => WhatsAppStatus.offline,
         };
 
-        _lastUsedCloudBridge = true;
         return WhatsAppState(
           status: status,
           qrDataUrl: data['qr_code'] as String?,
@@ -507,9 +528,10 @@ class WhatsAppClient {
     bool autoSendReminders = true,
     int reminderDaysBefore = 7,
   }) async {
-    // 1. Sove lokal si sèvis la aksesib
+    final targetBase = effectiveBaseUrl;
+    // 1. Sove dirèkteman sou sèvis Cloud / lokal la si aksesib
     try {
-      final uri = Uri.parse('$baseUrl/api/config');
+      final uri = Uri.parse('$targetBase/api/config');
       await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
@@ -522,13 +544,13 @@ class WhatsAppClient {
           'autoSendReminders': autoSendReminders,
           'reminderDaysBefore': reminderDaysBefore,
         }),
-      ).timeout(const Duration(seconds: 4));
+      ).timeout(const Duration(seconds: 8));
     } catch (_) {}
 
     // 2. Sove nan Supabase (pou tout aparèy jwenn li)
     try {
       await Supabase.instance.client.rpc('platform_whatsapp_config_set', params: {
-        'p_gateway_url': baseUrl,
+        'p_gateway_url': targetBase,
         'p_valid_number': validNumber.trim(),
         'p_default_country_code': defaultCountryCode.trim(),
         'p_auto_send_receipts': autoSendReceipts,
@@ -545,7 +567,7 @@ class WhatsAppClient {
 
   /// Chanje nimewo WhatsApp oswa konekte yon nouvo nimewo (Switch Account / Clear Auth)
   Future<bool> switchAccount({String? newNumber, String? backupNumber}) async {
-    final uri = Uri.parse('$baseUrl/api/switch-account');
+    final uri = Uri.parse('$effectiveBaseUrl/api/switch-account');
     try {
       final response = await http.post(
         uri,
@@ -554,14 +576,14 @@ class WhatsAppClient {
           if (newNumber != null && newNumber.isNotEmpty) 'newNumber': newNumber.trim(),
           if (backupNumber != null) 'backupNumber': backupNumber.trim(),
         }),
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 20));
       return response.statusCode == 200;
     } catch (_) {
       return false;
     }
   }
 
-  /// Voye yon mesaj WhatsApp (ak sipò dokiman PDF si bay)
+  /// Voye yon mesaj WhatsApp (Fast Lane dirèk imedya vs Slow Lane pwoteksyon Anti-Ban)
   Future<WhatsAppSendResult> sendMessage({
     required String to,
     required String message,
@@ -570,47 +592,56 @@ class WhatsAppClient {
     String kind = 'manual',
     String? gymId,
   }) async {
-    // 1. Eseye voye lokalman si nou sou PC epi CloudBridge pa t nesesè
-    if (!_lastUsedCloudBridge) {
+    final cleanPhone = normalizePhone(to);
+    final normKind = kind.trim().toLowerCase();
+
+    // 1. Fast Lane (Resi, Byenvini, OTP, Tès, Dirèk): voye imedyatman sou Render Cloud HTTP
+    if (isFastLaneKind(normKind)) {
       try {
-        final uri = Uri.parse('$baseUrl/api/send');
+        final uri = Uri.parse('$effectiveBaseUrl/api/send');
         final response = await http.post(
           uri,
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
-            'to': to.trim(),
+            'to': cleanPhone.isNotEmpty ? cleanPhone : to.trim(),
             'message': message.trim(),
-            'kind': kind,
+            'kind': normKind,
+            if (gymId != null && gymId.isNotEmpty) 'gymId': gymId,
             if (pdfBase64 != null && pdfBase64.isNotEmpty) 'pdfBase64': pdfBase64,
             if (pdfBase64 != null && pdfBase64.isNotEmpty) 'pdf_base64': pdfBase64,
             if (pdfFileName != null && pdfFileName.isNotEmpty) 'pdfFileName': pdfFileName,
             if (pdfFileName != null && pdfFileName.isNotEmpty) 'pdf_file_name': pdfFileName,
           }),
-        ).timeout(const Duration(seconds: 6));
+        ).timeout(const Duration(seconds: 25));
 
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        if (response.statusCode == 200 && data['ok'] == true) {
+        if ((response.statusCode == 200 || response.statusCode == 202) && data['ok'] == true) {
           return WhatsAppSendResult(
             success: true,
-            messageId: data['messageId'] as String?,
-            to: data['to'] as String?,
+            messageId: data['messageId']?.toString(),
+            to: data['to']?.toString() ?? cleanPhone,
+          );
+        }
+        if (response.statusCode == 422 && data['blocked'] == true) {
+          return WhatsAppSendResult(
+            success: false,
+            error: data['error']?.toString() ?? 'Mesaj bloke pa pwoteksyon Anti-Ban.',
           );
         }
       } catch (e) {
-        debugPrint('[WhatsApp] Voye lokal echwe, n ap pase pa Cloud Bridge: $e');
+        debugPrint('[WhatsApp] Voye HTTP echwe, n ap pase pa Supabase Outbox: $e');
       }
     }
 
-    // 2. Voye atravè Cloud Bridge Supabase (Pou Tablet, Telefòn, ak Web)
+    // 2. Slow Lane (Rapèl J-7 / J-2, Kanpay Marketing) oswa Fallback Outbox si Cloud HTTP tanporèman okipe
     try {
-      final cleanPhone = normalizePhone(to);
       final outboxId = await Supabase.instance.client.rpc(
         'whatsapp_enqueue_message',
         params: {
           'p_to_phone': cleanPhone,
           'p_message': message.trim(),
           'p_gym_id': (gymId != null && gymId.isNotEmpty) ? gymId : null,
-          'p_kind': kind,
+          'p_kind': normKind,
           'p_pdf_base64': pdfBase64,
           'p_pdf_file_name': pdfFileName,
         },
@@ -628,7 +659,7 @@ class WhatsAppClient {
     }
   }
 
-  /// Voye yon mesaj tès
+  /// Voye yon mesaj tès dirèkteman (montre erè egzak la si Liy lan poko konekte)
   Future<WhatsAppSendResult> sendTestMessage({
     String? to,
     String? message,
@@ -636,38 +667,35 @@ class WhatsAppClient {
     final targetPhone = to?.trim() ?? '';
     final msg = message?.trim() ?? '🏋️ *SecurGYM* - Tès mesaj koneksyon WhatsApp.';
 
-    // 1. Eseye voye lokalman
-    if (!_lastUsedCloudBridge) {
-      try {
-        final uri = Uri.parse('$baseUrl/api/test');
-        final response = await http.post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            if (targetPhone.isNotEmpty) 'to': targetPhone,
-            'message': msg,
-          }),
-        ).timeout(const Duration(seconds: 15));
+    // 1. Eseye voye dirèkteman via HTTP Cloud 24h/24
+    try {
+      final uri = Uri.parse('$effectiveBaseUrl/api/test');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          if (targetPhone.isNotEmpty) 'to': targetPhone,
+          'message': msg,
+        }),
+      ).timeout(const Duration(seconds: 25));
 
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        if (response.statusCode == 200 && data['ok'] == true) {
-          return WhatsAppSendResult(
-            success: true,
-            messageId: data['messageId'] as String?,
-            to: data['to'] as String? ?? targetPhone,
-          );
-        } else if (data['error'] != null) {
-          return WhatsAppSendResult(
-            success: false,
-            error: data['error'] as String,
-          );
-        }
-      } catch (e) {
-        debugPrint('[WhatsApp] Tès lokal echwe, n ap pase pa Cloud Bridge: $e');
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode == 200 && data['ok'] == true) {
+        return WhatsAppSendResult(
+          success: true,
+          messageId: data['messageId']?.toString(),
+          to: data['to']?.toString() ?? targetPhone,
+        );
       }
+      return WhatsAppSendResult(
+        success: false,
+        error: data['error']?.toString() ?? 'Sèvis WhatsApp la retounen HTTP ${response.statusCode}.',
+      );
+    } catch (e) {
+      debugPrint('[WhatsApp] Tès HTTP Cloud echwe, n ap pase pa Supabase Outbox: $e');
     }
 
-    // 2. Fallback Cloud Bridge Supabase
+    // 2. Fallback Supabase Outbox sèlman si sèvè HTTP a pa t ka jwenn
     try {
       final cleanPhone = normalizePhone(targetPhone);
       final outboxId = await Supabase.instance.client.rpc(
@@ -693,21 +721,35 @@ class WhatsAppClient {
 
   /// Rekonekte / Rafrechi kòd QR
   Future<bool> reconnect() async {
-    final uri = Uri.parse('$baseUrl/api/initialize');
+    final uri = Uri.parse('$effectiveBaseUrl/api/initialize');
     try {
-      final response = await http.post(uri).timeout(const Duration(seconds: 10));
-      return response.statusCode == 200;
+      final response = await http.post(uri).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) return true;
+    } catch (_) {}
+    try {
+      await Supabase.instance.client
+          .from('platform_whatsapp_accounts')
+          .update({'service_status': 'RESTART_REQUESTED'})
+          .eq('account_index', 1);
+      return true;
     } catch (_) {
       return false;
     }
   }
 
-  /// Reyinisyalize sesyon an nèt (wipe .wwebjs_auth epi kreye nouvo sesyon)
+  /// Reyinisyalize sesyon an nèt (wipe auth epi kreye nouvo sesyon)
   Future<bool> resetSession() async {
-    final uri = Uri.parse('$baseUrl/api/reset');
+    final uri = Uri.parse('$effectiveBaseUrl/api/reset');
     try {
-      final response = await http.post(uri).timeout(const Duration(seconds: 15));
-      return response.statusCode == 200;
+      final response = await http.post(uri).timeout(const Duration(seconds: 18));
+      if (response.statusCode == 200) return true;
+    } catch (_) {}
+    try {
+      await Supabase.instance.client
+          .from('platform_whatsapp_accounts')
+          .update({'service_status': 'RESET_REQUESTED'})
+          .eq('account_index', 1);
+      return true;
     } catch (_) {
       return false;
     }
@@ -715,13 +757,13 @@ class WhatsAppClient {
 
   /// Dekonekte sesyon WhatsApp la
   Future<bool> logout({bool clearSession = true}) async {
-    final uri = Uri.parse('$baseUrl/api/logout');
+    final uri = Uri.parse('$effectiveBaseUrl/api/logout');
     try {
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'clearSession': clearSession}),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -730,23 +772,21 @@ class WhatsAppClient {
 
   /// Lese verifikasyon otomatik rapèl échéance sou Supabase
   Future<Map<String, dynamic>?> triggerExpirationCheck({String? targetGymId}) async {
-    // 1. Eseye lokalman si nou sou PC
-    if (!_lastUsedCloudBridge) {
-      try {
-        final uri = Uri.parse('$baseUrl/api/cron/check-expirations');
-        final response = await http.post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(targetGymId != null ? {'gymId': targetGymId} : {}),
-        ).timeout(const Duration(seconds: 10));
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          if (data['ok'] == true && data['result'] != null) {
-            return Map<String, dynamic>.from(data['result'] as Map);
-          }
+    // 1. Eseye via sèvis Cloud HTTP
+    try {
+      final uri = Uri.parse('$effectiveBaseUrl/api/cron/check-expirations');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(targetGymId != null ? {'gymId': targetGymId} : {}),
+      ).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['ok'] == true && data['result'] != null) {
+          return Map<String, dynamic>.from(data['result'] as Map);
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
 
     // 2. Cloud Bridge Supabase RPC
     try {
@@ -763,23 +803,21 @@ class WhatsAppClient {
     return null;
   }
 
-  /// Rale lis tout liy WhatsApp nan Cluster a depi Supabase oswa sèvis lokal
+  /// Rale lis tout liy WhatsApp nan Cluster a depi sèvis Cloud la oswa Supabase
   Future<List<WhatsAppAccountInfo>> fetchAccountsList() async {
-    // 1. Eseye lokal si posib
-    if (!_lastUsedCloudBridge) {
-      try {
-        final uri = Uri.parse('$baseUrl/api/accounts');
-        final response = await http.get(uri).timeout(const Duration(milliseconds: 1800));
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          if (data['ok'] == true && data['accounts'] is List) {
-            return (data['accounts'] as List)
-                .map((a) => WhatsAppAccountInfo.fromJson(Map<String, dynamic>.from(a as Map)))
-                .toList();
-          }
+    // 1. Eseye dirèkteman via sèvis Cloud HTTP pou jwenn kòd QR ak estati an tan reyèl
+    try {
+      final uri = Uri.parse('$effectiveBaseUrl/api/accounts');
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['ok'] == true && data['accounts'] is List) {
+          return (data['accounts'] as List)
+              .map((a) => WhatsAppAccountInfo.fromJson(Map<String, dynamic>.from(a as Map)))
+              .toList();
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
 
     // 2. Cloud Bridge Supabase RPC
     try {
@@ -811,48 +849,54 @@ class WhatsAppClient {
 
   /// Rekonekte / Rafrechi kòd QR yon liy espesifik
   Future<bool> restartAccount(int accountIndex) async {
-    bool ok = false;
+    bool httpAttemptedAndRejected = false;
     try {
-      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/initialize');
-      final res = await http.post(uri).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200) ok = true;
+      final uri = Uri.parse('$effectiveBaseUrl/api/accounts/$accountIndex/initialize');
+      final res = await http.post(uri).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) return true;
+      if (res.statusCode == 409 || res.statusCode == 404) {
+        httpAttemptedAndRejected = true;
+      }
     } catch (_) {}
 
-    if (!ok) {
-      try {
-        await Supabase.instance.client
-            .from('platform_whatsapp_accounts')
-            .update({'service_status': 'RESTART_REQUESTED'})
-            .eq('account_index', accountIndex);
-        ok = true;
-      } catch (e) {
-        debugPrint('[WhatsApp] Erè restartAccount via Supabase: $e');
-      }
+    if (httpAttemptedAndRejected) return false;
+
+    try {
+      await Supabase.instance.client
+          .from('platform_whatsapp_accounts')
+          .update({'service_status': 'RESTART_REQUESTED'})
+          .eq('account_index', accountIndex);
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè restartAccount via Supabase: $e');
+      return false;
     }
-    return ok;
   }
 
   /// Efase sesyon yon liy (Wipe) pou eskane yon lòt nimewo
   Future<bool> resetAccountSession(int accountIndex) async {
-    bool ok = false;
+    bool httpAttemptedAndRejected = false;
     try {
-      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/reset');
-      final res = await http.post(uri).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200) ok = true;
+      final uri = Uri.parse('$effectiveBaseUrl/api/accounts/$accountIndex/reset');
+      final res = await http.post(uri).timeout(const Duration(seconds: 18));
+      if (res.statusCode == 200) return true;
+      if (res.statusCode == 409 || res.statusCode == 404) {
+        httpAttemptedAndRejected = true;
+      }
     } catch (_) {}
 
-    if (!ok) {
-      try {
-        await Supabase.instance.client
-            .from('platform_whatsapp_accounts')
-            .update({'service_status': 'RESET_REQUESTED'})
-            .eq('account_index', accountIndex);
-        ok = true;
-      } catch (e) {
-        debugPrint('[WhatsApp] Erè resetAccountSession via Supabase: $e');
-      }
+    if (httpAttemptedAndRejected) return false;
+
+    try {
+      await Supabase.instance.client
+          .from('platform_whatsapp_accounts')
+          .update({'service_status': 'RESET_REQUESTED'})
+          .eq('account_index', accountIndex);
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè resetAccountSession via Supabase: $e');
+      return false;
     }
-    return ok;
   }
 
   /// Debloke manyèlman yon liy ki te an restriksyon 24h
@@ -863,8 +907,8 @@ class WhatsAppClient {
         params: {'p_account_index': accountIndex},
       );
       try {
-        final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/unrestrict');
-        await http.post(uri).timeout(const Duration(seconds: 5));
+        final uri = Uri.parse('$effectiveBaseUrl/api/accounts/$accountIndex/unrestrict');
+        await http.post(uri).timeout(const Duration(seconds: 10));
       } catch (_) {}
       return true;
     } catch (e) {
@@ -995,14 +1039,14 @@ class WhatsAppClient {
         throw Exception(row['error_message']?.toString() ?? 'Erreur serveur WhatsApp');
       }
     }
-    throw TimeoutException('Le service WhatsApp local n\'a pas répondu à temps.');
+    throw TimeoutException('Le service WhatsApp Cloud n\'a pas répondu à temps.');
   }
 
-  /// Liste des conversations pour "Agrandir WhatsApp" (Local ou Bridge Web)
+  /// Liste des conversations pour "Agrandir WhatsApp" (Cloud HTTP ou Bridge Web)
   Future<List<WhatsAppChatSummary>> fetchAccountChats(int accountIndex, {int limit = 35}) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/chats?limit=$limit');
-      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      final uri = Uri.parse('$effectiveBaseUrl/api/accounts/$accountIndex/chats?limit=$limit');
+      final response = await http.get(uri).timeout(const Duration(seconds: 12));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['ok'] == true && data['chats'] is List) {
@@ -1024,7 +1068,7 @@ class WhatsAppClient {
         .toList();
   }
 
-  /// Messages d'un chat pour "Agrandir WhatsApp" (Local ou Bridge Web)
+  /// Messages d'un chat pour "Agrandir WhatsApp" (Cloud HTTP ou Bridge Web)
   Future<List<WhatsAppChatMessage>> fetchChatMessages(
     int accountIndex,
     String chatId, {
@@ -1032,8 +1076,8 @@ class WhatsAppClient {
   }) async {
     try {
       final encoded = Uri.encodeComponent(chatId);
-      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/chats/$encoded/messages?limit=$limit');
-      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      final uri = Uri.parse('$effectiveBaseUrl/api/accounts/$accountIndex/chats/$encoded/messages?limit=$limit');
+      final response = await http.get(uri).timeout(const Duration(seconds: 12));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['ok'] == true && data['messages'] is List) {
@@ -1062,12 +1106,12 @@ class WhatsAppClient {
     String message,
   ) async {
     try {
-      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/chats/send');
+      final uri = Uri.parse('$effectiveBaseUrl/api/accounts/$accountIndex/chats/send');
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'chatId': chatId, 'message': message.trim()}),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (data['ok'] == true && data['message'] is Map) {

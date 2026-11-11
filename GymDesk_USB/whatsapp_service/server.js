@@ -645,24 +645,31 @@ class WhatsAppAccountInstance {
 
       // 3. Voye mesaj la
       let res;
+      let finalContent = content;
+      let finalOptions = { ...options };
       try {
-        const finalContent = typeof content === 'string' ? applySpintaxAndHashShield(content) : content;
-      const finalOptions = { ...options };
-      if (finalOptions.caption && typeof finalOptions.caption === 'string') {
-        finalOptions.caption = applySpintaxAndHashShield(finalOptions.caption);
-      }
-      res = await this.client.sendMessage(chatId, finalContent, finalOptions);
+        finalContent = typeof content === 'string' ? applySpintaxAndHashShield(content) : content;
+        if (finalOptions.caption && typeof finalOptions.caption === 'string') {
+          finalOptions.caption = applySpintaxAndHashShield(finalOptions.caption);
+        }
+        res = await this.client.sendMessage(chatId, finalContent, finalOptions);
       } catch (sendErr) {
         const errMsg = String(sendErr && sendErr.message ? sendErr.message : sendErr);
-        if (errMsg.includes('getChat') || errMsg.includes('WWebJS')) {
+        if (errMsg.includes('getChat') || errMsg.includes('WWebJS') || errMsg.includes('Cannot read properties of undefined')) {
           console.warn(`[Liy ${this.accountIndex}] Erè getChat detekte, re-injeksyon kòd epi re-eseye...`);
           try {
             await this.ensureInjected();
-            res = await this.client.sendMessage(chatId, content, options);
+            res = await this.client.sendMessage(chatId, finalContent, finalOptions);
           } catch (retryErr) {
             throw retryErr;
           }
-        } else if (errMsg.includes('evaluate') || errMsg.includes('Target closed') || errMsg.includes('Session closed')) {
+        } else if (
+          errMsg.includes('detached Frame') ||
+          errMsg.includes('Attempted to use') ||
+          errMsg.includes('evaluate') ||
+          errMsg.includes('Target closed') ||
+          errMsg.includes('Session closed')
+        ) {
           console.warn(`[Liy ${this.accountIndex}] Navigatè a te kraze: ${errMsg}. N ap relanse l...`);
           this.status = 'DISCONNECTED';
           this.sendHeartbeat();
@@ -994,6 +1001,28 @@ class AccountCluster {
 
       if (!item || !assignedAccount) {
         // Okenn mesaj oswa okenn liy pa nan entèval tan pou voye kounye a
+        return;
+      }
+
+      // Sekirite Anti-Bann: Pa janm voye mesaj J-0 oswa Abonnement Expiré otomatik
+      const rawKind = String(item.kind || '').toLowerCase();
+      if (
+        rawKind !== 'test' &&
+        (['reminder_0d', 'reminder_expired', 'reminder_due'].includes(rawKind) ||
+          /Abonnement Expir[ée]|Dernier Jour|Ab[òo]nman Ekspire|D[èe]nye Jou/i.test(String(item.message || '')))
+      ) {
+        await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            status: 'cancelled',
+            error_message: 'Bloqué automatiquement par Anti-Ban (J-0 / Expiré désactivé)',
+          }),
+        }).catch(() => {});
         return;
       }
 
