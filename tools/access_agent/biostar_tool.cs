@@ -41,6 +41,8 @@ static class Native
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_GetAllDoor(IntPtr context, uint deviceId, out IntPtr doorObj, out uint numDoor);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern int BS2_SetDoor(IntPtr context, uint deviceId, IntPtr doors, uint doorCount);
+    [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_UnlockDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount);
     [DllImport("BS_SDK_V2.dll", CallingConvention = CallingConvention.Cdecl)]
     public static extern int BS2_LockDoor(IntPtr context, uint deviceId, byte flag, IntPtr doorIds, uint doorIdCount);
@@ -326,12 +328,12 @@ static class Program
                 : Native.BS2_UnlockDoor(ctx, id, DoorFlagOperator, doorIds, 1);
             // SOU TÈMINAL SAN KAPTEUR PÒT (sensorDevice=0), timed unlock la PA
             // ekspire: unlockFlags rete 0x04 epi relè a rete louvri san fen.
-            // Nou tann dire a epi nou retire flag operatè a pou relè a tounen
-            // nan eta "locked". 20s max pou ajan an pa touye pwosesis la (timeout 25s).
+            // Nou tann dire a, nou retire flag operatè a epi nou verifye relè a
+            // fèmen vre via GetAllDoorStatus.
             if (rc >= 0 && seconds > 0)
             {
                 System.Threading.Thread.Sleep((int)Math.Min(seconds, 20) * 1000);
-                Native.BS2_ReleaseDoor(ctx, id, DoorFlagOperator, doorIds, 1);
+                ForceRelockDoor(id, doorIds);
             }
         }
         finally { Marshal.FreeHGlobal(doorIds); }
@@ -363,9 +365,15 @@ static class Program
         try
         {
             Marshal.WriteInt32(doorIds, 0, firstDoorId);
-            rc = lockOnly
-                ? Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1)
-                : Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+            if (lockOnly)
+            {
+                rc = Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1);
+            }
+            else
+            {
+                rc = Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+                ForceRelockDoor(id, doorIds);
+            }
         }
         finally { Marshal.FreeHGlobal(doorIds); }
         if (doorObj != IntPtr.Zero) Native.BS2_ReleaseObject(doorObj);
@@ -848,6 +856,7 @@ static class Program
             Console.Out.Flush();
             Console.WriteLine("standalone\t" + EnsureStandalone(id).Replace('\t', ' '));
             Console.WriteLine("fpconfig\t" + EnsureFingerConfig(id).Replace('\t', ' '));
+            Console.WriteLine("doorcfg\t" + EnsureDoorConfig(id, true).Replace('\t', ' '));
             Console.Out.Flush();
             Console.Error.WriteLine("[watch] Siveyan aktive pandan " + seconds + "s — eskane dwèt la sou W2 a kounye a...");
             var lastBeat = DateTime.UtcNow;
@@ -907,14 +916,14 @@ static class Program
             return exitCode;
         }
 
-        // Mòd pèmanan (seconds == 0): deteksyon dekoneksyon ak rekoneksyon vitès limyè (< 300ms)
+        // Mòd pèmanan (seconds == 0): deteksyon dekoneksyon ak rekoneksyon vitès limyè (< 250ms)
         bool disconnectedPrinted = false;
         int reinitTries = 0;
         var lastNeedSearch = DateTime.UtcNow;
         while (true)
         {
             // Tann jiskaske IP W2 a reponn ping nan < 60ms anvan apèl Connect (evite bloke SDK 5-8s)
-            if (!FastPing(ip, 120))
+            if (!FastPing(ip, 70))
             {
                 if (!disconnectedPrinted)
                 {
@@ -925,17 +934,17 @@ static class Program
                 lastNeedSearch = DateTime.UtcNow;
                 while (true)
                 {
-                    Thread.Sleep(60);
+                    Thread.Sleep(35);
                     if (netChanged)
                     {
                         netChanged = false;
-                        if (FastPing(ip, 120)) break;
+                        if (FastPing(ip, 70)) break;
                     }
-                    else if (FastPing(ip, 80))
+                    else if (FastPing(ip, 60))
                     {
                         break;
                     }
-                    if ((DateTime.UtcNow - lastNeedSearch).TotalSeconds >= 15)
+                    if ((DateTime.UtcNow - lastNeedSearch).TotalSeconds >= 10)
                     {
                         lastNeedSearch = DateTime.UtcNow;
                         Console.WriteLine("need_search\t" + ip);
@@ -961,7 +970,7 @@ static class Program
                     Console.Out.Flush();
                     disconnectedPrinted = true;
                 }
-                Thread.Sleep(180);
+                Thread.Sleep(60);
                 continue;
             }
             reinitTries = 0;
@@ -976,7 +985,7 @@ static class Program
                     Console.Out.Flush();
                     disconnectedPrinted = true;
                 }
-                Thread.Sleep(180);
+                Thread.Sleep(60);
                 continue;
             }
 
@@ -992,8 +1001,9 @@ static class Program
             Console.WriteLine("watching\t" + id + "\tdoor=" + doorId);
             Console.WriteLine("standalone\t" + EnsureStandalone(id).Replace('\t', ' '));
             Console.WriteLine("fpconfig\t" + EnsureFingerConfig(id).Replace('\t', ' '));
+            Console.WriteLine("doorcfg\t" + EnsureDoorConfig(id, true).Replace('\t', ' '));
             Console.Out.Flush();
-            Console.Error.WriteLine("[watch] Siveyan pèmanan aktive sou " + ip + " (rekoneksyon enstantane pare)...");
+            Console.Error.WriteLine("[watch] Siveyan pèmanan aktive sou " + ip + " (rekoneksyon enstantane + auto-lock pare)...");
 
             var lastPingCheck = DateTime.UtcNow;
             var lastBeat = DateTime.UtcNow;
@@ -1002,7 +1012,7 @@ static class Program
 
             while (true)
             {
-                Thread.Sleep(40);
+                Thread.Sleep(30);
                 if (cmdDir != null && System.IO.Directory.Exists(cmdDir))
                 {
                     foreach (var file in System.IO.Directory.GetFiles(cmdDir, "*.cmd"))
@@ -1025,21 +1035,21 @@ static class Program
                     {
                         try
                         {
-                            string fix = EnsureStandalone(id) + " | " + EnsureFingerConfig(id);
+                            string fix = EnsureStandalone(id) + " | " + EnsureFingerConfig(id) + " | " + EnsureDoorConfig(id, false);
                             if (fix.Contains("fixed")) { Console.WriteLine("standalone\t" + fix.Replace('\t', ' ')); Console.Out.Flush(); }
                         }
                         finally { Monitor.Exit(cmdLock); }
                     }
                 }
 
-                // Deteksyon koupe kab / tèminal an < 300ms (oswa enstantane sou evenman rezo Windows)
-                bool doPing = netChanged || (DateTime.UtcNow - lastPingCheck).TotalMilliseconds >= 200;
+                // Deteksyon koupe kab / tèminal an < 250ms (oswa enstantane sou evenman rezo Windows)
+                bool doPing = netChanged || (DateTime.UtcNow - lastPingCheck).TotalMilliseconds >= 120;
                 bool wasNetEvent = netChanged;
                 if (doPing)
                 {
                     netChanged = false;
                     lastPingCheck = DateTime.UtcNow;
-                    if (FastPing(ip, 120))
+                    if (FastPing(ip, 65))
                     {
                         pingFails = 0;
                         if (wasNetEvent && Monitor.TryEnter(cmdLock, 0))
@@ -1069,8 +1079,8 @@ static class Program
                     }
                 }
 
-                // Verifikasyon SDK chak 4 segonn
-                if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 4)
+                // Verifikasyon SDK chak 3 segonn
+                if ((DateTime.UtcNow - lastBeat).TotalSeconds >= 3)
                 {
                     lastBeat = DateTime.UtcNow;
                     if (Monitor.TryEnter(cmdLock, 0))
@@ -1110,6 +1120,119 @@ static class Program
     }
 
     static readonly object cmdLock = new object();
+    static int doorPulseGen = 0;
+
+    // Fòse relè pòt la tounen fèmen nèt apre yon pulse oswa lè yon flag kole.
+    // Pa janm kite lockFlags=0x04 aktive (sa ta bloke tout anprent apre sa!).
+    static void ForceRelockDoor(uint id, IntPtr doorIds)
+    {
+        Native.BS2_ReleaseDoor(ctx, id, 0x04, doorIds, 1);
+        IntPtr statusObj = IntPtr.Zero;
+        uint numStatus = 0;
+        if (Native.BS2_GetAllDoorStatus(ctx, id, out statusObj, out numStatus) >= 0 && numStatus > 0)
+        {
+            byte unlocked = Marshal.ReadByte(statusObj, 5);
+            byte uFlags = Marshal.ReadByte(statusObj, 7);
+            Native.BS2_ReleaseObject(statusObj);
+            if (unlocked != 0 || uFlags != 0)
+            {
+                Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+                IntPtr st2 = IntPtr.Zero; uint n2 = 0;
+                if (Native.BS2_GetAllDoorStatus(ctx, id, out st2, out n2) >= 0 && n2 > 0)
+                {
+                    byte unl2 = Marshal.ReadByte(st2, 5);
+                    Native.BS2_ReleaseObject(st2);
+                    if (unl2 != 0)
+                    {
+                        Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1);
+                        Thread.Sleep(40);
+                        Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+                    }
+                }
+            }
+        }
+    }
+
+    // Garanti konfigirasyon pòt la gen autoLockTimeout > 0 ak unconditionalLock = 1
+    // (obligatwa pou W2 a fèmen relè a otomatikman menm si pa gen kapteur pòt branche)
+    // epi netwaye nenpòt unlockFlags ki te kole nan konfigirasyon oswa eta aktif la.
+    static string EnsureDoorConfig(uint id, bool releaseIfStuck)
+    {
+        IntPtr doorObj = IntPtr.Zero;
+        uint numDoor = 0;
+        var rc = Native.BS2_GetAllDoor(ctx, id, out doorObj, out numDoor);
+        if (rc < 0 || numDoor == 0 || doorObj == IntPtr.Zero)
+        {
+            if (doorObj != IntPtr.Zero) Native.BS2_ReleaseObject(doorObj);
+            return "ok\tdoorcfg\tno_door(" + rc + ")";
+        }
+        int firstDoorId = Marshal.ReadInt32(doorObj, 0);
+        bool changedCfg = false;
+        int autoLock = Marshal.ReadInt32(doorObj, 180);
+        byte uFlags = Marshal.ReadByte(doorObj, 189);
+        byte lFlags = Marshal.ReadByte(doorObj, 190);
+        byte uncond = Marshal.ReadByte(doorObj, 191);
+        string before = "autoLock=" + autoLock + ",uncond=" + uncond + ",uFlags=0x" + uFlags.ToString("X2") + ",lFlags=0x" + lFlags.ToString("X2");
+
+        if (autoLock <= 0 || autoLock > 20)
+        {
+            Marshal.WriteInt32(doorObj, 180, 3);
+            changedCfg = true;
+        }
+        if (uncond == 0)
+        {
+            Marshal.WriteByte(doorObj, 191, 1);
+            changedCfg = true;
+        }
+        if (uFlags != 0)
+        {
+            Marshal.WriteByte(doorObj, 189, 0);
+            changedCfg = true;
+        }
+        if (lFlags != 0)
+        {
+            Marshal.WriteByte(doorObj, 190, 0);
+            changedCfg = true;
+        }
+
+        int setRc = 0;
+        if (changedCfg)
+        {
+            setRc = Native.BS2_SetDoor(ctx, id, doorObj, numDoor);
+        }
+        Native.BS2_ReleaseObject(doorObj);
+
+        bool releasedStuck = false;
+        if (releaseIfStuck && firstDoorId != 0)
+        {
+            IntPtr statusObj = IntPtr.Zero; uint numStatus = 0;
+            if (Native.BS2_GetAllDoorStatus(ctx, id, out statusObj, out numStatus) >= 0 && numStatus > 0)
+            {
+                byte unlocked = Marshal.ReadByte(statusObj, 5);
+                byte activeUFlags = Marshal.ReadByte(statusObj, 7);
+                Native.BS2_ReleaseObject(statusObj);
+                if (unlocked != 0 || activeUFlags != 0)
+                {
+                    var doorIds = Marshal.AllocHGlobal(4);
+                    try
+                    {
+                        Marshal.WriteInt32(doorIds, 0, firstDoorId);
+                        ForceRelockDoor(id, doorIds);
+                        releasedStuck = true;
+                    }
+                    finally { Marshal.FreeHGlobal(doorIds); }
+                }
+            }
+        }
+
+        if (changedCfg && setRc >= 0)
+            return "ok\tfixed\tdoorcfg(" + before + "->autoLock=" + (autoLock <= 0 || autoLock > 20 ? 3 : autoLock) + ",uncond=1)" + (releasedStuck ? "+relocked" : "");
+        if (changedCfg && setRc < 0)
+            return "err\tsetdoor\tSetDoor:" + setRc;
+        if (releasedStuck)
+            return "ok\tfixed\trelocked_stuck";
+        return "ok\tdoorcfg\t" + before;
+    }
 
     static void RunDoorCommand(uint id, int doorId, string cmd, string resFile, string ip, ushort port)
     {
@@ -1194,19 +1317,37 @@ static class Program
                     uint seconds = 3;
                     if (parts.Length > 1) uint.TryParse(parts[1], out seconds);
                     seconds = Math.Max(1u, Math.Min(seconds, 20u));
+                    int gen = Interlocked.Increment(ref doorPulseGen);
                     lock (cmdLock) { rc = Native.BS2_TimedUnlockDoor(ctx, id, 0x04, doorIds, 1, seconds); }
                     if (rc >= 0)
                     {
-                        // Menm koreksyon ak Pulse(): san kapteur pòt, timed unlock
-                        // la pa ekspire — nou retire flag operatè a apre dire a.
                         System.IO.File.WriteAllText(resFile, "ok\t1");
                         System.Threading.Thread.Sleep((int)seconds * 1000);
-                        lock (cmdLock) { Native.BS2_ReleaseDoor(ctx, id, 0x04, doorIds, 1); }
+                        if (Volatile.Read(ref doorPulseGen) == gen)
+                        {
+                            lock (cmdLock) { ForceRelockDoor(id, doorIds); }
+                        }
                         return;
                     }
                 }
-                else if (parts[0] == "lock") { lock (cmdLock) { rc = Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1); } }
-                else { lock (cmdLock) { rc = Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1); } }
+                else if (parts[0] == "lock")
+                {
+                    Interlocked.Increment(ref doorPulseGen);
+                    lock (cmdLock)
+                    {
+                        rc = Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+                        if (rc >= 0) rc = Native.BS2_LockDoor(ctx, id, 0x04, doorIds, 1);
+                    }
+                }
+                else
+                {
+                    Interlocked.Increment(ref doorPulseGen);
+                    lock (cmdLock)
+                    {
+                        rc = Native.BS2_ReleaseDoor(ctx, id, 0xFF, doorIds, 1);
+                        ForceRelockDoor(id, doorIds);
+                    }
+                }
                 result = rc >= 0 ? "ok\t1" : "err\tdoor\t" + parts[0] + ": " + rc;
             }
             finally { Marshal.FreeHGlobal(doorIds); }
@@ -1524,9 +1665,11 @@ static class Program
         if (rc < 0) { Console.WriteLine("err\tunreachable\t" + ip + ":" + port + " pa reponn (code " + rc + ")"); return rc; }
         var a = EnsureFingerConfig(id);
         var b = EnsureStandalone(id);
+        var c = EnsureDoorConfig(id, true);
         Native.BS2_DisconnectDevice(ctx, id);
         Console.WriteLine(a);
         Console.WriteLine(b);
+        Console.WriteLine(c);
         return a.StartsWith("ok\t") && b.StartsWith("ok\t") ? 0 : -1;
     }
 

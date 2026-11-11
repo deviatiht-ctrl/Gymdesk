@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../app/runtime.dart';
 import '../../features/subscriptions/domain/subscription_rules.dart';
 import '../../l10n/app_strings.dart';
+import '../widgets/person_avatar.dart';
 import 'access_monitor.dart';
 import 'terminal_access_service.dart';
 
@@ -18,6 +19,7 @@ class AccessEventNotification {
     required this.message,
     this.memberName,
     this.memberId,
+    this.personId,
     this.planName,
     this.endDate,
     this.daysLeft,
@@ -32,6 +34,7 @@ class AccessEventNotification {
   final String message;
   final String? memberName;
   final String? memberId;
+  final String? personId;
   final String? planName;
   final String? endDate;
   final int? daysLeft;
@@ -135,6 +138,7 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
     final s = AppStrings.of(context);
     final isEmployee = snapshot['is_employee'] == true;
     final memberName = snapshot['name']?.toString() ?? s.text('member');
+    final personId = row['member_id']?.toString() ?? snapshot['id']?.toString() ?? snapshot['member_id']?.toString();
     final memberId = isEmployee ? null : row['member_id']?.toString() ?? snapshot['member_id']?.toString();
     final planName = snapshot['plan_name']?.toString();
     final endRaw = DateTime.tryParse(snapshot['end_date']?.toString() ?? '');
@@ -172,6 +176,7 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
       message: message,
       memberName: memberName,
       memberId: memberId,
+      personId: personId,
       planName: planName,
       endDate: endDate,
       daysLeft: daysLeft,
@@ -229,16 +234,23 @@ class AccessPopupOverlayState extends State<AccessPopupOverlay> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 26,
+                        PersonAvatar(
+                          size: 54,
+                          personId: event.personId ?? event.memberId,
+                          photoUrl: event.photoUrl,
+                          name: event.memberName,
+                          db: widget.runtime.database,
+                          client: widget.runtime.client,
                           backgroundColor: event.isGranted
                               ? const Color(0xFF047857)
                               : const Color(0xFF991B1B),
-                          child: Icon(
-                            event.isGranted ? LucideIcons.checkCheck : LucideIcons.shieldAlert,
-                            color: Colors.white,
-                            size: 28,
-                          ),
+                          borderColor: event.isGranted
+                              ? const Color(0xFF34D399)
+                              : const Color(0xFFFCA5A5),
+                          borderWidth: 2,
+                          fallbackIcon: event.isGranted ? LucideIcons.checkCheck : LucideIcons.shieldAlert,
+                          fallbackColor: Colors.white,
+                          iconSize: 26,
                         ),
                         const SizedBox(width: 14),
                         Expanded(

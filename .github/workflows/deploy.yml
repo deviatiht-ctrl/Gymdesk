@@ -29,7 +29,13 @@ jobs:
         run: flutter pub get
 
       - name: Build Web Release
-        run: flutter build web --release
+        run: |
+          VER="$(date -u +%Y%m%d_%H%M%S)"
+          printf '{"version":"%s"}\n' "$VER" > web/version.json
+          sed -i "s/var BUILD_VERSION = \"[^\"]*\";/var BUILD_VERSION = \"${VER}\";/" web/index.html
+          flutter build web --release
+          printf '{"version":"%s"}\n' "$VER" > build/web/version.json
+          sed -i "s/var BUILD_VERSION = \"[^\"]*\";/var BUILD_VERSION = \"${VER}\";/" build/web/index.html
 
       - name: Upload Web Build Artifact
         uses: actions/upload-artifact@v4

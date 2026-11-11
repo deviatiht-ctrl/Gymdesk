@@ -7,11 +7,12 @@ import 'dart:io';
 /// Les décisions d'accès arrivent instantanément depuis la fenêtre principale via
 /// un flux SSE local (127.0.0.1:47812), sans attendre Supabase.
 class DisplayBridgePlatform {
-  static const _port = 47812;
+  static const _port = 47813;
   String? _launchRoute;
 
   bool get launchedAsDisplay => _launchRoute != null;
   String? get launchRoute => _launchRoute;
+  String? displayUrlFor(String route) => null;
 
   void setLaunchArgs(List<String> args) {
     for (final a in args) {

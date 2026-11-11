@@ -136,7 +136,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
   }
 
   Future<void> _access(StaffProfile person) async {
-    if (_busy || !{'supervisor', 'reception'}.contains(person.role)) return;
+    if (_busy || !{'supervisor', 'manager', 'reception'}.contains(person.role)) return;
     final s = AppStrings.of(context);
     var role = person.role;
     var jobTitle = person.jobTitle;
@@ -486,7 +486,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
                   final person = snapshot.data![index];
                   final isSelf = person.id == session.staffId;
                   final manageable =
-                      {'supervisor', 'reception'}.contains(person.role) && !isSelf;
+                      {'supervisor', 'manager', 'reception'}.contains(person.role) && !isSelf;
                   return ListTile(
                     contentPadding: const EdgeInsets.symmetric(vertical: 8),
                     title: Wrap(

@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../app/providers.dart';
 import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/widgets/async_panel.dart';
+import '../../../core/widgets/person_avatar.dart';
 import '../../../l10n/app_strings.dart';
 import '../../members/data/member_photo_codec.dart';
 import '../../members/presentation/fingerprint_enrollment_dialog.dart';
@@ -326,30 +327,20 @@ class _EmployeeCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Photo or Job Icon Avatar
-              FutureBuilder<Uint8List?>(
-                future: repository.localPhoto(employee.id),
-                builder: (context, snap) {
-                  final photo = snap.data;
-                  final hasRemote = photo == null &&
-                      employee.photoUrl != null &&
-                      employee.photoUrl!.isNotEmpty &&
-                      (employee.photoUrl!.startsWith('http://') || employee.photoUrl!.startsWith('https://'));
-                  return Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: color.withAlpha(25),
-                      border: Border.all(color: color.withAlpha(80), width: 2),
-                      image: photo != null
-                          ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
-                          : (hasRemote ? DecorationImage(image: NetworkImage(employee.photoUrl!), fit: BoxFit.cover) : null),
-                    ),
-                    child: (photo == null && !hasRemote)
-                        ? Center(child: Icon(_jobIcons[employee.jobType] ?? LucideIcons.user, color: color, size: 24))
-                        : null,
-                  );
-                },
+              PersonAvatar(
+                size: 52,
+                personId: employee.id,
+                photoUrl: employee.photoUrl,
+                name: employee.fullName,
+                db: repository.db,
+                client: repository.client,
+                backgroundColor: color.withAlpha(25),
+                borderColor: color.withAlpha(80),
+                borderWidth: 2,
+                fallbackIcon: _jobIcons[employee.jobType] ?? LucideIcons.user,
+                fallbackColor: color,
+                iconSize: 24,
+                preferIconFallback: true,
               ),
               const SizedBox(width: 14),
               // Name, Employee Number & Job Title
@@ -554,7 +545,7 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
   Future<void> _loadExistingPhoto() async {
     setState(() => _loadingExistingPhoto = true);
     try {
-      final bytes = await widget.repository.localPhoto(widget.existing!.id);
+      final bytes = await widget.repository.photoBytes(widget.existing!);
       if (mounted) {
         setState(() {
           _photoBytes = bytes;
@@ -654,25 +645,33 @@ class _EmployeeFormDialogState extends State<_EmployeeFormDialog> {
                       children: [
                         GestureDetector(
                           onTap: _pickPhoto,
-                          child: Container(
-                            width: 90,
-                            height: 90,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: color.withAlpha(20),
-                              border: Border.all(color: color, width: 2.5),
-                              image: _photoBytes != null
-                                  ? DecorationImage(image: MemoryImage(_photoBytes!), fit: BoxFit.cover)
-                                  : (widget.existing?.photoUrl != null && !_photoCleared
-                                      ? DecorationImage(image: NetworkImage(widget.existing!.photoUrl!), fit: BoxFit.cover)
-                                      : null),
-                            ),
-                            child: _loadingExistingPhoto
-                                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                                : (_photoBytes == null && (widget.existing?.photoUrl == null || _photoCleared)
-                                    ? Center(child: Icon(LucideIcons.camera, size: 34, color: color))
-                                    : null),
-                          ),
+                          child: _loadingExistingPhoto
+                              ? Container(
+                                  width: 90,
+                                  height: 90,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: color.withAlpha(20),
+                                    border: Border.all(color: color, width: 2.5),
+                                  ),
+                                  child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                                )
+                              : PersonAvatar(
+                                  size: 90,
+                                  personId: _photoCleared ? null : widget.existing?.id,
+                                  photoUrl: _photoCleared ? null : widget.existing?.photoUrl,
+                                  name: '${_first.text} ${_last.text}'.trim(),
+                                  db: widget.repository.db,
+                                  client: widget.repository.client,
+                                  initialBytes: _photoBytes,
+                                  backgroundColor: color.withAlpha(20),
+                                  borderColor: color,
+                                  borderWidth: 2.5,
+                                  fallbackIcon: LucideIcons.camera,
+                                  fallbackColor: color,
+                                  iconSize: 34,
+                                  preferIconFallback: true,
+                                ),
                         ),
                         Positioned(
                           bottom: 0,
@@ -899,37 +898,27 @@ class _EmployeeProfileDialog extends StatelessWidget {
               ),
               child: Column(
                 children: [
-                  FutureBuilder<Uint8List?>(
-                    future: repository.localPhoto(employee.id),
-                    builder: (context, snap) {
-                      final photo = snap.data;
-                      final hasRemote = photo == null &&
-                          employee.photoUrl != null &&
-                          employee.photoUrl!.isNotEmpty &&
-                          (employee.photoUrl!.startsWith('http://') || employee.photoUrl!.startsWith('https://'));
-                      return Container(
-                        width: 96,
-                        height: 96,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.white,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 16,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                          image: photo != null
-                              ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
-                              : (hasRemote ? DecorationImage(image: NetworkImage(employee.photoUrl!), fit: BoxFit.cover) : null),
-                        ),
-                        child: (photo == null && !hasRemote)
-                            ? Center(child: Icon(_jobIcons[employee.jobType] ?? LucideIcons.user, size: 48, color: color))
-                            : null,
-                      );
-                    },
+                  PersonAvatar(
+                    size: 96,
+                    personId: employee.id,
+                    photoUrl: employee.photoUrl,
+                    name: employee.fullName,
+                    db: repository.db,
+                    client: repository.client,
+                    backgroundColor: Colors.white,
+                    borderColor: Colors.white,
+                    borderWidth: 3,
+                    shadows: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                    fallbackIcon: _jobIcons[employee.jobType] ?? LucideIcons.user,
+                    fallbackColor: color,
+                    iconSize: 48,
+                    preferIconFallback: true,
                   ),
                   const SizedBox(height: 14),
                   Text(

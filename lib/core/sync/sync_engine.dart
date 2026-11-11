@@ -185,25 +185,61 @@ class SyncEngine {
       if (full) {
         await db.purgeSyncedRecords();
       }
+      const coreEntities = {
+        SyncEntity.staff,
+        SyncEntity.members,
+        SyncEntity.plans,
+        SyncEntity.subscriptions,
+        SyncEntity.payments,
+        SyncEntity.attendance,
+      };
       final entities = SyncEntity.values
           .where(
             (e) =>
                 e != SyncEntity.gyms &&
-                (e != SyncEntity.auditLog || fresh.role == 'owner') &&
+                (e != SyncEntity.auditLog || fresh.canManageGym) &&
                 (e != SyncEntity.paymentDeclarations || fresh.isOwner) &&
                 (e != SyncEntity.platformInvoices || fresh.isOwner),
           )
-          .toList();
+          .toList()
+        ..sort((a, b) {
+          final ac = coreEntities.contains(a) ? 0 : 1;
+          final bc = coreEntities.contains(b) ? 0 : 1;
+          return ac.compareTo(bc);
+        });
       for (var i = 0; i < entities.length && !_closed; i++) {
         final entity = entities[i];
+        final isCore = coreEntities.contains(entity);
         final paymentSnapshot =
             entity == SyncEntity.payments && fresh.role == 'reception';
         if (paymentSnapshot) await db.purgeSyncedPayments();
         try {
           await _pull(entity, serverTime, full: reconcile || paymentSnapshot);
         } on SyncRejected catch (e) {
-          // Sèvè ki poko gen migrasyon 23 (anplwaye): pa bloke rès senkronizasyon an.
-          if (entity != SyncEntity.employees || e.code != 'invalid_record') rethrow;
+          final fatal = const {
+            'session_expired',
+            'access_changed',
+            'gym_suspended',
+          }.contains(e.code);
+          if (fatal) rethrow;
+          if (isCore) {
+            if (e.code == 'network') rethrow;
+            if (entity != SyncEntity.payments &&
+                entity != SyncEntity.attendance) {
+              rethrow;
+            }
+            pushError ??= e;
+          } else {
+            // Antite segondè (badges, employees, gymContracts, auditLog...) pa dwe
+            // janm bloke inisyalizasyon done prensipal pou kont pèsonèl yo.
+            if (e.code == 'network') pushError ??= e;
+          }
+        } catch (_) {
+          if (isCore &&
+              entity != SyncEntity.payments &&
+              entity != SyncEntity.attendance) {
+            rethrow;
+          }
         }
         _progress = (i + 1) / entities.length;
         _emit(SyncPhase.running);

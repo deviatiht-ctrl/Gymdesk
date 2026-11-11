@@ -204,7 +204,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
       await HapticFeedback.lightImpact();
       if (mounted) context.pop(true);
     } on StaffFailure catch (e) {
-      if ({'owner_exists', 'request_mismatch'}.contains(e.code)) {
+      if (e.code != 'network') {
         try {
           await _store.clear();
           _draft = null;
@@ -265,6 +265,18 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                             MessagePanel(
                               message:
                                   '${s.text('provision_resume')} ${_draft!['request_id']}',
+                              action: s.text('cancel'),
+                              onAction: _busy
+                                  ? null
+                                  : () async {
+                                      await _store.clear();
+                                      if (mounted) {
+                                        setState(() {
+                                          _draft = null;
+                                          _error = null;
+                                        });
+                                      }
+                                    },
                             ),
                           ],
                           const SizedBox(height: 24),
@@ -301,7 +313,15 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                               ),
                             ),
                           DropdownButtonFormField<String>(
-                            value: _jobTitle,
+                            initialValue: const {
+                              'caissier',
+                              'secretaire',
+                              'secretaire_caissiere',
+                              'superviseur',
+                              'personnalise',
+                            }.contains(_jobTitle)
+                                ? _jobTitle
+                                : 'personnalise',
                             decoration: InputDecoration(
                               labelText: s.text('staff_position'),
                               prefixIcon: const Icon(LucideIcons.briefcase),
@@ -314,6 +334,10 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                               DropdownMenuItem(
                                 value: 'secretaire',
                                 child: Text(s.text('job_title_secretary')),
+                              ),
+                              const DropdownMenuItem(
+                                value: 'secretaire_caissiere',
+                                child: Text('Secrétaire & Caissière'),
                               ),
                               DropdownMenuItem(
                                 value: 'superviseur',

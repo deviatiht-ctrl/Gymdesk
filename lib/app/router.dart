@@ -105,17 +105,23 @@ GoRouter createRouter(AppRuntime runtime) {
             path == '/tablet-access' ||
             path == '/door_access') &&
         gate != null) {
-      _deferredLocation = path;
+      final hasDisplayQuery = state.uri.queryParameters['display'] == '1' || runtime.displayOnly;
+      _deferredLocation = hasDisplayQuery && path != '/door_access' ? '$path?display=1' : path;
     }
-    if (gate == null && _deferredLocation != null && path != _deferredLocation) {
-      final target = _deferredLocation;
+    if (gate == null && _deferredLocation != null) {
+      final target = _deferredLocation!;
+      final targetUri = Uri.parse(target);
+      final sameTargetPath = path == targetUri.path;
+      final needsDisplayParam = targetUri.queryParameters['display'] == '1' &&
+          state.uri.queryParameters['display'] != '1';
       _deferredLocation = null;
-      if (runtime.session?.isPlatformAdmin != true) return target;
+      if ((!sameTargetPath || needsDisplayParam) && runtime.session?.isPlatformAdmin != true) {
+        return target;
+      }
     }
-    if (gate == null && path == _deferredLocation) _deferredLocation = null;
     // La fenêtre 2e écran (sans PIN) reste confinée à l'affichage d'accès.
     if (runtime.displayOnly && gate == null && path != '/access-display' && path != '/tablet-access') {
-      return displayRoute ?? '/access-display';
+      return displayRoute ?? '/access-display?display=1';
     }
     if ((path == '/access-display' || path == '/tablet-access') &&
         gate == null &&

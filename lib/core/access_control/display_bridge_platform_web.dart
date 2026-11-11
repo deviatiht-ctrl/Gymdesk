@@ -12,11 +12,23 @@ external JSBoolean? _openWindow(JSString url, JSString name);
 @JS('securgymCloseWindow')
 external void _closeWindow();
 
-/// Web : fenêtre navigateur séparée (window.open) + BroadcastChannel entre
-/// la fenêtre principale (qui reçoit les scans) et la fenêtre « 2e écran ».
+/// Web : fenêtre navigateur séparée (window.open) + BroadcastChannel/localStorage
+/// entre la fenêtre principale (qui reçoit les scans) et la fenêtre « 2e écran ».
 class DisplayBridgePlatform {
-  bool get launchedAsDisplay => Uri.base.queryParameters['display'] == '1';
-  String? get launchRoute => launchedAsDisplay ? Uri.base.path : null;
+  DisplayBridgePlatform()
+      : _launchedAsDisplay = Uri.base.queryParameters['display'] == '1',
+        _launchPath = Uri.base.path;
+
+  final bool _launchedAsDisplay;
+  final String _launchPath;
+
+  bool get launchedAsDisplay => _launchedAsDisplay;
+  String? get launchRoute {
+    if (!_launchedAsDisplay) return null;
+    final p = _launchPath == '/tablet-access' ? '/tablet-access' : '/access-display';
+    return '$p?display=1';
+  }
+
   void setLaunchArgs(List<String> args) {}
 
   bool _hostListening = false;
@@ -53,9 +65,14 @@ class DisplayBridgePlatform {
     } catch (_) {}
   }
 
+  String displayUrlFor(String route) {
+    final cleanRoute = route.startsWith('/') ? route : '/$route';
+    return Uri.base.replace(path: cleanRoute, queryParameters: {'display': '1'}, fragment: '').toString();
+  }
+
   Future<bool> openDisplayWindow(String route) async {
     try {
-      final url = Uri.base.replace(path: route, queryParameters: {'display': '1'}, fragment: '').toString();
+      final url = displayUrlFor(route);
       return _openWindow(url.toJS, 'securgym_access_display'.toJS)?.toDart ?? false;
     } catch (_) {
       return false;

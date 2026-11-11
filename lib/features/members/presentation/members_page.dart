@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/widgets/async_panel.dart';
+import '../../../core/widgets/person_avatar.dart';
 import '../../../l10n/app_strings.dart';
 import '../../subscriptions/domain/subscription_rules.dart';
 import '../data/members_repository.dart';
@@ -330,12 +331,17 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
                       onTap: () => context.go('/members/${member.id}'),
-                      leading: CircleAvatar(
-                        child: Text(
-                          member.firstName.isEmpty
-                              ? '?'
-                              : member.firstName.substring(0, 1).toUpperCase(),
-                        ),
+                      leading: PersonAvatar(
+                        size: 42,
+                        personId: member.id,
+                        photoUrl: member.photoUrl,
+                        name: member.fullName,
+                        db: _repository.db,
+                        client: _repository.client,
+                        backgroundColor: color.withAlpha(24),
+                        borderColor: color.withAlpha(110),
+                        borderWidth: 1.5,
+                        fallbackColor: color,
                       ),
                       title: Text(
                         member.fullName,

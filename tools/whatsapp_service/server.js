@@ -130,6 +130,34 @@ function killOrphanedBrowserForAccount(accountIndex) {
   } catch (_) {}
 }
 
+function cleanupAllOrphanSessionLocks() {
+  try {
+    if (!fs.existsSync(AUTH_DIR)) return;
+    const entries = fs.readdirSync(AUTH_DIR, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      if (ent.name.startsWith('session-account_')) {
+        const idxRaw = ent.name.replace('session-account_', '');
+        const idxNum = Number(idxRaw);
+        if (!Number.isNaN(idxNum)) {
+          killOrphanedBrowserForAccount(idxNum);
+        }
+        cleanSessionLockFiles(path.join(AUTH_DIR, ent.name));
+      }
+    }
+  } catch (_) {}
+}
+
+function normalizePdfBase64(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  let cleaned = raw.trim();
+  const marker = 'base64,';
+  const idx = cleaned.indexOf(marker);
+  if (idx !== -1) cleaned = cleaned.slice(idx + marker.length);
+  cleaned = cleaned.replace(/\s+/g, '');
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 function cleanEntireSessionDir(sessionDirPath) {
   try {
     if (fs.existsSync(sessionDirPath)) {
@@ -254,6 +282,7 @@ class WhatsAppAccountInstance {
   get isReady() {
     return (
       this.status === 'READY' &&
+      Boolean(this.phone) &&
       this.client !== null &&
       this.client.pupPage !== null &&
       this.client.pupPage !== undefined &&
@@ -452,18 +481,36 @@ class WhatsAppAccountInstance {
       });
 
       this.client.on('ready', async () => {
-        console.log(`[Liy ${this.accountIndex}] ✅ Kliyan WhatsApp pare nèt pou voye mesaj!`);
-        this.status = 'READY';
-        try { await this.ensureInjected(); } catch (_) {}
-        this.isInitializing = false;
-        this.lastError = null;
         try {
           if (this.client && this.client.info) {
             this.phone = this.client.info.wid ? this.client.info.wid.user : null;
             this.pushName = this.client.info.pushname || null;
-            console.log(`[Liy ${this.accountIndex}] Konekte kòm: ${this.pushName || 'Enkoni'} (${this.phone})`);
           }
         } catch (_) {}
+
+        if (!this.phone) {
+          console.warn(`[Liy ${this.accountIndex}] 'ready' resevwa men nimewo telefòn nan poko disponib. N ap tann...`);
+          setTimeout(async () => {
+            try {
+              if (this.client && this.client.info && this.client.info.wid) {
+                this.phone = this.client.info.wid.user;
+                this.pushName = this.client.info.pushname || null;
+                this.status = 'READY';
+                this.isInitializing = false;
+                this.lastError = null;
+                console.log(`[Liy ${this.accountIndex}] ✅ Konekte kòm: ${this.pushName || 'Enkoni'} (${this.phone})`);
+                this.sendHeartbeat();
+              }
+            } catch (_) {}
+          }, 2000);
+          return;
+        }
+
+        console.log(`[Liy ${this.accountIndex}] ✅ Kliyan WhatsApp pare nèt pou voye mesaj! Konekte kòm: ${this.pushName || 'Enkoni'} (${this.phone})`);
+        this.status = 'READY';
+        try { await this.ensureInjected(); } catch (_) {}
+        this.isInitializing = false;
+        this.lastError = null;
         this.sendHeartbeat();
       });
 
@@ -490,14 +537,6 @@ class WhatsAppAccountInstance {
       });
 
       await this.client.initialize();
-      if (this.client && this.client.pupPage) {
-        this.client.pupPage.on('framenavigated', async () => {
-          try {
-            const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
-            await this.client.pupPage.evaluate(LoadUtils);
-          } catch (_) {}
-        });
-      }
     } catch (err) {
       console.error(`[Liy ${this.accountIndex}] Erè inisyalizasyon:`, err.message);
       this.status = 'ERROR';
@@ -513,57 +552,52 @@ class WhatsAppAccountInstance {
       throw new Error(`Navigatè pou Liy ${this.accountIndex} pa pare.`);
     }
 
-
-      // Maske navigator.webdriver pou Meta pa detekte ke se yon bot
+    // Maske navigator.webdriver pou Meta pa detekte ke se yon bot
+    try {
       await this.client.pupPage.evaluate(() => {
         try {
           Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
           if (!window.chrome) window.chrome = { runtime: {} };
           Object.defineProperty(navigator, 'languages', { get: () => ['fr-FR', 'fr', 'en-US', 'en'] });
         } catch (_) {}
-      }).catch(() => {});
+      });
+    } catch (_) {}
 
-    let isReady = await this.client.pupPage.evaluate(() => {
-      return (
-        typeof window.WWebJS !== 'undefined' &&
-        typeof window.WWebJS.getChat === 'function' &&
-        typeof window.WWebJS.sendMessage === 'function'
-      );
-    }).catch(() => false);
+    let isReady = false;
+    try {
+      isReady = await this.client.pupPage.evaluate(() => {
+        return Boolean(
+          typeof window.WWebJS !== 'undefined' &&
+          typeof window.WWebJS.getChat === 'function' &&
+          typeof window.WWebJS.sendMessage === 'function'
+        );
+      });
+    } catch (_) {}
 
-    if (!isReady) {
-      console.log(`[Liy ${this.accountIndex}] 🔄 window.WWebJS pa pare nan paj la. Re-injeksyon LoadUtils...`);
+    if (isReady) return true;
+
+    console.log(`[Liy ${this.accountIndex}] 🔄 window.WWebJS pa pare nan paj la. Re-injeksyon LoadUtils...`);
+    try {
       const { LoadUtils } = require('whatsapp-web.js/src/util/Injected/Utils');
       const { ExposeAuthStore } = require('whatsapp-web.js/src/util/Injected/AuthStore/AuthStore');
-
-      try {
-        await this.client.pupPage.evaluate(ExposeAuthStore);
-      } catch (_) {}
-
-      try {
-        await this.client.pupPage.evaluate(LoadUtils);
-      } catch (e) {
-        console.warn(`[Liy ${this.accountIndex}] Erè evaluate LoadUtils:`, e.message);
-      }
-
-      for (let i = 0; i < 25; i++) {
-        isReady = await this.client.pupPage.evaluate(() => {
-          return (
-            typeof window.WWebJS !== 'undefined' &&
-            typeof window.WWebJS.getChat === 'function' &&
-            typeof window.WWebJS.sendMessage === 'function'
-          );
-        }).catch(() => false);
-        if (isReady) break;
-        await new Promise((r) => setTimeout(r, 200));
-      }
-
-      if (!isReady) {
-        throw new Error(`Kòd entèn WWebJS pa t ka chaje sou Liy ${this.accountIndex}`);
-      }
-      console.log(`[Liy ${this.accountIndex}] ✅ window.WWebJS reyinjekte avèk siksè.`);
+      await this.client.pupPage.evaluate(ExposeAuthStore).catch(() => {});
+      await this.client.pupPage.evaluate(LoadUtils).catch(() => {});
+      await new Promise((r) => setTimeout(r, 400));
+    } catch (e) {
+      console.warn(`[Liy ${this.accountIndex}] ensureInjected erè:`, e.message);
     }
-    return true;
+
+    try {
+      isReady = await this.client.pupPage.evaluate(() => {
+        return Boolean(
+          typeof window.WWebJS !== 'undefined' &&
+          typeof window.WWebJS.getChat === 'function' &&
+          typeof window.WWebJS.sendMessage === 'function'
+        );
+      });
+    } catch (_) {}
+
+    return isReady;
   }
 
   async destroy() {
@@ -689,6 +723,113 @@ class WhatsAppAccountInstance {
       this.isBusy = false;
     }
   }
+
+  _normalizeChatId(rawChatId) {
+    const s = String(rawChatId || '').trim();
+    if (!s) return null;
+    if (s.includes('@')) return s;
+    const digits = cleanPhoneNumber(s);
+    if (!digits || digits.length < 8) return null;
+    return `${digits}@c.us`;
+  }
+
+  async listChats(limit = 35) {
+    if (!this.isReady) {
+      throw new Error(`Liy ${this.accountIndex} pa konekte (pa READY).`);
+    }
+    await this.ensureInjected();
+    const chats = await this.client.getChats();
+    const sorted = (Array.isArray(chats) ? chats : [])
+      .slice()
+      .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+      .slice(0, Math.max(1, Math.min(Number(limit) || 35, 80)));
+
+    return sorted.map((c) => {
+      const id = c && c.id && c.id._serialized ? c.id._serialized : String((c && c.id) || '');
+      const user = c && c.id && c.id.user ? c.id.user : id.split('@')[0];
+      const lm = c && c.lastMessage ? c.lastMessage : null;
+      return {
+        id,
+        name: (c && c.name) ? c.name : user,
+        phone: user,
+        isGroup: Boolean(c && c.isGroup),
+        unreadCount: Number((c && c.unreadCount) || 0),
+        timestamp: Number((c && c.timestamp) || 0),
+        lastMessage: lm
+          ? {
+              body: typeof lm.body === 'string' ? lm.body : '',
+              fromMe: Boolean(lm.fromMe),
+              timestamp: Number(lm.timestamp || c.timestamp || 0),
+              type: lm.type || 'chat',
+              hasMedia: Boolean(lm.hasMedia),
+            }
+          : null,
+      };
+    });
+  }
+
+  async getChatMessages(rawChatId, limit = 50) {
+    if (!this.isReady) {
+      throw new Error(`Liy ${this.accountIndex} pa konekte (pa READY).`);
+    }
+    const cid = this._normalizeChatId(rawChatId);
+    if (!cid) throw new Error('Chat ID oswa nimewo pa valid.');
+    await this.ensureInjected();
+    const maxCount = Math.max(1, Math.min(Number(limit) || 50, 100));
+    let chat = null;
+    try {
+      chat = await this.client.getChatById(cid);
+    } catch (_) {}
+    if (!chat) {
+      const chats = await this.client.getChats();
+      chat = (Array.isArray(chats) ? chats : []).find(
+        (c) => c && c.id && (c.id._serialized === cid || c.id.user === cid.split('@')[0]),
+      );
+    }
+    if (!chat) {
+      return [];
+    }
+    const msgs = await chat.fetchMessages({ limit: maxCount });
+    return (Array.isArray(msgs) ? msgs : []).map((m) => ({
+      id: m && m.id && m.id._serialized ? m.id._serialized : String(Date.now()),
+      body: m && typeof m.body === 'string' ? m.body : '',
+      fromMe: Boolean(m && m.fromMe),
+      timestamp: Number((m && m.timestamp) || 0),
+      type: (m && m.type) || 'chat',
+      hasMedia: Boolean(m && m.hasMedia),
+      author: (m && (m.author || m.from)) || '',
+      ack: Number((m && m.ack) || 0),
+    }));
+  }
+
+  async sendDirectChatMessage(rawChatId, message) {
+    if (!this.isReady) {
+      throw new Error(`Liy ${this.accountIndex} pa konekte (pa READY).`);
+    }
+    const cid = this._normalizeChatId(rawChatId);
+    if (!cid) throw new Error('Nimewo destinataire a pa valid.');
+    const cleanText = String(message || '').trim();
+    if (!cleanText) throw new Error('Mesaj la vid.');
+
+    this.isBusy = true;
+    try {
+      await this.ensureInjected();
+      try { await this.client.sendPresenceAvailable(); } catch (_) {}
+      const sent = await this.client.sendMessage(cid, cleanText);
+      this.lastSentAt = Date.now();
+      return {
+        id: sent && sent.id && sent.id._serialized ? sent.id._serialized : String(Date.now()),
+        body: cleanText,
+        fromMe: true,
+        timestamp: Number((sent && sent.timestamp) || Math.floor(Date.now() / 1000)),
+        type: 'chat',
+        hasMedia: false,
+        ack: Number((sent && sent.ack) || 1),
+      };
+    } finally {
+      this.isBusy = false;
+    }
+  }
 }
 
 // ============================================================================
@@ -699,6 +840,7 @@ class AccountCluster {
     this.accounts = new Map(); // accountIndex -> WhatsAppAccountInstance
     this.isDispatching = false;
     this.isSyncing = false;
+    this.isProcessingBridge = false;
   }
 
   getAccount(index) {
@@ -888,16 +1030,21 @@ class AccountCluster {
 
       try {
         const msgKind = ['receipt', 'welcome', 'test'].includes(item.kind) ? item.kind : 'reminder';
+        const pdfB64 = normalizePdfBase64(item.pdf_base64 || item.pdfBase64);
+        let pdfName = String(item.pdf_file_name || item.pdfFileName || 'Recu.pdf').trim();
+        if (!pdfName.toLowerCase().endsWith('.pdf')) pdfName += '.pdf';
+        const textBody = String(item.message || '').trim();
         let sendResult;
-        if (item.pdf_base64 && typeof item.pdf_base64 === 'string') {
+        if (pdfB64) {
           try {
-            const media = new MessageMedia('application/pdf', item.pdf_base64, item.pdf_file_name || 'Recu.pdf');
-            sendResult = await assignedAccount.sendWithHumanPresence(chatId, media, { caption: item.message.trim() }, item.id, msgKind);
-          } catch (_) {
-            sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id, msgKind);
+            const media = new MessageMedia('application/pdf', pdfB64, pdfName);
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, media, { caption: textBody }, item.id, msgKind);
+          } catch (pdfErr) {
+            console.warn(`[Cluster] PDF echwe pou ${item.id}, nou voye tèks la (${pdfErr.message})`);
+            sendResult = await assignedAccount.sendWithHumanPresence(chatId, textBody, {}, item.id, msgKind);
           }
         } else {
-          sendResult = await assignedAccount.sendWithHumanPresence(chatId, item.message.trim(), {}, item.id, msgKind);
+          sendResult = await assignedAccount.sendWithHumanPresence(chatId, textBody, {}, item.id, msgKind);
         }
 
         // Siksè voye
@@ -912,12 +1059,13 @@ class AccountCluster {
             status: 'sent',
             sent_by_phone: assignedAccount.phone,
             sent_at: new Date().toISOString(),
+            error_message: null,
           }),
         });
       } catch (sendErr) {
         console.warn(`[Cluster] Echèk voye mesaj sou Liy ${assignedAccount.accountIndex}:`, sendErr.message);
         assignedAccount.lastSentAt = Date.now();
-        const retries = (item.retry_count || 0) + 1;
+        const retries = Math.max(Number(item.retry_count || 0), Number(item.attempts || 0)) + 1;
         const newStatus = retries >= 5 ? 'failed' : 'pending';
         await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?id=eq.${item.id}`, {
           method: 'PATCH',
@@ -930,6 +1078,7 @@ class AccountCluster {
             status: newStatus,
             error_message: `Echwe sou Liy ${assignedAccount.accountIndex} (${sendErr.message}); ${retries >= 5 ? 'abandone apre 5 tantativ' : 'ap re-eseye sou yon lòt liy'}`,
             retry_count: retries,
+            attempts: retries,
             processed_at: null,
           }),
         });
@@ -941,7 +1090,7 @@ class AccountCluster {
   }
 
   // Voye yon mesaj manyèl / tès sou cluster a
-  async sendMessageAnywhere(to, message, mediaBase64 = null, mediaName = null) {
+  async sendMessageAnywhere(to, message, mediaBase64 = null, mediaName = null, messageKind = null) {
     const cleanPhone = cleanPhoneNumber(to);
     if (!cleanPhone || cleanPhone.length < 8) {
       throw new Error('Nimewo destinataire a pa valid.');
@@ -968,11 +1117,100 @@ class AccountCluster {
       throw new Error('Okenn liy WhatsApp pa pare oswa konekte pou voye mesaj kounye a.');
     }
 
-    if (mediaBase64) {
-      const media = new MessageMedia('application/pdf', mediaBase64, mediaName || 'Document.pdf');
-      return await chosen.sendWithHumanPresence(chatId, media, { caption: message.trim() }, null, 'receipt');
+    const pdfB64 = normalizePdfBase64(mediaBase64);
+    if (pdfB64) {
+      let pdfName = String(mediaName || 'Recu.pdf').trim();
+      if (!pdfName.toLowerCase().endsWith('.pdf')) pdfName += '.pdf';
+      const media = new MessageMedia('application/pdf', pdfB64, pdfName);
+      return await chosen.sendWithHumanPresence(chatId, media, { caption: String(message || '').trim() }, null, messageKind || 'receipt');
     } else {
-      return await chosen.sendWithHumanPresence(chatId, message.trim(), {}, null, 'test');
+      return await chosen.sendWithHumanPresence(chatId, String(message || '').trim(), {}, null, messageKind || 'test');
+    }
+  }
+
+  // Rekipere mesaj ki te rete bloke nan 'processing' apre yon koupe kouran
+  async recoverStuckProcessingMessages() {
+    try {
+      const cutoff = new Date(Date.now() - 3 * 60 * 1000).toISOString();
+      await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.processing&processed_at=lt.${encodeURIComponent(cutoff)}`, {
+        method: 'PATCH',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'pending', processed_at: null }),
+      });
+    } catch (_) {}
+  }
+
+  // Traitement kòmand entèraktif depi Vercel Web ("Agrandir WhatsApp")
+  async processBridgeCommands() {
+    if (this.isProcessingBridge) return;
+    this.isProcessingBridge = true;
+    try {
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_bridge_commands?status=eq.pending&order=created_at.asc&limit=5`, {
+        method: 'GET',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+      });
+      if (!res.ok) return;
+      const rows = await res.json();
+      if (!Array.isArray(rows) || rows.length === 0) return;
+
+      for (const cmd of rows) {
+        try {
+          const acc = this.getAccount(cmd.account_index || 1);
+          if (!acc || !acc.isReady) {
+            throw new Error(`Liy ${cmd.account_index || 1} pa konekte pou kounye a.`);
+          }
+          const payload = (cmd.payload && typeof cmd.payload === 'object') ? cmd.payload : {};
+          let result;
+          if (cmd.action === 'list_chats') {
+            result = { chats: await acc.listChats(payload.limit || 35) };
+          } else if (cmd.action === 'get_messages') {
+            result = { messages: await acc.getChatMessages(payload.chatId || '', payload.limit || 50) };
+          } else if (cmd.action === 'send_chat') {
+            result = { message: await acc.sendDirectChatMessage(payload.chatId || '', payload.message || '') };
+          } else {
+            throw new Error(`Aksyon enkoni: ${cmd.action}`);
+          }
+
+          await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_bridge_commands?id=eq.${cmd.id}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              status: 'done',
+              result,
+              error_message: null,
+              completed_at: new Date().toISOString(),
+            }),
+          });
+        } catch (cmdErr) {
+          await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_bridge_commands?id=eq.${cmd.id}`, {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              status: 'error',
+              error_message: cmdErr && cmdErr.message ? cmdErr.message : String(cmdErr),
+              completed_at: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+        }
+      }
+    } catch (_) {
+    } finally {
+      this.isProcessingBridge = false;
     }
   }
 
@@ -1148,11 +1386,48 @@ app.post('/api/accounts/:index/unrestrict', async (req, res) => {
   res.json({ ok: true, message: `Liy ${idx} debloke.` });
 });
 
-// 6. Voye mesaj (Backwards compatibility)
+// 5bis. Entèfas Konvèsasyon an dirèk ("Agrandi" depi Admin)
+app.get('/api/accounts/:index/chats', async (req, res) => {
+  const acc = cluster.getAccount(req.params.index);
+  if (!acc) return res.status(404).json({ ok: false, error: 'Kont pa jwenn.' });
+  try {
+    const chats = await acc.listChats(req.query.limit || 35);
+    res.json({ ok: true, chats });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/accounts/:index/chats/:chatId/messages', async (req, res) => {
+  const acc = cluster.getAccount(req.params.index);
+  if (!acc) return res.status(404).json({ ok: false, error: 'Kont pa jwenn.' });
+  try {
+    const messages = await acc.getChatMessages(decodeURIComponent(req.params.chatId), req.query.limit || 50);
+    res.json({ ok: true, messages });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post(['/api/accounts/:index/chats/:chatId/send', '/api/accounts/:index/chats/send'], async (req, res) => {
+  const acc = cluster.getAccount(req.params.index);
+  if (!acc) return res.status(404).json({ ok: false, error: 'Kont pa jwenn.' });
+  try {
+    const chatId = req.params.chatId ? decodeURIComponent(req.params.chatId) : (req.body.chatId || '');
+    const sent = await acc.sendDirectChatMessage(chatId, req.body.message || '');
+    res.json({ ok: true, message: sent });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 6. Voye mesaj (Backwards compatibility — sipòte snake_case ak camelCase pou PDF)
 app.post('/api/send', async (req, res) => {
   try {
-    const { to, message, pdf_base64, pdf_file_name } = req.body;
-    const result = await cluster.sendMessageAnywhere(to, message, pdf_base64, pdf_file_name);
+    const { to, message, pdf_base64, pdfBase64, pdf_file_name, pdfFileName, kind } = req.body;
+    const resolvedPdf = pdf_base64 || pdfBase64 || null;
+    const resolvedName = pdf_file_name || pdfFileName || null;
+    const result = await cluster.sendMessageAnywhere(to, message, resolvedPdf, resolvedName, kind || null);
     res.json({ ok: true, messageId: result && result.id ? result.id._serialized : null, to });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -1206,11 +1481,20 @@ setInterval(() => {
   }
 }, 5000);
 
-// 3. Distribiye mesaj k ap tann nan outbox la chak 3.5s (ak delè moun 25s-50s)
+// 3. Distribiye mesaj k ap tann nan outbox la chak 3.5s
 setInterval(() => cluster.dispatchPendingOutboxMessages(), 3500);
 
-// 4. Verifikasyon otomatik rapèl échéance chak 1 èdtan
+// 3bis. Tcheke kòmand chat entèraktif depi Vercel Web chak 1.5s
+setInterval(() => cluster.processBridgeCommands(), 1500);
+
+// 3ter. Debloke mesaj processing ki te koupe pandan koupe kouran chak 2 minit
+setInterval(() => cluster.recoverStuckProcessingMessages(), 2 * 60 * 1000);
+
+// 4. Verifikasyon otomatik rapèl échéance chak 1 èdtan (J-7 & J-2 sèlman + Anti-Doublon)
 setInterval(() => cluster.runCronExpirationReminders(), 60 * 60 * 1000);
+
+// Netwaye ansyen verou Chromium ki te ka rete depi dènye redemaraj la
+cleanupAllOrphanSessionLocks();
 
 // Kòmanse sèvè a
 app.listen(PORT, '0.0.0.0', async () => {
@@ -1218,8 +1502,10 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`  Sèvis WhatsApp SecurGYM Multi-Kont sou pò ${PORT}`);
   console.log(`  URL Sèvis: http://127.0.0.1:${PORT}`);
   console.log(`  Cloud Bridge Supabase Aktif: ${SUPABASE_URL}`);
-  console.log(`  Pwoteksyon Anti-Bann: Delè varyab 25s - 50s + Poz Repo 3 min`);
+  console.log('  Anti-Doublon & Rapèl J-7 / J-2 + Agrandir Bridge Aktif');
   console.log('====================================================');
+
+  await cluster.recoverStuckProcessingMessages();
 
   // Chaje kont yo touswit depi Supabase
   await cluster.syncAccountsFromSupabase();

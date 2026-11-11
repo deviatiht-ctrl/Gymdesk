@@ -11,6 +11,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../app/providers.dart';
 import '../../../core/access_control/access_monitor.dart';
 import '../../../core/access_control/terminal_access_service.dart';
+import '../../../core/storage/person_photo_cache.dart';
+import '../../../core/widgets/person_avatar.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_models.dart';
 import '../../../core/biometrics/biometric_service.dart';
@@ -56,6 +58,8 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
   String? _matchedJobType;
   String? _matchedJobTitle;
   String? _matchedEmployeeNumber;
+  String? _matchedPersonId;
+  String? _matchedPhotoUrl;
   int? _daysLeft;
   Uint8List? _matchedPhoto;
 
@@ -143,26 +147,18 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     } catch (_) {}
   }
 
-  Future<void> _loadMemberPhotoById(String memberId, [String? photoUrl]) async {
+  Future<void> _loadMemberPhotoById(String personId, [String? photoUrl]) async {
     try {
-      final local = await _membersRepo.localPhoto(memberId);
-      if (local != null && local.isNotEmpty) {
-        if (mounted) setState(() => _matchedPhoto = local);
-        return;
+      final runtime = ref.read(appRuntimeProvider);
+      final bytes = await PersonPhotoCache.resolve(
+        personId: personId,
+        photoUrl: photoUrl,
+        db: runtime.database,
+        client: runtime.client,
+      );
+      if (mounted && bytes != null && bytes.isNotEmpty) {
+        setState(() => _matchedPhoto = bytes);
       }
-      if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http')) {
-        final runtime = ref.read(appRuntimeProvider);
-        final bytes = await runtime.client.storage
-            .from('member-photos')
-            .download(photoUrl)
-            .timeout(const Duration(seconds: 4));
-        if (mounted && bytes.isNotEmpty) {
-          setState(() => _matchedPhoto = bytes);
-          return;
-        }
-      }
-      final member = await _membersRepo.watchMember(memberId).first.timeout(const Duration(seconds: 3));
-      if (member != null) await _loadMemberPhoto(member);
     } catch (_) {}
   }
 
@@ -197,6 +193,10 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       _matchedJobType = person?.jobType ?? person?.employee?.jobType;
       _matchedJobTitle = person?.jobTitle ?? person?.employee?.jobTitle ?? (person?.isEmployee == true ? person?.displayJob : null);
       _matchedEmployeeNumber = person?.employeeNumber ?? person?.employee?.employeeNumber;
+      final m = person?.entry?.member;
+      final anyId = person?.id ?? person?.memberId ?? m?.id;
+      _matchedPersonId = anyId;
+      _matchedPhotoUrl = person?.photoUrl ?? m?.photoUrl;
       _matchedName = person?.name ??
           (decision.outcome == AccessOutcome.legacy
               ? (decision.uid != null && decision.uid!.isNotEmpty && decision.uid != '-'
@@ -211,11 +211,10 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
           : person.reason == 'expired'
           ? AccessStatus.deniedExpired
           : AccessStatus.deniedNoSubscription;
-      _matchedPhoto = null;
+      _matchedPhoto = PersonPhotoCache.peek(personId: _matchedPersonId, photoUrl: _matchedPhotoUrl);
     });
     final m = person?.entry?.member;
-    final mId = person?.memberId ?? m?.id;
-    final anyId = person?.id ?? mId;
+    final anyId = person?.id ?? person?.memberId ?? m?.id;
     if (m != null) {
       _loadMemberPhoto(m);
     } else if (anyId != null) {
@@ -244,12 +243,18 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     final name = snapshot['name']?.toString() ?? member?.fullName ?? '';
     final days = (snapshot['days_left'] as num?)?.toInt();
 
+    final targetId = memberId ?? member?.id ?? snapshot['id']?.toString();
+    final targetPhotoUrl = snapshot['photo_url']?.toString() ?? member?.photoUrl;
+
     setState(() {
       _matchedMember = member;
       _matchedIsEmployee = snapshot['is_employee'] == true;
       _matchedJobType = snapshot['job_type']?.toString();
       _matchedJobTitle = snapshot['job_title']?.toString();
       _matchedEmployeeNumber = snapshot['employee_number']?.toString();
+      _matchedPersonId = targetId;
+      _matchedPhotoUrl = targetPhotoUrl;
+      _matchedPhoto = PersonPhotoCache.peek(personId: targetId, photoUrl: targetPhotoUrl);
       _matchedName = name;
       _daysLeft = days;
       _processing = false;
@@ -263,6 +268,12 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         _status = AccessStatus.deniedUnrecognized;
       }
     });
+
+    if (member != null) {
+      unawaited(_loadMemberPhoto(member));
+    } else if (targetId != null && targetId.isNotEmpty) {
+      unawaited(_loadMemberPhotoById(targetId, targetPhotoUrl));
+    }
 
     _scheduleDismiss(Duration(seconds: isGranted ? 6 : 5));
   }
@@ -345,9 +356,14 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       setState(() {
         _status = AccessStatus.granted;
         _matchedMember = member;
+        _matchedIsEmployee = false;
+        _matchedPersonId = member.id;
+        _matchedPhotoUrl = member.photoUrl;
+        _matchedPhoto = PersonPhotoCache.peek(personId: member.id, photoUrl: member.photoUrl);
         _daysLeft = daysRemaining;
         _processing = false;
       });
+      unawaited(_loadMemberPhoto(member));
 
       // Si recordToCloud se false (pa egzanp apèl lokal san recordAccessEvent), anrejistre prezans lan
       if (!recordToCloud) {
@@ -372,9 +388,14 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
             ? AccessStatus.deniedExpired
             : AccessStatus.deniedNoSubscription;
         _matchedMember = member;
+        _matchedIsEmployee = false;
+        _matchedPersonId = member.id;
+        _matchedPhotoUrl = member.photoUrl;
+        _matchedPhoto = PersonPhotoCache.peek(personId: member.id, photoUrl: member.photoUrl);
         _daysLeft = daysRemaining;
         _processing = false;
       });
+      unawaited(_loadMemberPhoto(member));
       _scheduleDismiss(const Duration(seconds: 7));
     }
   }
@@ -502,6 +523,9 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
           _status = AccessStatus.none;
           _matchedMember = null;
           _matchedName = null;
+          _matchedPersonId = null;
+          _matchedPhotoUrl = null;
+          _matchedPhoto = null;
         });
       }
     });
@@ -998,7 +1022,6 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
     }
 
     final displayName = _matchedMember?.fullName ?? _matchedName;
-    final initials = displayName?.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join();
 
     return Container(
       decoration: BoxDecoration(
@@ -1025,46 +1048,33 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Glowing Circle Avatar with Member Photo
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: color, width: 4),
-                    boxShadow: [
-                      BoxShadow(
-                        color: color.withOpacity(0.45),
-                        blurRadius: 22,
-                        spreadRadius: 4,
-                      ),
-                    ],
-                    color: color.withOpacity(0.15),
-                    image: _matchedPhoto != null
-                        ? DecorationImage(
-                            image: MemoryImage(_matchedPhoto!),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
+                // Glowing Circle Avatar with Member / Employee Photo
+                PersonAvatar(
+                  size: 120,
+                  personId: _matchedPersonId ?? _matchedMember?.id,
+                  photoUrl: _matchedPhotoUrl ?? _matchedMember?.photoUrl,
+                  name: displayName,
+                  db: ref.read(appRuntimeProvider).database,
+                  client: ref.read(appRuntimeProvider).client,
+                  initialBytes: _matchedPhoto,
+                  backgroundColor: color.withOpacity(0.15),
+                  borderColor: color,
+                  borderWidth: 4,
+                  shadows: [
+                    BoxShadow(
+                      color: color.withOpacity(0.45),
+                      blurRadius: 22,
+                      spreadRadius: 4,
+                    ),
+                  ],
+                  fallbackIcon: isGranted ? LucideIcons.checkCheck : LucideIcons.shieldAlert,
+                  fallbackColor: color,
+                  iconSize: 54,
+                  initialsStyle: TextStyle(
+                    color: color,
+                    fontSize: 44,
+                    fontWeight: FontWeight.w900,
                   ),
-                  child: _matchedPhoto == null
-                      ? Center(
-                          child: (initials != null && initials.isNotEmpty)
-                              ? Text(
-                                  initials,
-                                  style: TextStyle(
-                                    color: color,
-                                    fontSize: 44,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                )
-                              : Icon(
-                                  isGranted ? LucideIcons.checkCheck : LucideIcons.shieldAlert,
-                                  size: 54,
-                                  color: color,
-                                ),
-                        )
-                      : null,
                 ),
                 const SizedBox(height: 20),
                 Text(
@@ -1138,7 +1148,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                     if (_matchedEmployeeNumber != null && _matchedEmployeeNumber!.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(
-                        'Matricule : ',
+                        'Matricule : $_matchedEmployeeNumber',
                         style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
                       ),
                     ],

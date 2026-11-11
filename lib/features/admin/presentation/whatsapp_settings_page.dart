@@ -36,7 +36,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   );
   final _gymSearchController = TextEditingController();
 
-  int _selectedTabIndex = 0; // 0: Konfigirasyon & Nimewo, 1: Aksè Gym yo (Super Admin)
+  int _selectedTabIndex = 0; // 0: Konfigirasyon & Nimewo, 1: Aksè Gym yo, 2: Contrôle des messages
 
   bool _autoSendWelcome = true;
   bool _autoSendReceipts = true;
@@ -50,10 +50,16 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   bool _sendingTest = false;
   Timer? _pollTimer;
 
-  // Super Admin: Lis aksè WhatsApp pou chak gym
+  // Super Admin: Lis aksè WhatsApp pou chak gym & Contrôle des messages
   bool _loadingGyms = false;
   List<GymWhatsAppAccess> _gymsAccessList = [];
   List<WhatsAppAccountInfo> _accountsList = [];
+
+  bool _loadingControl = false;
+  bool _dispatchingControlBatch = false;
+  bool _controlAutoVerifyEnabled = true;
+  Map<String, dynamic>? _controlData;
+  Timer? _controlAutoTimer;
 
   @override
   void initState() {
@@ -64,6 +70,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _controlAutoTimer?.cancel();
     _gatewayUrlController.dispose();
     _validNumberController.dispose();
     _backupNumberController.dispose();
@@ -817,31 +824,58 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
               color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
-              child: Row(
-                children: [
-                  ChoiceChip(
-                    label: Text(s.text('whatsapp_tab_settings')),
-                    selected: _selectedTabIndex == 0,
-                    onSelected: (val) => setState(() => _selectedTabIndex = 0),
-                  ),
-                  const SizedBox(width: 12),
-                  ChoiceChip(
-                    label: Text(s.text('whatsapp_tab_super_admin')),
-                    selected: _selectedTabIndex == 1,
-                    onSelected: (val) {
-                      setState(() => _selectedTabIndex = 1);
-                      _loadGymsAccessList();
-                    },
-                  ),
-                ],
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    ChoiceChip(
+                      label: Text(s.text('whatsapp_tab_settings')),
+                      selected: _selectedTabIndex == 0,
+                      onSelected: (val) {
+                        _controlAutoTimer?.cancel();
+                        setState(() => _selectedTabIndex = 0);
+                      },
+                    ),
+                    const SizedBox(width: 10),
+                    ChoiceChip(
+                      label: Text(s.text('whatsapp_tab_super_admin')),
+                      selected: _selectedTabIndex == 1,
+                      onSelected: (val) {
+                        _controlAutoTimer?.cancel();
+                        setState(() => _selectedTabIndex = 1);
+                        _loadGymsAccessList();
+                      },
+                    ),
+                    const SizedBox(width: 10),
+                    ChoiceChip(
+                      label: Text(s.text('whatsapp_tab_message_control')),
+                      selected: _selectedTabIndex == 2,
+                      onSelected: (val) {
+                        setState(() => _selectedTabIndex = 2);
+                        _loadControlOverview();
+                        _startControlAutoLoop();
+                        if (_controlAutoVerifyEnabled) {
+                          _runControlDispatchBatch(
+                            includeMissed: true,
+                            includeRenewals: true,
+                            retryFailed: false,
+                            silent: true,
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
 
           Expanded(
-            child: _selectedTabIndex == 1 && isSuperAdmin
-                ? _buildSuperAdminGymsView(s, theme)
-                : _buildSettingsView(s, theme),
+            child: _selectedTabIndex == 2 && isSuperAdmin
+                ? _buildControlOverviewView(s, theme)
+                : _selectedTabIndex == 1 && isSuperAdmin
+                    ? _buildSuperAdminGymsView(s, theme)
+                    : _buildSettingsView(s, theme),
           ),
         ],
       ),
@@ -2382,6 +2416,16 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ),
               const Spacer(),
               if (isReady) ...[
+                FilledButton.tonalIcon(
+                  onPressed: () => _showExpandedChatDialog(acc),
+                  icon: const Icon(LucideIcons.maximize2, size: 13),
+                  label: const Text('Agrandir'),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: const Color(0xFF0F766E),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 OutlinedButton.icon(
                   onPressed: () async {
                     final ok = await ref.read(whatsAppClientProvider).restartAccount(acc.accountIndex);
@@ -2592,4 +2636,1046 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     );
   }
 
+  // --- ONGLET 3: SUPER ADMIN - KONTRÒL MESAJ YO (ANTI-DOUBLON & J-7/J-2 OTOMATIK) ---
+
+  Future<void> _loadControlOverview({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() => _loadingControl = true);
+    }
+    final data = await ref.read(whatsAppClientProvider).fetchControlOverview();
+    if (!mounted) return;
+    setState(() {
+      if (data != null) _controlData = data;
+      _loadingControl = false;
+    });
+  }
+
+  void _startControlAutoLoop() {
+    _controlAutoTimer?.cancel();
+    _controlAutoTimer = Timer.periodic(const Duration(seconds: 20), (_) async {
+      if (!mounted || _selectedTabIndex != 2) return;
+      if (_controlAutoVerifyEnabled && !_dispatchingControlBatch) {
+        await _runControlDispatchBatch(
+          includeMissed: true,
+          includeRenewals: true,
+          retryFailed: false,
+          silent: true,
+        );
+      } else {
+        await _loadControlOverview(silent: true);
+      }
+    });
+  }
+
+  Future<void> _runControlDispatchBatch({
+    required bool includeMissed,
+    required bool includeRenewals,
+    required bool retryFailed,
+    bool silent = false,
+  }) async {
+    if (_dispatchingControlBatch) return;
+    if (mounted) setState(() => _dispatchingControlBatch = true);
+    try {
+      final res = await ref.read(whatsAppClientProvider).dispatchControlBatch(
+            includeMissedRegistrations: includeMissed,
+            includeRenewals: includeRenewals,
+            retryFailed: retryFailed,
+          );
+      await _loadControlOverview(silent: true);
+      if (!mounted || silent || res == null) return;
+      final qw = (res['queued_welcome'] as num?)?.toInt() ?? 0;
+      final qr = (res['queued_renewals'] as num?)?.toInt() ?? 0;
+      final rf = (res['retried_failed'] as num?)?.toInt() ?? 0;
+      final sk = (res['skipped_duplicates'] as num?)?.toInt() ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Vérification anti-doublon : $qw bienvenue, $qr rappels J-7/J-2, $rf relances ($sk doublons évités).',
+          ),
+          backgroundColor: const Color(0xFF0F766E),
+        ),
+      );
+    } catch (e) {
+      if (mounted && !silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erè : $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _dispatchingControlBatch = false);
+    }
+  }
+
+  Widget _buildControlOverviewView(AppStrings s, ThemeData theme) {
+    final data = _controlData;
+    final summary = data != null && data['summary'] is Map
+        ? Map<String, dynamic>.from(data['summary'] as Map)
+        : const <String, dynamic>{};
+    final gyms = (data?['subscribed_gyms'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final priority = (data?['priority_queue'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final missed = (data?['missed_registrations'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final renewals = (data?['renewal_candidates'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final recent = (data?['recent_logs'] as List? ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+
+    final subscribedCount = (summary['subscribed_gyms_count'] as num?)?.toInt() ?? gyms.length;
+    final readyLines = (summary['ready_lines'] as num?)?.toInt() ??
+        _accountsList.where((a) => a.isReady).length;
+    final pendingCount = (summary['pending_outbox'] as num?)?.toInt() ?? 0;
+    final failedCount = (summary['failed_outbox'] as num?)?.toInt() ?? 0;
+    final missedCount = (summary['missed_registrations_count'] as num?)?.toInt() ?? missed.length;
+    final renewalCount = (summary['renewal_candidates_count'] as num?)?.toInt() ?? renewals.length;
+    final sent24h = (summary['sent_24h'] as num?)?.toInt() ?? 0;
+
+    return RefreshIndicator(
+      onRefresh: () => _loadControlOverview(silent: false),
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        children: [
+          // Header Intelligence Automatique
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+              side: BorderSide(color: const Color(0xFF0F766E).withOpacity(0.35), width: 1.5),
+            ),
+            color: const Color(0xFF0F766E).withOpacity(0.05),
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(LucideIcons.bot, color: Color(0xFF0F766E), size: 24),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Contrôle Intelligent des Messages (Anti-Doublon · J-7 & J-2)',
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      if (_loadingControl || _dispatchingControlBatch)
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Surveille les salles abonnées, récupère les inscriptions faites hors ligne et envoie strictement les rappels J-7 et J-2. '
+                    'Vérifie automatiquement les journaux et la file avant chaque envoi : aucun numéro ne reçoit 2 fois le même message '
+                    '(seul un J-7 suivi d\'un J-2 à l\'approche du renouvellement est autorisé).',
+                    style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      FilterChip(
+                        selected: _controlAutoVerifyEnabled,
+                        avatar: const Icon(LucideIcons.sparkles, size: 15),
+                        label: Text(
+                          _controlAutoVerifyEnabled
+                              ? 'Intelligence Auto : ACTIVE (20s)'
+                              : 'Intelligence Auto : Pause',
+                        ),
+                        onSelected: (v) {
+                          setState(() => _controlAutoVerifyEnabled = v);
+                          if (v) {
+                            _runControlDispatchBatch(
+                              includeMissed: true,
+                              includeRenewals: true,
+                              retryFailed: false,
+                              silent: false,
+                            );
+                          }
+                        },
+                      ),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                        onPressed: _dispatchingControlBatch
+                            ? null
+                            : () => _runControlDispatchBatch(
+                                  includeMissed: true,
+                                  includeRenewals: true,
+                                  retryFailed: true,
+                                ),
+                        icon: const Icon(LucideIcons.send, size: 15),
+                        label: const Text('Tout Analyser & Envoyer en Groupe'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _loadingControl ? null : () => _loadControlOverview(silent: false),
+                        icon: const Icon(LucideIcons.refreshCw, size: 15),
+                        label: const Text('Rafraîchir'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // KPI Chips Grid
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _controlKpiCard('Salles abonnées', '$subscribedCount', LucideIcons.building2, Colors.teal),
+              _controlKpiCard('Lignes prêtes', '$readyLines', LucideIcons.smartphone, readyLines > 0 ? Colors.green : Colors.red),
+              _controlKpiCard('En attente', '$pendingCount', LucideIcons.clock, Colors.amber.shade800),
+              _controlKpiCard('Échecs à relancer', '$failedCount', LucideIcons.alertTriangle, failedCount > 0 ? Colors.red : Colors.grey),
+              _controlKpiCard('Inscriptions ratées', '$missedCount', LucideIcons.userPlus, Colors.indigo),
+              _controlKpiCard('Renouvellements J-7 / J-2', '$renewalCount', LucideIcons.calendarClock, Colors.deepOrange),
+              _controlKpiCard('Envoyés (24h)', '$sent24h', LucideIcons.checkCheck, Colors.green.shade700),
+            ],
+          ),
+          const SizedBox(height: 22),
+
+          // 1. Inscriptions hors ligne sans message de bienvenue
+          _controlSectionHeader(
+            icon: LucideIcons.userPlus,
+            color: Colors.indigo,
+            title: 'Inscriptions récentes sans message ($missedCount)',
+            subtitle: 'Membres inscrits pendant que le PC était éteint — vérifiés anti-doublon.',
+            action: missed.isNotEmpty
+                ? FilledButton.tonalIcon(
+                    onPressed: _dispatchingControlBatch
+                        ? null
+                        : () => _runControlDispatchBatch(
+                              includeMissed: true,
+                              includeRenewals: false,
+                              retryFailed: false,
+                            ),
+                    icon: const Icon(LucideIcons.send, size: 14),
+                    label: Text('Envoyer Bienvenue (${missed.length})'),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 8),
+          if (missed.isEmpty)
+            _emptyInfoCard('Toutes les inscriptions récentes ont déjà reçu ou sont en file pour leur message de bienvenue.')
+          else
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.dividerColor),
+              ),
+              child: Column(
+                children: [
+                  for (final m in missed.take(25))
+                    ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: 16,
+                        backgroundColor: Colors.indigo.withOpacity(0.12),
+                        child: const Icon(LucideIcons.userCheck, size: 15, color: Colors.indigo),
+                      ),
+                      title: Text('${m['member_name'] ?? 'Membre'} (${m['member_number'] ?? ''})',
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      subtitle: Text('${m['gym_name'] ?? ''} · +${m['clean_phone'] ?? ''}'),
+                      trailing: Chip(
+                        label: const Text('Bienvenue en attente', style: TextStyle(fontSize: 11)),
+                        backgroundColor: Colors.indigo.withOpacity(0.08),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 22),
+
+          // 2. Renouvellements STRICTEMENT J-7 et J-2
+          _controlSectionHeader(
+            icon: LucideIcons.calendarClock,
+            color: Colors.deepOrange,
+            title: 'Renouvellements à envoyer — J-7 & J-2 uniquement ($renewalCount)',
+            subtitle: 'Jamais J-0 ni J-1. Un numéro notifié à J-7 ne reçoit ensuite que J-2 (pas de doublon).',
+            action: renewals.isNotEmpty
+                ? FilledButton.tonalIcon(
+                    onPressed: _dispatchingControlBatch
+                        ? null
+                        : () => _runControlDispatchBatch(
+                              includeMissed: false,
+                              includeRenewals: true,
+                              retryFailed: false,
+                            ),
+                    icon: const Icon(LucideIcons.bellRing, size: 14),
+                    label: Text('Envoyer J-7 / J-2 (${renewals.length})'),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 8),
+          if (renewals.isEmpty)
+            _emptyInfoCard('Aucun membre à J-7 ou J-2 en attente d\'envoi.')
+          else
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.dividerColor),
+              ),
+              child: Column(
+                children: [
+                  for (final r in renewals.take(30))
+                    ListTile(
+                      dense: true,
+                      leading: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: (r['days_left'] == 2 ? Colors.red : Colors.amber.shade800).withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'J-${r['days_left']}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            color: r['days_left'] == 2 ? Colors.red.shade800 : Colors.amber.shade900,
+                          ),
+                        ),
+                      ),
+                      title: Text('${r['member_name'] ?? 'Membre'} · ${r['plan_name'] ?? ''}',
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      subtitle: Text('${r['gym_name'] ?? ''} · +${r['clean_phone'] ?? ''} · Fin : ${r['end_date'] ?? ''}'),
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 22),
+
+          // 3. Messages en priorité / en attente / en échec
+          _controlSectionHeader(
+            icon: LucideIcons.listOrdered,
+            color: Colors.amber.shade800,
+            title: 'File prioritaire & Échecs (${priority.length})',
+            subtitle: 'Messages à envoyer en priorité dès que la passerelle PC est allumée.',
+            action: failedCount > 0
+                ? OutlinedButton.icon(
+                    onPressed: _dispatchingControlBatch
+                        ? null
+                        : () => _runControlDispatchBatch(
+                              includeMissed: false,
+                              includeRenewals: false,
+                              retryFailed: true,
+                            ),
+                    icon: const Icon(LucideIcons.rotateCcw, size: 14),
+                    label: Text('Relancer échecs ($failedCount)'),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 8),
+          if (priority.isEmpty)
+            _emptyInfoCard('File d\'attente vide : aucun message bloqué ou en échec.')
+          else
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.dividerColor),
+              ),
+              child: Column(
+                children: [
+                  for (final p in priority.take(30))
+                    ListTile(
+                      dense: true,
+                      leading: Icon(
+                        p['status'] == 'failed'
+                            ? LucideIcons.alertCircle
+                            : p['status'] == 'processing'
+                                ? LucideIcons.loader
+                                : LucideIcons.clock,
+                        color: p['status'] == 'failed'
+                            ? Colors.red
+                            : p['status'] == 'processing'
+                                ? Colors.blue
+                                : Colors.amber.shade800,
+                        size: 18,
+                      ),
+                      title: Text(
+                        '[${(p['kind'] ?? 'manual').toString().toUpperCase()}] +${p['to_phone'] ?? ''} · ${p['gym_name'] ?? ''}',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                      subtitle: Text(
+                        p['status'] == 'failed' && (p['error_message']?.toString().isNotEmpty ?? false)
+                            ? '${p['error_message']}'
+                            : '${p['message_preview'] ?? ''}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: p['status'] == 'failed'
+                          ? TextButton(
+                              onPressed: () async {
+                                final ok = await ref.read(whatsAppClientProvider).retryOutboxItem(p['id'].toString());
+                                if (ok) await _loadControlOverview(silent: true);
+                              },
+                              child: const Text('Relancer'),
+                            )
+                          : Text(
+                              p['has_pdf'] == true ? 'PDF' : '${p['status']}',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 22),
+
+          // 4. Liste des salles abonnées à WhatsApp
+          _controlSectionHeader(
+            icon: LucideIcons.building2,
+            color: Colors.teal,
+            title: 'Salles avec abonnement WhatsApp (${gyms.length})',
+            subtitle: 'État de l\'abonnement et compteurs de messages par salle.',
+          ),
+          const SizedBox(height: 8),
+          if (gyms.isEmpty)
+            _emptyInfoCard('Aucune salle configurée dans les abonnements WhatsApp.')
+          else
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.dividerColor),
+              ),
+              child: Column(
+                children: [
+                  for (final g in gyms)
+                    ListTile(
+                      dense: true,
+                      leading: Icon(
+                        g['is_valid'] == true ? LucideIcons.circleCheck : LucideIcons.pauseCircle,
+                        color: g['is_valid'] == true ? Colors.green : Colors.red.shade600,
+                        size: 18,
+                      ),
+                      title: Text('${g['gym_name'] ?? ''} (${g['gym_code'] ?? ''})',
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                      subtitle: Text(
+                        '${g['status'] == 'active' ? 'Actif (${g['days_remaining']}j)' : g['status']} · En attente: ${g['pending_count'] ?? 0} · Échecs: ${g['failed_count'] ?? 0}',
+                      ),
+                      trailing: Text(
+                        '${g['sent_today_count'] ?? 0} / 24h',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 22),
+
+          // 5. Derniers envois confirmés
+          _controlSectionHeader(
+            icon: LucideIcons.history,
+            color: Colors.grey.shade700,
+            title: 'Historique récent anti-doublon (${recent.length})',
+            subtitle: 'Numéros déjà notifiés (utilisé pour bloquer tout envoi en double).',
+          ),
+          const SizedBox(height: 8),
+          if (recent.isEmpty)
+            _emptyInfoCard('Aucun envoi enregistré pour le moment.')
+          else
+            Card(
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.dividerColor),
+              ),
+              child: Column(
+                children: [
+                  for (final r in recent.take(20))
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(LucideIcons.checkCheck, color: Colors.green, size: 16),
+                      title: Text('${r['recipient_name'] ?? r['recipient_phone']} (+${r['recipient_phone']})',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                      subtitle: Text('${r['gym_name'] ?? ''} · ${r['kind'] ?? ''}'),
+                      trailing: Text(
+                        _formatIsoShort(r['created_at']?.toString()),
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _controlKpiCard(String label, String value, IconData icon, Color color) {
+    return Container(
+      width: 170,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.28)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+                Text(label, style: const TextStyle(fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _controlSectionHeader({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    Widget? action,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+          ),
+        ),
+        ?action,
+      ],
+    );
+  }
+
+  Widget _emptyInfoCard(String text) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.grey.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.withOpacity(0.25)),
+      ),
+      child: Text(text, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+    );
+  }
+
+  String _formatIsoShort(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '';
+    return DateFormat('dd/MM HH:mm').format(dt);
+  }
+
+  void _showExpandedChatDialog(WhatsAppAccountInfo account) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _WhatsAppChatViewerDialog(
+        account: account,
+        client: WhatsAppClient(baseUrl: _gatewayUrlController.text.trim()),
+      ),
+    );
+  }
+
 }
+
+/// Fenêtre Agrandie Interactive pou wè ak reponn mesaj WhatsApp dirèkteman sou liy konekte a
+class _WhatsAppChatViewerDialog extends StatefulWidget {
+  const _WhatsAppChatViewerDialog({
+    required this.account,
+    required this.client,
+  });
+
+  final WhatsAppAccountInfo account;
+  final WhatsAppClient client;
+
+  @override
+  State<_WhatsAppChatViewerDialog> createState() => _WhatsAppChatViewerDialogState();
+}
+
+class _WhatsAppChatViewerDialogState extends State<_WhatsAppChatViewerDialog> {
+  final _searchCtrl = TextEditingController();
+  final _msgCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
+
+  List<WhatsAppChatSummary> _chats = [];
+  WhatsAppChatSummary? _selectedChat;
+  List<WhatsAppChatMessage> _messages = [];
+  bool _loadingChats = true;
+  bool _loadingMessages = false;
+  bool _sending = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadChats();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _msgCtrl.dispose();
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadChats() async {
+    setState(() {
+      _loadingChats = true;
+      _error = null;
+    });
+    try {
+      final list = await widget.client.fetchAccountChats(widget.account.accountIndex);
+      if (!mounted) return;
+      setState(() {
+        _chats = list;
+        _loadingChats = false;
+      });
+      if (_selectedChat == null && list.isNotEmpty) {
+        await _selectChat(list.first);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingChats = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  Future<void> _selectChat(WhatsAppChatSummary chat) async {
+    setState(() {
+      _selectedChat = chat;
+      _loadingMessages = true;
+      _error = null;
+    });
+    try {
+      final msgs = await widget.client.fetchChatMessages(widget.account.accountIndex, chat.id);
+      if (!mounted) return;
+      setState(() {
+        _messages = msgs;
+        _loadingMessages = false;
+      });
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMessages = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  void _openPhoneDirect(String rawPhone) {
+    final clean = WhatsAppClient.normalizePhone(rawPhone);
+    if (clean.length < 8) return;
+    final temp = WhatsAppChatSummary(
+      id: '$clean@c.us',
+      name: '+$clean',
+      phone: clean,
+    );
+    _selectChat(temp);
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+      }
+    });
+  }
+
+  Future<void> _sendReply() async {
+    final chat = _selectedChat;
+    final text = _msgCtrl.text.trim();
+    if (chat == null || text.isEmpty || _sending) return;
+    setState(() => _sending = true);
+    try {
+      final sent = await widget.client.sendChatMessage(widget.account.accountIndex, chat.id, text);
+      if (!mounted) return;
+      _msgCtrl.clear();
+      setState(() {
+        _sending = false;
+        if (sent != null) {
+          _messages = [..._messages, sent];
+        }
+      });
+      _scrollToBottom();
+      // Refresh messages shortly for sync consistency
+      final refreshed = await widget.client.fetchChatMessages(widget.account.accountIndex, chat.id);
+      if (mounted && refreshed.isNotEmpty) {
+        setState(() => _messages = refreshed);
+        _scrollToBottom();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Échec envoi : $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final mq = MediaQuery.of(context).size;
+    final width = (mq.width * 0.9).clamp(340.0, 1080.0);
+    final height = (mq.height * 0.85).clamp(420.0, 760.0);
+    final isCompact = width < 700;
+
+    final query = _searchCtrl.text.trim().toLowerCase();
+    final filteredChats = _chats.where((c) {
+      if (query.isEmpty) return true;
+      return c.name.toLowerCase().contains(query) ||
+          c.phone.toLowerCase().contains(query) ||
+          c.lastMessageBody.toLowerCase().contains(query);
+    }).toList();
+    final queryDigits = WhatsAppClient.normalizePhone(_searchCtrl.text.trim());
+
+    return Dialog(
+      insetPadding: const EdgeInsets.all(16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Column(
+          children: [
+            // Top bar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              color: const Color(0xFF0F766E),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.messageSquare, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'WhatsApp Web — Liy ${widget.account.accountIndex} : ${widget.account.label}',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        if (widget.account.phoneNumber != null)
+                          Text(
+                            '+${widget.account.phoneNumber} ${widget.account.pushName ?? ''}',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Rafraîchir',
+                    icon: const Icon(LucideIcons.refreshCw, color: Colors.white, size: 18),
+                    onPressed: _loadChats,
+                  ),
+                  IconButton(
+                    tooltip: 'Fermer',
+                    icon: const Icon(LucideIcons.x, color: Colors.white, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+
+            if (_error != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                color: Colors.red.shade50,
+                child: Text(_error!, style: TextStyle(color: Colors.red.shade900, fontSize: 12)),
+              ),
+
+            Expanded(
+              child: isCompact
+                  ? (_selectedChat == null
+                      ? _buildChatSidebar(theme, filteredChats, queryDigits)
+                      : Column(
+                          children: [
+                            ListTile(
+                              dense: true,
+                              leading: const Icon(LucideIcons.arrowLeft, size: 18),
+                              title: Text('Conversations (${_chats.length})'),
+                              onTap: () => setState(() => _selectedChat = null),
+                            ),
+                            const Divider(height: 1),
+                            Expanded(child: _buildMessagePane(theme)),
+                          ],
+                        ))
+                  : Row(
+                      children: [
+                        SizedBox(
+                          width: 310,
+                          child: _buildChatSidebar(theme, filteredChats, queryDigits),
+                        ),
+                        const VerticalDivider(width: 1),
+                        Expanded(child: _buildMessagePane(theme)),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatSidebar(ThemeData theme, List<WhatsAppChatSummary> filteredChats, String queryDigits) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(10),
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Rechercher nom ou numéro...',
+              prefixIcon: const Icon(LucideIcons.search, size: 16),
+              suffixIcon: _searchCtrl.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(LucideIcons.x, size: 14),
+                      onPressed: () => setState(() => _searchCtrl.clear()),
+                    )
+                  : null,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ),
+        if (queryDigits.length >= 8)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                onPressed: () => _openPhoneDirect(queryDigits),
+                icon: const Icon(LucideIcons.messageCircle, size: 15),
+                label: Text('Écrire au +$queryDigits'),
+              ),
+            ),
+          ),
+        const Divider(height: 1),
+        Expanded(
+          child: _loadingChats
+              ? const Center(child: CircularProgressIndicator())
+              : filteredChats.isEmpty
+                  ? const Center(child: Text('Aucune conversation trouvée.', style: TextStyle(color: Colors.grey)))
+                  : ListView.separated(
+                      itemCount: filteredChats.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (ctx, i) {
+                        final c = filteredChats[i];
+                        final selected = _selectedChat?.id == c.id;
+                        return ListTile(
+                          selected: selected,
+                          selectedTileColor: const Color(0xFF0F766E).withOpacity(0.1),
+                          leading: CircleAvatar(
+                            backgroundColor: const Color(0xFF25D366).withOpacity(0.18),
+                            child: Text(
+                              c.name.isNotEmpty ? c.name[0].toUpperCase() : '#',
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                            ),
+                          ),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  c.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                                ),
+                              ),
+                              if (c.unreadCount > 0)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF25D366),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '${c.unreadCount}',
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          subtitle: Text(
+                            c.lastMessageHasMedia && c.lastMessageBody.isEmpty
+                                ? '📎 Document / Média'
+                                : '${c.lastMessageFromMe ? 'Vous : ' : ''}${c.lastMessageBody}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          onTap: () => _selectChat(c),
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMessagePane(ThemeData theme) {
+    final chat = _selectedChat;
+    if (chat == null) {
+      return const Center(
+        child: Text('Sélectionnez une conversation à gauche ou tapez un numéro.', style: TextStyle(color: Colors.grey)),
+      );
+    }
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: const Color(0xFF0F766E).withOpacity(0.15),
+                child: const Icon(LucideIcons.user, size: 16, color: Color(0xFF0F766E)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(chat.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    if (chat.phone.isNotEmpty)
+                      Text('+${chat.phone}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Actualiser les messages',
+                onPressed: _loadingMessages ? null : () => _selectChat(chat),
+                icon: const Icon(LucideIcons.refreshCw, size: 16),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: _loadingMessages
+              ? const Center(child: CircularProgressIndicator())
+              : _messages.isEmpty
+                  ? const Center(child: Text('Aucun message dans cette discussion.', style: TextStyle(color: Colors.grey)))
+                  : ListView.builder(
+                      controller: _scrollCtrl,
+                      padding: const EdgeInsets.all(14),
+                      itemCount: _messages.length,
+                      itemBuilder: (ctx, idx) {
+                        final m = _messages[idx];
+                        final ts = m.timestamp > 0
+                            ? DateFormat('dd/MM HH:mm').format(
+                                DateTime.fromMillisecondsSinceEpoch(m.timestamp * 1000).toLocal(),
+                              )
+                            : '';
+                        return Align(
+                          alignment: m.fromMe ? Alignment.centerRight : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            constraints: const BoxConstraints(maxWidth: 480),
+                            decoration: BoxDecoration(
+                              color: m.fromMe
+                                  ? const Color(0xFF0F766E).withOpacity(0.15)
+                                  : theme.colorScheme.surfaceVariant.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: m.fromMe
+                                    ? const Color(0xFF0F766E).withOpacity(0.35)
+                                    : theme.dividerColor,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                if (m.hasMedia)
+                                  const Padding(
+                                    padding: EdgeInsets.only(bottom: 4),
+                                    child: Text(
+                                      '📎 Pièce jointe / Média',
+                                      style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.teal),
+                                    ),
+                                  ),
+                                SelectableText(
+                                  m.body.isNotEmpty ? m.body : (m.hasMedia ? '(Média)' : ''),
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                                if (ts.isNotEmpty) ...[
+                                  const SizedBox(height: 3),
+                                  Text(ts, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _msgCtrl,
+                  minLines: 1,
+                  maxLines: 3,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _sendReply(),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Écrire une réponse WhatsApp...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                onPressed: _sending ? null : _sendReply,
+                icon: _sending
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(LucideIcons.send, size: 15),
+                label: const Text('Envoyer'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+

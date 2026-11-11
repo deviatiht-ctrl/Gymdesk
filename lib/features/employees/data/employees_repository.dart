@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/db/local_database.dart';
+import '../../../core/storage/person_photo_cache.dart';
 import '../../../core/sync/sync_models.dart';
 import '../domain/employee.dart';
 
@@ -85,8 +86,10 @@ class EmployeesRepository {
     };
     await _write(row);
     if (clearPhoto) {
+      PersonPhotoCache.invalidate(id, photoUrl: existing?.photoUrl);
       await (db.delete(db.photoUploads)..where((t) => t.memberId.equals(id))).go();
     } else if (photo != null) {
+      PersonPhotoCache.invalidate(id, photoUrl: existing?.photoUrl);
       await db.enqueuePhoto(id, photo);
     }
     return id;
@@ -95,19 +98,12 @@ class EmployeesRepository {
   Future<Uint8List?> localPhoto(String employeeId) async =>
       (await db.photoForMember(employeeId))?.bytes;
 
-  Future<Uint8List?> photoBytes(Employee employee) async {
-    final local = await localPhoto(employee.id);
-    if (local != null && local.isNotEmpty) return local;
-    if (employee.photoUrl == null || employee.photoUrl!.isEmpty) return null;
-    if (client == null) return null;
-    try {
-      return await client!.storage
-          .from('member-photos')
-          .download(employee.photoUrl!);
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<Uint8List?> photoBytes(Employee employee) => PersonPhotoCache.resolve(
+        personId: employee.id,
+        photoUrl: employee.photoUrl,
+        db: db,
+        client: client,
+      );
 
   Future<void> saveFingerprints(Employee employee, List<String> captures) async {
     if (!_canManage) throw const EmployeeFailure('access_denied');

@@ -118,19 +118,45 @@
     // --- Contrôle d'accès : 2e écran dans une vraie fenêtre séparée, temps réel ---
     (function () {
       var post = null;
+      var BRIDGE_KEY = 'securgym_access_bridge_msg';
+      var listeners = [];
+      var storageBound = false;
+      function dispatch(raw) {
+        for (var i = 0; i < listeners.length; i++) {
+          try { listeners[i](raw); } catch (e) {}
+        }
+      }
+      function bindStorage() {
+        if (storageBound) return;
+        storageBound = true;
+        window.addEventListener('storage', function (ev) {
+          if (ev.key !== BRIDGE_KEY || !ev.newValue) return;
+          try {
+            var parsed = JSON.parse(ev.newValue);
+            if (parsed && parsed.payload) dispatch(String(parsed.payload));
+          } catch (e) {}
+        });
+      }
       window.securgymBridgePost = function (msg) {
         try {
           if (!post && 'BroadcastChannel' in window) post = new BroadcastChannel('securgym-access-display');
           if (post) post.postMessage(msg);
         } catch (e) {}
+        try {
+          localStorage.setItem(BRIDGE_KEY, JSON.stringify({ ts: Date.now(), nonce: Math.random(), payload: String(msg) }));
+        } catch (e) {}
       };
       window.securgymBridgeListen = function (cb) {
+        if (typeof cb === 'function') listeners.push(cb);
+        bindStorage();
+        var ok = true;
         try {
-          if (!('BroadcastChannel' in window)) return false;
-          var ch = new BroadcastChannel('securgym-access-display');
-          ch.onmessage = function (e) { cb(String(e.data)); };
-          return true;
-        } catch (e) { return false; }
+          if ('BroadcastChannel' in window) {
+            var ch = new BroadcastChannel('securgym-access-display');
+            ch.onmessage = function (e) { cb(String(e.data)); };
+          }
+        } catch (e) { ok = false; }
+        return ok || ('localStorage' in window);
       };
       window.securgymOpenWindow = function (url, name) {
         var w = window.open(url, name, 'popup=yes,width=1280,height=800,left=60,top=40');
@@ -285,27 +311,109 @@
       setTimeout(dismissSplash, 15000);
     })();
   </script>
-    <script>
-    var BUILD_VERSION = "20261106_1400";
-    if (localStorage.getItem("securgym_build_version") !== BUILD_VERSION) {
-      var hadOld = !!localStorage.getItem("securgym_build_version");
-      localStorage.setItem("securgym_build_version", BUILD_VERSION);
-      var p1 = ('serviceWorker' in navigator) ?
-        navigator.serviceWorker.getRegistrations().then(function(regs) {
-          return Promise.all(regs.map(function(r) { return r.unregister(); }));
-        }) : Promise.resolve();
-      var p2 = ('caches' in window) ?
-        caches.keys().then(function(names) {
-          return Promise.all(names.map(function(n) { return caches.delete(n); }));
-        }) : Promise.resolve();
-      Promise.all([p1, p2]).then(function() {
-        if (hadOld && !sessionStorage.getItem("securgym_v_reload")) {
-          sessionStorage.setItem("securgym_v_reload", "1");
-          window.location.reload(true);
+  <script>
+    (function () {
+      var BUILD_VERSION = "20261111_052210";
+      window.__SECURGYM_BUILD_VERSION__ = BUILD_VERSION;
+      var scriptLoaded = false;
+
+      function clearSwAndCaches() {
+        var p1 = ('serviceWorker' in navigator)
+          ? navigator.serviceWorker.getRegistrations().then(function (regs) {
+              return Promise.all(regs.map(function (r) { return r.unregister(); }));
+            }).catch(function () {})
+          : Promise.resolve();
+        var p2 = ('caches' in window)
+          ? caches.keys().then(function (names) {
+              return Promise.all(names.map(function (n) { return caches.delete(n); }));
+            }).catch(function () {})
+          : Promise.resolve();
+        return Promise.all([p1, p2]);
+      }
+
+      function injectBootstrap(ver) {
+        if (scriptLoaded) return;
+        scriptLoaded = true;
+        var v = ver || BUILD_VERSION;
+        window.__SECURGYM_BUILD_VERSION__ = v;
+        var s = document.createElement('script');
+        s.src = new URL('flutter_bootstrap.js?v=' + encodeURIComponent(v), document.baseURI).toString();
+        s.async = true;
+        document.body.appendChild(s);
+      }
+
+      function canReloadNow(ver) {
+        try {
+          var prev = sessionStorage.getItem('securgym_v_reload_ver');
+          var at = Number(sessionStorage.getItem('securgym_v_reload_at') || '0');
+          if (prev === ver && (Date.now() - at) < 15000) return false;
+          sessionStorage.setItem('securgym_v_reload_ver', ver);
+          sessionStorage.setItem('securgym_v_reload_at', String(Date.now()));
+          return true;
+        } catch (e) {
+          return false;
         }
-      });
-    }
+      }
+
+      function hardReloadWithVersion(ver) {
+        try {
+          var u = new URL(window.location.href);
+          u.searchParams.set('_v', ver);
+          window.location.replace(u.toString());
+        } catch (e) {
+          window.location.reload();
+        }
+      }
+
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function (regs) {
+          regs.forEach(function (r) { try { r.unregister(); } catch (e) {} });
+        }).catch(function () {});
+      }
+
+      try {
+        var cur = new URL(window.location.href);
+        if (cur.searchParams.has('_v')) {
+          cur.searchParams.delete('_v');
+          history.replaceState(null, '', cur.pathname + cur.search + cur.hash);
+        }
+      } catch (e) {}
+
+      var ctrl = ('AbortController' in window) ? new AbortController() : null;
+      var timer = setTimeout(function () {
+        if (ctrl) { try { ctrl.abort(); } catch (e) {} }
+        injectBootstrap(BUILD_VERSION);
+      }, 1800);
+
+      var versionUrl = new URL('version.json?_ts=' + Date.now(), document.baseURI).toString();
+      fetch(versionUrl, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' },
+        signal: ctrl ? ctrl.signal : undefined
+      })
+        .then(function (r) { return r && r.ok ? r.json() : null; })
+        .catch(function () { return null; })
+        .then(function (data) {
+          clearTimeout(timer);
+          var remoteVer = (data && data.version) ? String(data.version).trim() : BUILD_VERSION;
+          var storedVer = null;
+          try { storedVer = localStorage.getItem('securgym_build_version'); } catch (e) {}
+          var needsCacheWipe = (storedVer !== remoteVer) || (remoteVer !== BUILD_VERSION);
+
+          if (needsCacheWipe) {
+            try { localStorage.setItem('securgym_build_version', remoteVer); } catch (e) {}
+            clearSwAndCaches().then(function () {
+              if ((remoteVer !== BUILD_VERSION || (storedVer && storedVer !== remoteVer)) && canReloadNow(remoteVer)) {
+                hardReloadWithVersion(remoteVer);
+                return;
+              }
+              injectBootstrap(remoteVer);
+            });
+          } else {
+            injectBootstrap(remoteVer);
+          }
+        });
+    })();
   </script>
-  <script src="flutter_bootstrap.js?v=20261106_1400" async></script>
 </body>
 </html>

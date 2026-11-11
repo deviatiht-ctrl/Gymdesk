@@ -9,15 +9,19 @@
   ],
   "headers": [
     {
-      "source": "/(.*).wasm",
+      "source": "/(.*)",
       "headers": [
-        {
-          "key": "Content-Type",
-          "value": "application/wasm"
-        },
         {
           "key": "Cache-Control",
           "value": "no-cache, no-store, must-revalidate"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
         }
       ]
     },
@@ -31,8 +35,12 @@
       ]
     },
     {
-      "source": "/(.*).(js|wasm|html|json)",
+      "source": "/(.*).wasm",
       "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/wasm"
+        },
         {
           "key": "Cache-Control",
           "value": "no-cache, no-store, must-revalidate"
@@ -40,15 +48,36 @@
       ]
     },
     {
-      "source": "/(.*)",
+      "source": "/(.*).(js|wasm|html|json)",
       "headers": [
         {
-          "key": "Cross-Origin-Embedder-Policy",
-          "value": "credentialless"
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
         },
         {
-          "key": "Cross-Origin-Opener-Policy",
-          "value": "same-origin"
+          "key": "Pragma",
+          "value": "no-cache"
+        },
+        {
+          "key": "Expires",
+          "value": "0"
+        }
+      ]
+    },
+    {
+      "source": "/version.json",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate, max-age=0"
+        },
+        {
+          "key": "Pragma",
+          "value": "no-cache"
+        },
+        {
+          "key": "Expires",
+          "value": "0"
         }
       ]
     }

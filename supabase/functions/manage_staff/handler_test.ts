@@ -91,6 +91,12 @@ Deno.test('lost Auth response is recovered through request metadata', async () =
   assert(result.status === 200 && gateway.creates === 1 && gateway.finishes === 1);
 });
 
+Deno.test('accepts supervisor role for staff creation', async () => {
+  const gateway = new TestStaffGateway();
+  const result = await createStaffHandler(gateway, new Set())(request({ ...body, role: 'supervisor' }));
+  assert(result.status === 200 && gateway.creates === 1 && gateway.capturedPayload?.role === 'supervisor');
+});
+
 Deno.test('rejects owner roles, weak passwords and invalid records', async () => {
   const gateway = new TestStaffGateway();
   const handler = createStaffHandler(gateway, new Set());

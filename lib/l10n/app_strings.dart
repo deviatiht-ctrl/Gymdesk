@@ -2496,6 +2496,7 @@ class AppStrings {
     'whatsapp_no_due_reminders': ['Pa gen okenn abònman ki prèt pou ekspire jodi a.', 'Aucun abonnement n\'arrive à échéance aujourd\'hui.', 'No memberships are expiring today.'],
     'whatsapp_tab_settings': ['Konfigirasyon & Nimewo', 'Configuration & Numéros', 'Configuration & Numbers'],
     'whatsapp_tab_super_admin': ['👑 Aksè WhatsApp Gym yo', '👑 Accès WhatsApp des Salles', '👑 Gym WhatsApp Access'],
+    'whatsapp_tab_message_control': ['🤖 Kontwòl Mesaj yo', '🤖 Contrôle des Messages', '🤖 Message Control'],
     'whatsapp_gym_access_title': ['Jesyon Aksè Abònman WhatsApp pou Gym yo', 'Gestion des Abonnements WhatsApp des Salles', 'Gym WhatsApp Subscription Management'],
     'whatsapp_gym_access_desc': [
       'Sèlman Super Admin SecurGYM ka bay aksè, mete peryòd valab, sispann oswa renouvle sèvis WhatsApp pou chak gym.',
@@ -2573,7 +2574,7 @@ class AppStrings {
     'whatsapp_no_gyms_found': ['Pa gen okenn gym ki koresponn ak rechèch la.', 'Aucune salle ne correspond à la recherche.', 'No gym found matching search.'],
     'whatsapp_contact_label': ['Kontak:', 'Contact :', 'Contact:'],
     'whatsapp_period_display': ['Peryòd:', 'Période :', 'Period:'],
-    'whatsapp_auto_reminders_active': ['🟢 Automatizasyon Entèlijan Aktif (Rapèl 7j, 2j ak Finisman)', '🟢 Automatisation Intelligente Active (Rappels 7j, 2j et Échéance)', '🟢 Smart Automation Active (7d, 2d & Expiration reminders)'],
+    'whatsapp_auto_reminders_active': ['🟢 Automatizasyon Entèlijan Aktif (Rapèl J-7 ak J-2 sèlman)', '🟢 Automatisation Intelligente Active (Rappels J-7 & J-2 uniquement)', '🟢 Smart Automation Active (J-7 & J-2 reminders only)'],
     'whatsapp_auto_reminders_desc_active': [
       'Sistèm nan ap verifye epi voye rapèl yo otomatikman san okenn aksyon manyèl pa nesesè.',
       'Le système vérifie et envoie automatiquement les rappels d\'échéance sans aucune intervention manuelle requise.',

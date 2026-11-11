@@ -31,7 +31,7 @@ export function createStaffHandler(gateway: StaffGateway, origins: ReadonlySet<s
     const fullName = text(input.full_name, 2, 120);
     const phone = text(input.phone ?? '', 0, 32);
     const role = text(input.role, 1, 16);
-    if (!['manager','reception'].includes(role) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError('invalid_record');
+    if (!['supervisor', 'manager', 'reception'].includes(role) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError('invalid_record');
     const password = input.password;
     if (typeof password !== 'string' || password.length < 12 || password.length > 128) throw new ApiError('weak_password');
     const payload: Json = { email, full_name: fullName, phone, role };

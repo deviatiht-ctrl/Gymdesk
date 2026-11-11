@@ -197,6 +197,7 @@ class _ReceiptDialogState extends ConsumerState<_ReceiptDialog> {
           pdfBytes: _pdf,
           pdfUrl: url,
           gymPhone: widget.data.gymPhone,
+          allowResend: !auto,
           languageCode: s.locale.languageCode,
         );
         if (ok) {

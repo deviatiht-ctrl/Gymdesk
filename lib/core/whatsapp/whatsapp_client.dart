@@ -114,6 +114,78 @@ class WhatsAppSendResult {
   final String? error;
 }
 
+/// Rezime yon konvèsasyon WhatsApp (pou bouton Agrandi)
+class WhatsAppChatSummary {
+  const WhatsAppChatSummary({
+    required this.id,
+    required this.name,
+    required this.phone,
+    this.isGroup = false,
+    this.unreadCount = 0,
+    this.timestamp = 0,
+    this.lastMessageBody = '',
+    this.lastMessageFromMe = false,
+    this.lastMessageHasMedia = false,
+  });
+
+  final String id;
+  final String name;
+  final String phone;
+  final bool isGroup;
+  final int unreadCount;
+  final int timestamp;
+  final String lastMessageBody;
+  final bool lastMessageFromMe;
+  final bool lastMessageHasMedia;
+
+  factory WhatsAppChatSummary.fromJson(Map<String, dynamic> json) {
+    final lm = json['lastMessage'] is Map
+        ? Map<String, dynamic>.from(json['lastMessage'] as Map)
+        : const <String, dynamic>{};
+    return WhatsAppChatSummary(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? json['phone']?.toString() ?? 'Contact',
+      phone: json['phone']?.toString() ?? '',
+      isGroup: json['isGroup'] as bool? ?? false,
+      unreadCount: (json['unreadCount'] as num?)?.toInt() ?? 0,
+      timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+      lastMessageBody: lm['body']?.toString() ?? '',
+      lastMessageFromMe: lm['fromMe'] as bool? ?? false,
+      lastMessageHasMedia: lm['hasMedia'] as bool? ?? false,
+    );
+  }
+}
+
+/// Yon mesaj endividyèl nan yon konvèsasyon WhatsApp
+class WhatsAppChatMessage {
+  const WhatsAppChatMessage({
+    required this.id,
+    required this.body,
+    required this.fromMe,
+    required this.timestamp,
+    this.type = 'chat',
+    this.hasMedia = false,
+  });
+
+  final String id;
+  final String body;
+  final bool fromMe;
+  final int timestamp;
+  final String type;
+  final bool hasMedia;
+
+  factory WhatsAppChatMessage.fromJson(Map<String, dynamic> json) {
+    return WhatsAppChatMessage(
+      id: json['id']?.toString() ?? '',
+      body: json['body']?.toString() ?? '',
+      fromMe: json['fromMe'] as bool? ?? false,
+      timestamp: (json['timestamp'] as num?)?.toInt() ?? 0,
+      type: json['type']?.toString() ?? 'chat',
+      hasMedia: json['hasMedia'] as bool? ?? false,
+    );
+  }
+}
+
 /// Modèl pou jesyon aksè abònman WhatsApp yon Gym pa Super Admin
 class GymWhatsAppAccess {
   const GymWhatsAppAccess({
@@ -496,6 +568,7 @@ class WhatsAppClient {
     String? pdfBase64,
     String? pdfFileName,
     String kind = 'manual',
+    String? gymId,
   }) async {
     // 1. Eseye voye lokalman si nou sou PC epi CloudBridge pa t nesesè
     if (!_lastUsedCloudBridge) {
@@ -507,10 +580,13 @@ class WhatsAppClient {
           body: jsonEncode({
             'to': to.trim(),
             'message': message.trim(),
+            'kind': kind,
             if (pdfBase64 != null && pdfBase64.isNotEmpty) 'pdfBase64': pdfBase64,
+            if (pdfBase64 != null && pdfBase64.isNotEmpty) 'pdf_base64': pdfBase64,
             if (pdfFileName != null && pdfFileName.isNotEmpty) 'pdfFileName': pdfFileName,
+            if (pdfFileName != null && pdfFileName.isNotEmpty) 'pdf_file_name': pdfFileName,
           }),
-        ).timeout(const Duration(seconds: 25));
+        ).timeout(const Duration(seconds: 6));
 
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         if (response.statusCode == 200 && data['ok'] == true) {
@@ -533,6 +609,7 @@ class WhatsAppClient {
         params: {
           'p_to_phone': cleanPhone,
           'p_message': message.trim(),
+          'p_gym_id': (gymId != null && gymId.isNotEmpty) ? gymId : null,
           'p_kind': kind,
           'p_pdf_base64': pdfBase64,
           'p_pdf_file_name': pdfFileName,
@@ -822,6 +899,192 @@ class WhatsAppClient {
       debugPrint('[WhatsApp] Erè deleteAccountSlot: $e');
       return false;
     }
+  }
+
+  /// Vue globale Contrôle des messages (Super Admin)
+  Future<Map<String, dynamic>?> fetchControlOverview() async {
+    try {
+      final res = await Supabase.instance.client.rpc('platform_whatsapp_control_overview');
+      if (res != null && res is Map) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè fetchControlOverview: $e');
+    }
+    return null;
+  }
+
+  /// Envoi groupé sécurisé anti-doublon (Inscriptions manquées + J-7/J-2 + Retry échecs)
+  Future<Map<String, dynamic>?> dispatchControlBatch({
+    bool includeMissedRegistrations = true,
+    bool includeRenewals = true,
+    bool retryFailed = false,
+  }) async {
+    try {
+      final res = await Supabase.instance.client.rpc(
+        'platform_whatsapp_dispatch_batch',
+        params: {
+          'p_include_missed_registrations': includeMissedRegistrations,
+          'p_include_renewals': includeRenewals,
+          'p_retry_failed': retryFailed,
+        },
+      );
+      if (res != null && res is Map) {
+        return Map<String, dynamic>.from(res);
+      }
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè dispatchControlBatch: $e');
+    }
+    return null;
+  }
+
+  /// Relancer un message spécifique en échec
+  Future<bool> retryOutboxItem(String outboxId) async {
+    try {
+      await Supabase.instance.client
+          .from('whatsapp_messages_outbox')
+          .update({
+            'status': 'pending',
+            'error_message': null,
+            'attempts': 0,
+            'retry_count': 0,
+            'processed_at': null,
+          })
+          .eq('id', outboxId);
+      return true;
+    } catch (e) {
+      debugPrint('[WhatsApp] Erè retryOutboxItem: $e');
+      return false;
+    }
+  }
+
+  Future<Map<String, dynamic>> _runRemoteBridgeCommand({
+    required int accountIndex,
+    required String action,
+    required Map<String, dynamic> payload,
+    Duration timeout = const Duration(seconds: 16),
+  }) async {
+    final sb = Supabase.instance.client;
+    final inserted = await sb
+        .from('whatsapp_bridge_commands')
+        .insert({
+          'account_index': accountIndex,
+          'action': action,
+          'payload': payload,
+          'status': 'pending',
+        })
+        .select('id')
+        .single();
+    final cmdId = inserted['id'].toString();
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 450));
+      final row = await sb
+          .from('whatsapp_bridge_commands')
+          .select('status, result, error_message')
+          .eq('id', cmdId)
+          .single();
+      final status = row['status']?.toString() ?? 'pending';
+      if (status == 'done') {
+        final rawResult = row['result'];
+        return rawResult is Map
+            ? Map<String, dynamic>.from(rawResult)
+            : <String, dynamic>{};
+      }
+      if (status == 'error') {
+        throw Exception(row['error_message']?.toString() ?? 'Erreur serveur WhatsApp');
+      }
+    }
+    throw TimeoutException('Le service WhatsApp local n\'a pas répondu à temps.');
+  }
+
+  /// Liste des conversations pour "Agrandir WhatsApp" (Local ou Bridge Web)
+  Future<List<WhatsAppChatSummary>> fetchAccountChats(int accountIndex, {int limit = 35}) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/chats?limit=$limit');
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['ok'] == true && data['chats'] is List) {
+          return (data['chats'] as List)
+              .map((c) => WhatsAppChatSummary.fromJson(Map<String, dynamic>.from(c as Map)))
+              .toList();
+        }
+      }
+    } catch (_) {}
+
+    final remote = await _runRemoteBridgeCommand(
+      accountIndex: accountIndex,
+      action: 'list_chats',
+      payload: {'limit': limit},
+    );
+    final chatsRaw = (remote['chats'] as List?) ?? const [];
+    return chatsRaw
+        .map((c) => WhatsAppChatSummary.fromJson(Map<String, dynamic>.from(c as Map)))
+        .toList();
+  }
+
+  /// Messages d'un chat pour "Agrandir WhatsApp" (Local ou Bridge Web)
+  Future<List<WhatsAppChatMessage>> fetchChatMessages(
+    int accountIndex,
+    String chatId, {
+    int limit = 50,
+  }) async {
+    try {
+      final encoded = Uri.encodeComponent(chatId);
+      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/chats/$encoded/messages?limit=$limit');
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['ok'] == true && data['messages'] is List) {
+          return (data['messages'] as List)
+              .map((m) => WhatsAppChatMessage.fromJson(Map<String, dynamic>.from(m as Map)))
+              .toList();
+        }
+      }
+    } catch (_) {}
+
+    final remote = await _runRemoteBridgeCommand(
+      accountIndex: accountIndex,
+      action: 'get_messages',
+      payload: {'chatId': chatId, 'limit': limit},
+    );
+    final msgsRaw = (remote['messages'] as List?) ?? const [];
+    return msgsRaw
+        .map((m) => WhatsAppChatMessage.fromJson(Map<String, dynamic>.from(m as Map)))
+        .toList();
+  }
+
+  /// Envoyer un message interactif depuis "Agrandir WhatsApp"
+  Future<WhatsAppChatMessage?> sendChatMessage(
+    int accountIndex,
+    String chatId,
+    String message,
+  ) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/accounts/$accountIndex/chats/send');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'chatId': chatId, 'message': message.trim()}),
+      ).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['ok'] == true && data['message'] is Map) {
+          return WhatsAppChatMessage.fromJson(Map<String, dynamic>.from(data['message'] as Map));
+        }
+      }
+    } catch (_) {}
+
+    final remote = await _runRemoteBridgeCommand(
+      accountIndex: accountIndex,
+      action: 'send_chat',
+      payload: {'chatId': chatId, 'message': message.trim()},
+    );
+    if (remote['message'] is Map) {
+      return WhatsAppChatMessage.fromJson(Map<String, dynamic>.from(remote['message'] as Map));
+    }
+    return null;
   }
 
 }

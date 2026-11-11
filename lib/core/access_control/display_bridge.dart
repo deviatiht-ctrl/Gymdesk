@@ -136,6 +136,7 @@ class AccessDisplayBridge {
   }
 
   Future<bool> openDisplayWindow(String route) => _platform.openDisplayWindow(route);
+  String? displayUrlFor(String route) => _platform.displayUrlFor(route);
   void closeCurrentWindow() => _platform.closeCurrentWindow();
 
   static Map<String, dynamic>? _decode(String raw) {

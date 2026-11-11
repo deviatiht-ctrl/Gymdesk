@@ -55,12 +55,20 @@ class LocalOverviewPage extends ConsumerWidget {
               const SizedBox(height: 24),
               if (engine.state.value.errorCode != null)
                 Text(s.text(engine.state.value.errorCode!)),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton(
-                  onPressed: () => context.go('/sync'),
-                  child: Text(s.text('sync')),
-                ),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: () => engine.synchronize(full: true, retry: true),
+                    icon: const Icon(LucideIcons.refreshCw, size: 16),
+                    label: Text(s.text('retry')),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => context.go('/sync'),
+                    child: Text(s.text('sync')),
+                  ),
+                ],
               ),
             ],
           );
@@ -73,9 +81,6 @@ class LocalOverviewPage extends ConsumerWidget {
         final trialDaysLeft = trialEnds == null
             ? 0
             : trialEnds.difference(DateTime.now().toUtc()).inDays.clamp(0, 7);
-
-        final contractConfig = gym['settings'] as Map? ?? {};
-        final maxMembers = (contractConfig['max_members'] as num?)?.toInt() ?? 1000;
 
         return ListView(
           padding: const EdgeInsets.all(24),

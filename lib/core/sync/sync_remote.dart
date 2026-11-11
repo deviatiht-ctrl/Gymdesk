@@ -29,7 +29,7 @@ class SupabaseSyncRemote implements SyncRemote {
 
   Future<T> _request<T>(Future<T> Function() request) async {
     try {
-      return await request().timeout(const Duration(seconds: 12));
+      return await request().timeout(const Duration(seconds: 25));
     } on PostgrestException catch (e) {
       throw SyncRejected(
         switch (e.code) {
@@ -58,7 +58,7 @@ class SupabaseSyncRemote implements SyncRemote {
     () async => Map<String, dynamic>.from(
       await client
           .rpc('sync_context')
-          .timeout(const Duration(seconds: 4)) as Map,
+          .timeout(const Duration(seconds: 10)) as Map,
     ),
   );
 

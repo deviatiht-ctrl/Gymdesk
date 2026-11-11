@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
@@ -14,6 +15,8 @@ import '../../../app/providers.dart';
 import '../../../core/access_control/access_monitor.dart';
 import '../../../core/access_control/display_bridge.dart';
 import '../../../core/access_control/terminal_access_service.dart';
+import '../../../core/storage/person_photo_cache.dart';
+import '../../../core/widgets/person_avatar.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../../../l10n/app_strings.dart';
@@ -24,14 +27,86 @@ import '../../settings/data/settings_repository.dart';
 /// Ouvrir l'écran d'accès sur le 2e écran public ou tablette Wi-Fi.
 Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = false]) async {
   final target = isTablet ? '/tablet-access' : '/access-display';
+  final displayUrl = AccessDisplayBridge.instance.displayUrlFor(target);
   final opened = await AccessDisplayBridge.instance.openDisplayWindow(target);
   if (context == null || !context.mounted) return;
   if (opened) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Écran d’accès ouvert dans une fenêtre séparée — glissez-la sur le 2e écran (F11 = plein écran).'),
-        backgroundColor: Color(0xFF0F766E),
-        duration: Duration(seconds: 5),
+      SnackBar(
+        content: Text(
+          displayUrl == null
+              ? 'Écran d’accès ouvert dans une fenêtre séparée — glissez-la sur le 2e écran (F11 = plein écran).'
+              : 'Écran d’accès ouvert — glissez sur le 2e écran (F11) ou ouvrez :\n$displayUrl',
+        ),
+        backgroundColor: const Color(0xFF0F766E),
+        duration: const Duration(seconds: 7),
+        action: displayUrl == null
+            ? null
+            : SnackBarAction(
+                label: 'Copier URL',
+                textColor: const Color(0xFF5EEAD4),
+                onPressed: () {
+                  unawaited(Clipboard.setData(ClipboardData(text: displayUrl)));
+                },
+              ),
+      ),
+    );
+    return;
+  }
+  if (kIsWeb && displayUrl != null) {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isTablet ? 'Ouvrir Mode Tablette Wi-Fi' : 'Ouvrir le 2e écran d’accès'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Le navigateur a bloqué la fenêtre séparée. Copiez cette adresse pour l’ouvrir sur le 2e écran ou autorisez les popups :',
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SelectableText(
+                displayUrl,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Fermer'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: displayUrl));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Adresse du 2e écran copiée !')),
+                );
+              }
+            },
+            icon: const Icon(LucideIcons.copy, size: 16),
+            label: const Text('Copier l’adresse'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              context.push('$target?display=1');
+            },
+            icon: const Icon(LucideIcons.monitor, size: 16),
+            label: const Text('Ouvrir ici'),
+          ),
+        ],
       ),
     );
     return;
@@ -230,7 +305,10 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
 
     setState(() {
       _decision = decision;
-      _photo = null;
+      _photo = PersonPhotoCache.peek(
+        personId: targetId,
+        photoUrl: decision.person?.photoUrl ?? member?.photoUrl,
+      );
       _quote = math.Random().nextInt(_frenchQuotes.length);
       if (decision.outcome == AccessOutcome.granted || decision.outcome == AccessOutcome.legacy) {
         _todayCount++;
@@ -277,38 +355,32 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
         ? (snapshot['reason'] == 'legacy_biostar' ? AccessOutcome.legacy : AccessOutcome.granted)
         : (eventType == 'denied_unknown' ? AccessOutcome.unrecognized : AccessOutcome.denied);
     final decision = AccessDecision(outcome, person: person);
+    final targetId = memberId ?? person?.id ?? snapshot['id']?.toString();
+    final targetPhotoUrl = snapshot['photo_url']?.toString() ?? person?.photoUrl;
     setState(() {
       _decision = decision;
-      _photo = null;
+      _photo = PersonPhotoCache.peek(personId: targetId, photoUrl: targetPhotoUrl);
       _quote = math.Random().nextInt(_frenchQuotes.length);
       if (isGranted) _todayCount++;
     });
-    if (memberId != null) {
-      unawaited(_loadPhotoById(memberId, decision, snapshot['photo_url']?.toString()));
+    if (targetId != null && targetId.isNotEmpty) {
+      unawaited(_loadPhotoById(targetId, decision, targetPhotoUrl));
     }
     _scheduleDismiss(Duration(seconds: isGranted ? 8 : 6));
   }
 
-  Future<void> _loadPhotoById(String memberId, AccessDecision decision, [String? photoUrl]) async {
+  Future<void> _loadPhotoById(String personId, AccessDecision decision, [String? photoUrl]) async {
     try {
-      final local = await _members.localPhoto(memberId);
-      if (local != null && local.isNotEmpty) {
-        if (mounted && identical(_decision, decision)) setState(() => _photo = local);
-        return;
+      final runtime = ref.read(appRuntimeProvider);
+      final bytes = await PersonPhotoCache.resolve(
+        personId: personId,
+        photoUrl: photoUrl,
+        db: runtime.database,
+        client: runtime.client,
+      );
+      if (mounted && identical(_decision, decision) && bytes != null && bytes.isNotEmpty) {
+        setState(() => _photo = bytes);
       }
-      if (photoUrl != null && photoUrl.isNotEmpty && !photoUrl.startsWith('http')) {
-        final runtime = ref.read(appRuntimeProvider);
-        final bytes = await runtime.client.storage
-            .from('member-photos')
-            .download(photoUrl)
-            .timeout(const Duration(seconds: 3));
-        if (mounted && identical(_decision, decision) && bytes.isNotEmpty) {
-          setState(() => _photo = bytes);
-          return;
-        }
-      }
-      final member = await _members.watchMember(memberId).first.timeout(const Duration(seconds: 3));
-      if (member != null) await _loadPhoto(member, decision);
     } catch (_) {}
   }
 
@@ -985,7 +1057,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
                       if ((person?.employeeNumber ?? person?.employee?.employeeNumber)?.isNotEmpty == true) ...[
                         const SizedBox(height: 6),
                         Text(
-                          'Matricule : ',
+                          'Matricule : ${person?.employeeNumber ?? person?.employee?.employeeNumber ?? ''}',
                           style: const TextStyle(color: Color(0xFF99F6E4), fontSize: 13, fontWeight: FontWeight.w600),
                         ),
                       ],
@@ -1048,47 +1120,34 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
   }
 
   Widget _avatar(AccessPerson? person, Color accent, bool granted, bool unrecognized) {
-    final photo = _photo;
-    final photoUrl = person?.photoUrl;
-    final initials = person?.name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).take(2).map((p) => p[0].toUpperCase()).join();
-    final hasNetworkImage = photo == null && photoUrl != null && photoUrl.isNotEmpty && (photoUrl.startsWith('http://') || photoUrl.startsWith('https://'));
-
-    return Container(
-      width: 180,
-      height: 180,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: accent, width: 5),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withOpacity(0.45),
-            blurRadius: 32,
-            spreadRadius: 4,
-          ),
-        ],
-        color: accent.withOpacity(0.15),
-        image: photo != null
-            ? DecorationImage(image: MemoryImage(photo), fit: BoxFit.cover)
-            : (hasNetworkImage ? DecorationImage(image: NetworkImage(photoUrl), fit: BoxFit.cover) : null),
-      ),
-      child: photo != null || hasNetworkImage
-          ? null
-          : Center(
-              child: initials != null && initials.isNotEmpty
-                  ? Text(
-                      initials,
-                      style: TextStyle(color: accent, fontSize: 64, fontWeight: FontWeight.w900),
-                    )
-                  : Icon(
-                      unrecognized
-                          ? LucideIcons.fingerprint
-                          : granted
-                              ? LucideIcons.partyPopper
-                              : LucideIcons.ban,
-                      color: accent,
-                      size: 84,
-                    ),
-            ),
+    final runtime = ref.read(appRuntimeProvider);
+    final personId = person?.id ?? person?.memberId;
+    return PersonAvatar(
+      size: 180,
+      personId: personId,
+      photoUrl: person?.photoUrl,
+      name: person?.name,
+      db: runtime.database,
+      client: runtime.client,
+      initialBytes: _photo,
+      backgroundColor: accent.withOpacity(0.15),
+      borderColor: accent,
+      borderWidth: 5,
+      shadows: [
+        BoxShadow(
+          color: accent.withOpacity(0.45),
+          blurRadius: 32,
+          spreadRadius: 4,
+        ),
+      ],
+      fallbackIcon: unrecognized
+          ? LucideIcons.fingerprint
+          : granted
+              ? LucideIcons.partyPopper
+              : LucideIcons.ban,
+      fallbackColor: accent,
+      iconSize: 84,
+      initialsStyle: TextStyle(color: accent, fontSize: 64, fontWeight: FontWeight.w900),
     );
   }
 

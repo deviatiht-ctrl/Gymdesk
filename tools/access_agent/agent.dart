@@ -14,8 +14,7 @@ import 'suprema_ffi.dart';
 ///   signale honnêtement (`reader_connected: false`) : aucune capture simulée.
 /// - Pilote le relais d'ouverture de porte (Série USB CH340 / FTDI & HTTP)
 
-const String agentVersion = '3.6.2';
-bool _doorConnected = false;
+const String agentVersion = '3.6.3';
 
 ReaderBackend? _sdk;
 DateTime _lastRefresh = DateTime.fromMillisecondsSinceEpoch(0);
@@ -107,7 +106,7 @@ Future<void> _watchLoop() async {
   var failCount = 0;
   while (true) {
     if (_watchPaused || _biostarTool() == null) {
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
       continue;
     }
     final cfg = _biostarTool()!;
@@ -129,7 +128,6 @@ Future<void> _watchLoop() async {
         final f = line.trim().split('\t');
         if (f.first == 'watching') {
           _watchReady = true;
-          _doorConnected = true;
           _watchError = null;
           failCount = 0;
           print('[W2] Siveyan aktif sou ${term['ip']} (${f.length > 1 ? f[1] : '?'})');
@@ -137,10 +135,9 @@ Future<void> _watchLoop() async {
         } else if (f.first == 'disconnected') {
           final wasReady = _watchReady;
           _watchReady = false;
-          _doorConnected = false;
           _watchError = f.length > 1 ? f.skip(1).join(': ') : 'disconnected';
           if (wasReady) {
-            print('[W2] Kab/tèminal dekonekte (${_watchError}) — rekoneksyon enstantane ap tann...');
+            print('[W2] Kab/tèminal dekonekte ($_watchError) — rekoneksyon enstantane ap tann...');
             broadcastEvent({'type': 'terminal_watch', 'online': false, 'ip': term['ip']});
           }
         } else if (f.first == 'need_search') {
@@ -178,14 +175,13 @@ Future<void> _watchLoop() async {
     final wasReady = _watchReady;
     _watchProc = null;
     _watchReady = false;
-    _doorConnected = false;
     if (wasReady) broadcastEvent({'type': 'terminal_watch', 'online': false});
     if (!_watchPaused) {
       failCount++;
       if (failCount >= 5) {
         unawaited(_autoDiscoverOrConfigureTerminal());
       }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await Future<void>.delayed(const Duration(milliseconds: 60));
     }
   }
 }
@@ -195,7 +191,7 @@ DateTime _lastAutoNetCheck = DateTime.fromMillisecondsSinceEpoch(0);
 /// Auto-dekouvri tèminal BioEntry W2 sou kab rezo a epi mete terminal.json ajou otomatikman.
 Future<void> _autoDiscoverOrConfigureTerminal() async {
   final now = DateTime.now();
-  if (now.difference(_lastAutoNetCheck).inSeconds < 20) return;
+  if (now.difference(_lastAutoNetCheck).inSeconds < 8) return;
   _lastAutoNetCheck = now;
   try {
     // Konfigirasyon kat rezo a (192.168.1.50, wout W2) se Gadyen_Ultime.ps1
@@ -825,6 +821,13 @@ Future<void> _handleRequest(HttpRequest request) async {
             ? [viaWatch]
             : await _biostarCall([verb, ip, '$port'], timeout: const Duration(seconds: 20));
         final ok = lines.any((l) => l.first == 'ok');
+        if (ok) {
+          broadcastEvent({
+            'type': 'door_locked',
+            'command': verb,
+            'timestamp': DateTime.now().toIso8601String(),
+          });
+        }
         await _json(res, {'success': ok, 'online': ok, 'ip': ip, 'command': verb});
       } on SupremaException catch (e) {
         await _json(res, {'success': false, 'error': e.code, 'message': e.message});

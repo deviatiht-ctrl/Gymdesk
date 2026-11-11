@@ -17,8 +17,14 @@ class StaffRepository {
     try {
       return await action().timeout(const Duration(seconds: 60));
     } on FunctionException catch (e) {
-      final details = e.details;
-      final code = details is Map ? details['error'] : null;
+      dynamic details = e.details;
+      if (details is String && details.trim().startsWith('{')) {
+        try {
+          details = jsonDecode(details);
+        } catch (_) {}
+      }
+      var code = details is Map ? details['error']?.toString() : null;
+      if (code == 'email_exists') code = 'owner_exists';
       const safe = {
         'access_denied',
         'owner_exists',
@@ -31,7 +37,7 @@ class StaffRepository {
         'provision_failed',
       };
       throw StaffFailure(
-        code is String && safe.contains(code) ? code : 'server_error',
+        code != null && safe.contains(code) ? code : 'server_error',
       );
     } on PostgrestException catch (e) {
       throw StaffFailure(switch (e.code) {
@@ -108,8 +114,8 @@ class StaffRepository {
     Map<String, dynamic>? permissions,
   }) => _request(() async {
     if (session.role != 'owner' ||
-        !{'supervisor', 'reception'}.contains(role) ||
-        !{'supervisor', 'reception'}.contains(target.role)) {
+        !{'supervisor', 'manager', 'reception'}.contains(role) ||
+        !{'supervisor', 'manager', 'reception'}.contains(target.role)) {
       throw const StaffFailure('access_denied');
     }
     final params = <String, dynamic>{

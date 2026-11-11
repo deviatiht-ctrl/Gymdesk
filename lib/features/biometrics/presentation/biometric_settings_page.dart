@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gymdesk_biometrics/gymdesk_biometrics.dart';
@@ -7,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../app/providers.dart';
 import '../../../core/access_control/access_monitor.dart';
+import '../../../core/access_control/display_bridge.dart';
 import '../../../core/access_control/terminal_access_service.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../l10n/app_strings.dart';
@@ -635,6 +637,19 @@ class _BiometricSettingsPageState extends ConsumerState<BiometricSettingsPage> {
                               icon: const Icon(LucideIcons.idCard, size: 18),
                               label: Text(s.text('employees')),
                             ),
+                            if (AccessDisplayBridge.instance.displayUrlFor('/access-display') case final url?)
+                              OutlinedButton.icon(
+                                onPressed: () async {
+                                  await Clipboard.setData(ClipboardData(text: url));
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Lien 2e écran copié : $url')),
+                                    );
+                                  }
+                                },
+                                icon: const Icon(LucideIcons.copy, size: 16),
+                                label: const Text('Copier lien 2e écran'),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 6),

@@ -2,6 +2,7 @@
 class DisplayBridgePlatform {
   bool get launchedAsDisplay => false;
   String? get launchRoute => null;
+  String? displayUrlFor(String route) => null;
   void setLaunchArgs(List<String> args) {}
   Future<bool> startHost(void Function(String message) onMessage) async => false;
   void stopHost() {}

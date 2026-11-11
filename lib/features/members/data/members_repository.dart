@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/db/local_database.dart';
+import '../../../core/storage/person_photo_cache.dart';
 import '../../../core/sync/sync_models.dart';
 import '../../payments/domain/payment.dart';
 import '../../plans/domain/plan.dart';
@@ -293,7 +294,10 @@ class MembersRepository {
           ),
       };
       await db.save(SyncEntity.members, memberRow, changedAt: changedAt);
-      if (draft.photo != null) await db.enqueuePhoto(id, draft.photo!);
+      if (draft.photo != null) {
+        PersonPhotoCache.invalidate(id);
+        await db.enqueuePhoto(id, draft.photo!);
+      }
       if (subscription != null) {
         subscriptionId = _uuid.v4();
         await db.save(
@@ -343,7 +347,10 @@ class MembersRepository {
         'created_by': member.row['created_by'],
         'photo_url': member.photoUrl,
       }, changedAt: changedAt);
-      if (draft.photo != null) await db.enqueuePhoto(member.id, draft.photo!);
+      if (draft.photo != null) {
+        PersonPhotoCache.invalidate(member.id, photoUrl: member.photoUrl);
+        await db.enqueuePhoto(member.id, draft.photo!);
+      }
     });
   });
 
@@ -605,18 +612,12 @@ class MembersRepository {
     }
   }
 
-  Future<Uint8List?> photoBytes(Member member) async {
-    final local = await localPhoto(member.id);
-    if (local != null) return local;
-    if (member.photoUrl == null || member.photoUrl!.isEmpty) return null;
-    try {
-      return await client.storage
-          .from('member-photos')
-          .download(member.photoUrl!);
-    } catch (_) {
-      return null;
-    }
-  }
+  Future<Uint8List?> photoBytes(Member member) => PersonPhotoCache.resolve(
+        personId: member.id,
+        photoUrl: member.photoUrl,
+        db: db,
+        client: client,
+      );
 
   GymSubscription? _currentFromSorted(
     List<GymSubscription> usableSorted,

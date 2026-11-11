@@ -24,8 +24,84 @@ class WhatsAppNotificationService {
   final WhatsAppClient _client;
   final Ref _ref;
 
-  // Cache pou evite voye menm rapèl la 2 fwa nan menm jounen an
+  // Cache pou evite voye menm rapèl / byenvini / resi la 2 fwa
   static final Set<String> _sentReminderKeys = {};
+  static final Set<String> _sentDedupKeys = {};
+
+  /// Tcheke si yon nimewo deja jwenn yon mesaj ki sanble (Logs + Outbox + Memoire)
+  Future<bool> _hasAlreadySentOrQueued({
+    required String? gymId,
+    required String cleanPhone,
+    required List<String> kinds,
+    String? receiptNo,
+    Duration? lookback,
+  }) async {
+    if (cleanPhone.isEmpty) return true;
+    final memKey = '${gymId ?? ''}|$cleanPhone|${kinds.join(',')}|${receiptNo ?? ''}';
+    if (_sentDedupKeys.contains(memKey)) return true;
+
+    final sb = Supabase.instance.client;
+    final sinceIso = lookback != null
+        ? DateTime.now().toUtc().subtract(lookback).toIso8601String()
+        : null;
+
+    try {
+      var logQuery = sb
+          .from('whatsapp_notification_logs')
+          .select('id, metadata, created_at')
+          .inFilter('kind', kinds)
+          .eq('recipient_phone', cleanPhone);
+      if (gymId != null && gymId.isNotEmpty) {
+        logQuery = logQuery.eq('gym_id', gymId);
+      }
+      if (sinceIso != null) {
+        logQuery = logQuery.gte('created_at', sinceIso);
+      }
+      final logs = await logQuery.limit(20);
+      if (logs.isNotEmpty) {
+        if (receiptNo == null || receiptNo.isEmpty) {
+          _sentDedupKeys.add(memKey);
+          return true;
+        }
+        for (final row in logs) {
+          final meta = row['metadata'];
+          if (meta is Map && meta['receipt_no']?.toString() == receiptNo) {
+            _sentDedupKeys.add(memKey);
+            return true;
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
+      var outQuery = sb
+          .from('whatsapp_messages_outbox')
+          .select('id, pdf_file_name, message, status, created_at')
+          .inFilter('kind', kinds)
+          .inFilter('status', ['pending', 'processing', 'sent'])
+          .eq('to_phone', cleanPhone);
+      if (sinceIso != null) {
+        outQuery = outQuery.gte('created_at', sinceIso);
+      }
+      final outbox = await outQuery.limit(20);
+      if (outbox.isNotEmpty) {
+        if (receiptNo == null || receiptNo.isEmpty) {
+          _sentDedupKeys.add(memKey);
+          return true;
+        }
+        for (final row in outbox) {
+          final pdfName = row['pdf_file_name']?.toString() ?? '';
+          final msg = row['message']?.toString() ?? '';
+          if (pdfName == 'Recu_$receiptNo.pdf' || msg.contains('#$receiptNo')) {
+            _sentDedupKeys.add(memKey);
+            return true;
+          }
+        }
+      }
+    } catch (_) {}
+
+    return false;
+  }
 
   // Jesyon Automatizasyon an background
   Timer? _autoTimer;
@@ -131,6 +207,7 @@ class WhatsAppNotificationService {
     required String gymName,
     String? gymPhone,
     String? gymId,
+    String? memberId,
     String languageCode = 'fr',
   }) async {
     final cleanTo = WhatsAppClient.normalizePhone(to);
@@ -142,6 +219,16 @@ class WhatsAppNotificationService {
     final access = await checkGymAccess(gymId: targetGymId);
     if (!access.hasAccess) {
       debugPrint('[WhatsApp] Mesaj Byenvini bloke: ${access.message}');
+      return false;
+    }
+
+    // Anti-doublon: pa voye byenvini 2 fwa bay menm nimewo a
+    if (await _hasAlreadySentOrQueued(
+      gymId: targetGymId,
+      cleanPhone: cleanTo,
+      kinds: const ['welcome'],
+    )) {
+      debugPrint('[WhatsApp] Byenvini deja voye pou $cleanTo, doublon evite.');
       return false;
     }
 
@@ -164,18 +251,27 @@ class WhatsAppNotificationService {
     );
 
     try {
-      final res = await _client.sendMessage(to: cleanTo, message: message);
-      if (res.success && targetGymId.isNotEmpty) {
-        try {
-          await Supabase.instance.client.from('whatsapp_notification_logs').insert({
-            'gym_id': targetGymId,
-            'kind': 'welcome',
-            'recipient_phone': cleanTo,
-            'recipient_name': memberName,
-            'status': 'sent',
-            'metadata': {'portal_url': portalUrl},
-          });
-        } catch (_) {}
+      final res = await _client.sendMessage(
+        to: cleanTo,
+        message: message,
+        kind: 'welcome',
+        gymId: targetGymId,
+      );
+      if (res.success) {
+        _sentDedupKeys.add('$targetGymId|$cleanTo|welcome|');
+        if (targetGymId.isNotEmpty) {
+          try {
+            await Supabase.instance.client.from('whatsapp_notification_logs').insert({
+              'gym_id': targetGymId,
+              if (memberId != null && memberId.isNotEmpty) 'member_id': memberId,
+              'kind': 'welcome',
+              'recipient_phone': cleanTo,
+              'recipient_name': memberName,
+              'status': 'sent',
+              'metadata': {'portal_url': portalUrl, 'member_number': memberNumber},
+            });
+          } catch (_) {}
+        }
       }
       return res.success;
     } catch (e) {
@@ -191,6 +287,7 @@ class WhatsAppNotificationService {
     Uint8List? pdfBytes,
     String? pdfUrl,
     String? gymPhone,
+    bool allowResend = false,
     String languageCode = 'fr',
   }) async {
     final cleanTo = WhatsAppClient.normalizePhone(to);
@@ -202,6 +299,17 @@ class WhatsAppNotificationService {
     if (!access.hasAccess) {
       debugPrint('[WhatsApp] Resi bloke: ${access.message}');
       return false;
+    }
+
+    if (!allowResend &&
+        await _hasAlreadySentOrQueued(
+          gymId: targetGymId,
+          cleanPhone: cleanTo,
+          kinds: const ['receipt'],
+          receiptNo: data.receiptNo,
+        )) {
+      debugPrint('[WhatsApp] Resi #${data.receiptNo} deja voye pou $cleanTo, doublon evite.');
+      return true;
     }
 
     final effectiveGymPhone = (gymPhone != null && gymPhone.trim().isNotEmpty)
@@ -230,22 +338,27 @@ class WhatsAppNotificationService {
         message: message,
         pdfBase64: pdfBase64,
         pdfFileName: pdfFileName,
+        kind: 'receipt',
+        gymId: targetGymId,
       );
-      if (res.success && targetGymId != null && targetGymId.isNotEmpty) {
-        try {
-          await Supabase.instance.client.from('whatsapp_notification_logs').insert({
-            'gym_id': targetGymId,
-            'kind': 'receipt',
-            'recipient_phone': cleanTo,
-            'recipient_name': data.memberName,
-            'status': 'sent',
-            'metadata': {
-              'receipt_no': data.receiptNo,
-              'amount': data.amount,
-              'plan_name': data.planName,
-            },
-          });
-        } catch (_) {}
+      if (res.success) {
+        _sentDedupKeys.add('${targetGymId ?? ''}|$cleanTo|receipt|${data.receiptNo}');
+        if (targetGymId != null && targetGymId.isNotEmpty) {
+          try {
+            await Supabase.instance.client.from('whatsapp_notification_logs').insert({
+              'gym_id': targetGymId,
+              'kind': 'receipt',
+              'recipient_phone': cleanTo,
+              'recipient_name': data.memberName,
+              'status': 'sent',
+              'metadata': {
+                'receipt_no': data.receiptNo,
+                'amount': data.amount,
+                'plan_name': data.planName,
+              },
+            });
+          } catch (_) {}
+        }
       }
       return res.success;
     } catch (e) {
@@ -254,7 +367,7 @@ class WhatsAppNotificationService {
     }
   }
 
-  /// 3. RAPÈL FIN ABÒNMAN (7 Jou, 2 Jou, Jou Fini oswa Ekspire)
+  /// 3. RAPÈL FIN ABÒNMAN (STRIKTEMAN 7 Jou ak 2 Jou SÈLMAN)
   Future<bool> sendExpirationReminder({
     required String to,
     required String memberName,
@@ -264,8 +377,12 @@ class WhatsAppNotificationService {
     required int daysRemaining,
     String? gymPhone,
     String? gymId,
+    String? memberId,
     String languageCode = 'fr',
   }) async {
+    if (daysRemaining != 7 && daysRemaining != 2) {
+      return false;
+    }
     final cleanTo = WhatsAppClient.normalizePhone(to);
     if (cleanTo.length < 8) return false;
 
@@ -275,6 +392,16 @@ class WhatsAppNotificationService {
     final access = await checkGymAccess(gymId: targetGymId);
     if (!access.hasAccess) {
       debugPrint('[WhatsApp] Rapèl bloke: ${access.message}');
+      return false;
+    }
+
+    final milestoneKind = daysRemaining == 7 ? 'reminder_7d' : 'reminder_2d';
+    if (await _hasAlreadySentOrQueued(
+      gymId: targetGymId,
+      cleanPhone: cleanTo,
+      kinds: [milestoneKind],
+      lookback: const Duration(days: 6),
+    )) {
       return false;
     }
 
@@ -299,7 +426,33 @@ class WhatsAppNotificationService {
     );
 
     try {
-      final res = await _client.sendMessage(to: cleanTo, message: message);
+      final res = await _client.sendMessage(
+        to: cleanTo,
+        message: message,
+        kind: milestoneKind,
+        gymId: targetGymId,
+      );
+      if (res.success) {
+        _sentDedupKeys.add('$targetGymId|$cleanTo|$milestoneKind|');
+        if (targetGymId.isNotEmpty) {
+          try {
+            await Supabase.instance.client.from('whatsapp_notification_logs').insert({
+              'gym_id': targetGymId,
+              if (memberId != null && memberId.isNotEmpty) 'member_id': memberId,
+              'kind': milestoneKind,
+              'recipient_phone': cleanTo,
+              'recipient_name': memberName,
+              'status': 'sent',
+              'metadata': {
+                'days_remaining': daysRemaining,
+                'plan_name': planName,
+                'end_date': endDate.toIso8601String(),
+                'auto': true,
+              },
+            });
+          } catch (_) {}
+        }
+      }
       return res.success;
     } catch (e) {
       debugPrint('[WhatsApp] Echèk voye rapèl abònman: $e');
@@ -352,35 +505,49 @@ class WhatsAppNotificationService {
         } catch (_) {}
       }
 
-      // 2. Chaje abònman yo
+      // 2. Chaje abònman yo epi idantifye dat fen ki pi lwen pou chak manm (deja renouvle = sote)
       final subRows = await db.watchRecords(SyncEntity.subscriptions, limit: 10000).first;
+      final parsedSubs = <Map<String, dynamic>>[];
+      final latestEndByMember = <String, DateTime>{};
       for (final r in subRows) {
         try {
           final p = jsonDecode(r.payload) as Map<String, dynamic>;
-          if (p['status'] != 'active') continue;
+          final st = p['status']?.toString();
+          if (st != 'active' && st != 'pending') continue;
+          final mid = p['member_id']?.toString();
+          final endRaw = p['end_date']?.toString();
+          if (mid == null || endRaw == null) continue;
+          final end = DateTime.tryParse(endRaw);
+          if (end == null) continue;
+          final endDay = DateTime(end.year, end.month, end.day);
+          final prev = latestEndByMember[mid];
+          if (prev == null || endDay.isAfter(prev)) {
+            latestEndByMember[mid] = endDay;
+          }
+          parsedSubs.add({...p, '_endDay': endDay});
+        } catch (_) {}
+      }
+
+      for (final p in parsedSubs) {
+        try {
           final memberId = p['member_id']?.toString();
           if (memberId == null || !memberMap.containsKey(memberId)) continue;
 
           final member = memberMap[memberId]!;
-          final endRaw = p['end_date']?.toString();
-          if (endRaw == null) continue;
-
-          final end = DateTime.tryParse(endRaw);
-          if (end == null) continue;
-          final endDay = DateTime(end.year, end.month, end.day);
+          final endDay = p['_endDay'] as DateTime;
+          final latest = latestEndByMember[memberId];
+          if (latest != null && latest.isAfter(endDay)) {
+            continue; // Manm lan deja renouvle pou pi lwen
+          }
 
           final diffDays = endDay.difference(today).inDays;
 
-          // Etap Entèlijan: 7 jou avan, 2 jou avan, jou fen an (0 jou), oswa fenk fini (-1 jou)
+          // STRIKTEMAN J-7 ak J-2 sèlman (si l ale a J-7, sèlman J-2 ka ale 5 jou apre; pa gen J-0/-1)
           String? milestoneKind;
           if (diffDays == 7) {
             milestoneKind = 'reminder_7d';
           } else if (diffDays == 2) {
             milestoneKind = 'reminder_2d';
-          } else if (diffDays == 0) {
-            milestoneKind = 'reminder_0d';
-          } else if (diffDays == -1) {
-            milestoneKind = 'reminder_expired';
           }
 
           if (milestoneKind == null) continue;
@@ -389,26 +556,22 @@ class WhatsAppNotificationService {
               ? member['whatsapp'].toString()
               : member['phone']?.toString() ?? '';
 
-          if (phone.trim().isEmpty) continue;
+          final cleanPhone = WhatsAppClient.normalizePhone(phone);
+          if (cleanPhone.length < 8) continue;
 
-          // Anti-doublon lokal
+          // Anti-doublon lokal + baz done (Logs + Outbox)
           final cacheKey = '${memberId}_${endDay.toIso8601String()}_$milestoneKind';
           if (_sentReminderKeys.contains(cacheKey)) continue;
 
-          // Anti-doublon Supabase nan whatsapp_notification_logs
-          try {
-            final logs = await Supabase.instance.client
-                .from('whatsapp_notification_logs')
-                .select('id')
-                .eq('member_id', memberId)
-                .eq('kind', milestoneKind)
-                .gte('created_at', now.subtract(const Duration(days: 3)).toIso8601String())
-                .limit(1);
-            if (logs.isNotEmpty) {
-              _sentReminderKeys.add(cacheKey);
-              continue; // Te deja voye nan dènye 3 jou yo
-            }
-          } catch (_) {}
+          if (await _hasAlreadySentOrQueued(
+            gymId: gymId,
+            cleanPhone: cleanPhone,
+            kinds: [milestoneKind],
+            lookback: const Duration(days: 6),
+          )) {
+            _sentReminderKeys.add(cacheKey);
+            continue;
+          }
 
           final memberName = '${member['first_name'] ?? ''} ${member['last_name'] ?? ''}'.trim();
           final planName = p['plan_name']?.toString() ?? 'Abonnement Gym';
@@ -422,31 +585,13 @@ class WhatsAppNotificationService {
             daysRemaining: diffDays,
             gymPhone: gymPhone,
             gymId: gymId,
+            memberId: memberId,
             languageCode: languageCode,
           );
 
           if (ok) {
             _sentReminderKeys.add(cacheKey);
             sentCount++;
-
-            // Enskri nan journal Supabase
-            try {
-              await Supabase.instance.client.from('whatsapp_notification_logs').insert({
-                'gym_id': gymId,
-                'member_id': memberId,
-                'kind': milestoneKind,
-                'recipient_phone': WhatsAppClient.normalizePhone(phone),
-                'recipient_name': memberName,
-                'status': 'sent',
-                'metadata': {
-                  'days_remaining': diffDays,
-                  'plan_name': planName,
-                  'end_date': endDay.toIso8601String(),
-                  'auto': true,
-                },
-              });
-            } catch (_) {}
-
             // Delè sekirite anti-spam ant rapèl yo (2.5 segonn)
             await Future<void>.delayed(const Duration(milliseconds: 2500));
           }
