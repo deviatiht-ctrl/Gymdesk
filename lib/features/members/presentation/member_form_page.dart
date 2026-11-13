@@ -206,6 +206,7 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
       initialDate: _birthDate ?? DateTime(now.year - 20),
       firstDate: DateTime(now.year - 110),
       lastDate: now,
+      initialDatePickerMode: DatePickerMode.year,
     );
     if (date != null && mounted) setState(() => _birthDate = date);
   }
@@ -508,17 +509,27 @@ class _MemberFormPageState extends ConsumerState<MemberFormPage> {
                         ),
                       ),
                       SizedBox(
-                        width: 220,
-                        child: OutlinedButton.icon(
-                          onPressed: _busy ? null : _pickBirthDate,
-                          icon: const Icon(LucideIcons.calendar),
-                          label: Text(
-                            _birthDate == null
-                                ? s.text('birth_date')
-                                : DateFormat.yMMMd(
-                                    Localizations.localeOf(context).toString(),
-                                  ).format(_birthDate!),
-                          ),
+                        width: 260,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _busy ? null : _pickBirthDate,
+                                icon: const Icon(LucideIcons.calendar),
+                                label: Text(
+                                  _birthDate == null
+                                      ? s.text('birth_date')
+                                      : '${DateFormat.yMMMd(Localizations.localeOf(context).toString()).format(_birthDate!)} (${DateTime.now().year - _birthDate!.year} ans)',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            if (_birthDate != null)
+                              IconButton(
+                                icon: const Icon(LucideIcons.x, size: 16),
+                                onPressed: _busy ? null : () => setState(() => _birthDate = null),
+                              ),
+                          ],
                         ),
                       ),
                       SizedBox(

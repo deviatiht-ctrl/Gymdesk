@@ -396,9 +396,17 @@ class MembersRepository {
     required DateTime changedAt,
     PaymentCommand? payment,
     double? price,
+    String? sex,
+    DateTime? birthDate,
   }) => _local(() async {
     if (!{'owner', 'supervisor', 'reception', 'manager'}.contains(session.role)) {
       throw const MemberFailure('access_denied');
+    }
+    if (sex != null && sex.isNotEmpty && !{'male', 'female', 'other'}.contains(sex)) {
+      throw const MemberFailure('invalid_record');
+    }
+    if (birthDate != null && birthDate.isAfter(dateOnly(DateTime.now()))) {
+      throw const MemberFailure('invalid_record');
     }
     _validatePayment(payment);
     final planPrice = plan.flexible && price != null ? price : plan.price;
@@ -496,8 +504,51 @@ class MembersRepository {
           );
         }
       }
+      if (sex != null || birthDate != null) {
+        final updatedMemberRow = Map<String, dynamic>.from(member.row);
+        if (sex != null && sex.isNotEmpty) {
+          updatedMemberRow['sex'] = sex;
+        }
+        if (birthDate != null) {
+          updatedMemberRow['birth_date'] = ymd(dateOnly(birthDate));
+        }
+        updatedMemberRow['updated_at'] = changedAt.toUtc().toIso8601String();
+        await db.save(
+          SyncEntity.members,
+          updatedMemberRow,
+          changedAt: changedAt,
+        );
+      }
     });
     return subscription;
+  });
+
+  Future<void> updateDemographics(
+    Member member, {
+    String? sex,
+    DateTime? birthDate,
+    required DateTime changedAt,
+  }) => _local(() async {
+    if (!{'owner', 'supervisor', 'reception', 'manager'}.contains(session.role)) {
+      throw const MemberFailure('access_denied');
+    }
+    if (sex != null && sex.isNotEmpty && !{'male', 'female', 'other'}.contains(sex)) {
+      throw const MemberFailure('invalid_record');
+    }
+    if (birthDate != null && birthDate.isAfter(dateOnly(DateTime.now()))) {
+      throw const MemberFailure('invalid_record');
+    }
+    await db.transaction(() async {
+      final updatedRow = Map<String, dynamic>.from(member.row);
+      if (sex != null && sex.isNotEmpty) {
+        updatedRow['sex'] = sex;
+      }
+      if (birthDate != null) {
+        updatedRow['birth_date'] = ymd(dateOnly(birthDate));
+      }
+      updatedRow['updated_at'] = changedAt.toUtc().toIso8601String();
+      await db.save(SyncEntity.members, updatedRow, changedAt: changedAt);
+    });
   });
 
   /// Mete `credit_balance` manm nan ajou nan menm tranzaksyon an.

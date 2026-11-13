@@ -370,6 +370,8 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     var replacePrevious = replaceTarget != null;
     DateTime start = replaceTarget != null ? dateOnly(replaceTarget.startDate) : dateOnly(DateTime.now());
     DateTime end = subscriptionEnd(start, plan?.durationDays ?? 30);
+    String? renewSex = member.sex;
+    DateTime? renewBirthDate = member.birthDate;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -384,6 +386,127 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                   if (activePlans.isEmpty)
                     Text(s.text('plans_empty'))
                   else ...[
+                    Builder(
+                      builder: (context) {
+                        final bool missingInfo = (renewSex == null || renewSex!.isEmpty) || renewBirthDate == null;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: missingInfo ? const Color(0xFFFEF3C7) : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: missingInfo ? const Color(0xFFF59E0B) : Colors.grey.shade300,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    missingInfo ? LucideIcons.alertTriangle : LucideIcons.userCheck,
+                                    size: 16,
+                                    color: missingInfo ? const Color(0xFFB45309) : const Color(0xFF0F766E),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      missingInfo
+                                          ? s.text('missing_profile_info')
+                                          : 'Profil du membre (Sexe & Date de naissance)',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12.5,
+                                        color: missingInfo ? const Color(0xFF92400E) : const Color(0xFF0F766E),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (missingInfo) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  s.text('missing_profile_renew_hint'),
+                                  style: TextStyle(fontSize: 11.5, color: Colors.amber.shade900),
+                                ),
+                              ],
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: DropdownButtonFormField<String?>(
+                                      value: renewSex,
+                                      isDense: true,
+                                      decoration: InputDecoration(
+                                        labelText: s.text('sex'),
+                                        prefixIcon: const Icon(LucideIcons.user, size: 16),
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                        border: const OutlineInputBorder(),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                      ),
+                                      items: [
+                                        DropdownMenuItem(value: null, child: Text(s.text('unknown'))),
+                                        DropdownMenuItem(value: 'male', child: Text(s.text('male'))),
+                                        DropdownMenuItem(value: 'female', child: Text(s.text('female'))),
+                                        DropdownMenuItem(value: 'other', child: Text(s.text('other_sex'))),
+                                      ],
+                                      onChanged: (v) => setDialog(() => renewSex = v),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: InkWell(
+                                      onTap: () async {
+                                        final now = DateTime.now();
+                                        final picked = await showDatePicker(
+                                          context: context,
+                                          initialDate: renewBirthDate ?? DateTime(now.year - 20),
+                                          firstDate: DateTime(now.year - 110),
+                                          lastDate: now,
+                                          initialDatePickerMode: DatePickerMode.year,
+                                        );
+                                        if (picked != null) {
+                                          setDialog(() => renewBirthDate = picked);
+                                        }
+                                      },
+                                      child: InputDecorator(
+                                        decoration: InputDecoration(
+                                          labelText: s.text('birth_date'),
+                                          prefixIcon: const Icon(LucideIcons.calendar, size: 16),
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          border: const OutlineInputBorder(),
+                                          filled: true,
+                                          fillColor: Colors.white,
+                                          suffixIcon: renewBirthDate != null
+                                              ? IconButton(
+                                                  icon: const Icon(LucideIcons.x, size: 14),
+                                                  onPressed: () => setDialog(() => renewBirthDate = null),
+                                                )
+                                              : null,
+                                        ),
+                                        child: Text(
+                                          renewBirthDate == null
+                                              ? s.text('birth_date')
+                                              : '${DateFormat.yMMMd(locale).format(renewBirthDate!)}${renewBirthDate != null ? " (${DateTime.now().year - renewBirthDate!.year} ans)" : ""}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: renewBirthDate != null ? FontWeight.w600 : FontWeight.normal,
+                                            color: renewBirthDate != null ? Colors.black87 : Colors.grey.shade600,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
                     if (latestSub != null) ...[
                       Container(
                         margin: const EdgeInsets.only(bottom: 12),
@@ -657,13 +780,16 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
         changedAt: _now,
         payment: command,
         price: selectedPrice,
+        sex: renewSex,
+        birthDate: renewBirthDate,
       );
+      await runtime.sync?.synchronize();
     });
     if (created != null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Abònman renouvle avèk siksè !'),
+            content: Text('Abonnement renouvelé avec succès !'),
             backgroundColor: Color(0xFF0F766E),
             duration: Duration(seconds: 3),
           ),
@@ -1378,13 +1504,53 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                             _row(s.text('whatsapp'), member.whatsapp),
                             _row(s.text('email'), member.email),
                             _row(
+                              s.text('sex'),
+                              member.sex == 'male'
+                                  ? s.text('male')
+                                  : (member.sex == 'female'
+                                      ? s.text('female')
+                                      : (member.sex == 'other'
+                                          ? s.text('other_sex')
+                                          : member.sex)),
+                            ),
+                            _row(
                               s.text('birth_date'),
                               member.birthDate == null
                                   ? null
-                                  : DateFormat.yMMMd(
-                                      locale,
-                                    ).format(member.birthDate!),
+                                  : '${DateFormat.yMMMd(locale).format(member.birthDate!)}${member.ageOn(DateTime.now()) != null ? " (${member.ageOn(DateTime.now())} ${s.text('years_old')})" : ""}',
                             ),
+                            if (member.sex == null || member.sex!.isEmpty || member.birthDate == null) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFFF59E0B)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(LucideIcons.alertTriangle, size: 16, color: Color(0xFFB45309)),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        '${s.text('missing_profile_alert')} : ${[if (member.sex == null || member.sex!.isEmpty) s.text('sex'), if (member.birthDate == null) s.text('birth_date')].join(', ')}',
+                                        style: const TextStyle(fontSize: 12, color: Color(0xFF92400E), fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                    TextButton(
+                                      style: TextButton.styleFrom(
+                                        visualDensity: VisualDensity.compact,
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                      ),
+                                      onPressed: _busy ? null : () => context.go('/members/${member.id}/edit'),
+                                      child: Text(s.text('edit'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
                             _row(
                               s.text('nif'),
                               member.nif == null

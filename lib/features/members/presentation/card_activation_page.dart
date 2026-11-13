@@ -254,6 +254,18 @@ class _CardActivationPageState extends ConsumerState<CardActivationPage> {
     }
   }
 
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(now.year - 20),
+      firstDate: DateTime(now.year - 110),
+      lastDate: now,
+      initialDatePickerMode: DatePickerMode.year,
+    );
+    if (date != null && mounted) setState(() => _birthDate = date);
+  }
+
   void _startMemorizationCountdown() {
     setState(() {
       _pinStage = 2;
@@ -1029,6 +1041,58 @@ Mèsi pou konfyans ou, bòn antrènman !''';
                   validator: (v) => (v == null || v.trim().isEmpty)
                       ? s.text('required')
                       : null,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String?>(
+                        value: _sex,
+                        decoration: InputDecoration(
+                          labelText: s.text('sex'),
+                          prefixIcon: const Icon(LucideIcons.user, size: 18),
+                          border: const OutlineInputBorder(),
+                        ),
+                        items: [
+                          DropdownMenuItem(value: null, child: Text(s.text('unknown'))),
+                          DropdownMenuItem(value: 'male', child: Text(s.text('male'))),
+                          DropdownMenuItem(value: 'female', child: Text(s.text('female'))),
+                          DropdownMenuItem(value: 'other', child: Text(s.text('other_sex'))),
+                        ],
+                        onChanged: (v) => setState(() => _sex = v),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: InkWell(
+                        onTap: _pickBirthDate,
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            labelText: s.text('birth_date'),
+                            prefixIcon: const Icon(LucideIcons.calendar, size: 18),
+                            border: const OutlineInputBorder(),
+                            suffixIcon: _birthDate != null
+                                ? IconButton(
+                                    icon: const Icon(LucideIcons.x, size: 16),
+                                    onPressed: () => setState(() => _birthDate = null),
+                                  )
+                                : null,
+                          ),
+                          child: Text(
+                            _birthDate == null
+                                ? s.text('birth_date')
+                                : '${DateFormat.yMMMd(Localizations.localeOf(context).toString()).format(_birthDate!)}${_birthDate != null ? " (${DateTime.now().year - _birthDate!.year} ans)" : ""}',
+                            style: TextStyle(
+                              color: _birthDate == null ? Colors.grey.shade600 : Colors.black87,
+                              fontSize: 13,
+                              fontWeight: _birthDate == null ? FontWeight.normal : FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextFormField(

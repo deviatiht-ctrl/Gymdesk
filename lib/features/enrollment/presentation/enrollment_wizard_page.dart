@@ -259,6 +259,20 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
     }
   }
 
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(now.year - 20),
+      firstDate: DateTime(now.year - 110),
+      lastDate: now,
+      initialDatePickerMode: DatePickerMode.year,
+    );
+    if (date != null && mounted) {
+      setState(() => _birthDate = date);
+    }
+  }
+
   void _onAutoBiometricEvent(BiometricEvent event) {
     if (!mounted || _isCapturing || _isSaving || _skipFingerprintForNow) return;
     if (_selectedFingerIndex == 1 && _primaryTemplate != null) return;
@@ -1393,15 +1407,54 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                         Expanded(
                                           child: DropdownButtonFormField<String>(
                                             value: _sex,
-                                            decoration: InputDecoration(labelText: s.text('sex'), border: const OutlineInputBorder()),
+                                            decoration: InputDecoration(
+                                              labelText: s.text('sex'),
+                                              border: const OutlineInputBorder(),
+                                              prefixIcon: const Icon(LucideIcons.user, size: 18),
+                                            ),
                                             items: [
                                               DropdownMenuItem(value: 'male', child: Text(s.text('male'))),
                                               DropdownMenuItem(value: 'female', child: Text(s.text('female'))),
+                                              DropdownMenuItem(value: 'other', child: Text(s.text('other_sex'))),
                                             ],
                                             onChanged: (val) => setState(() => _sex = val ?? 'male'),
                                           ),
                                         ),
                                         const SizedBox(width: 12),
+                                        Expanded(
+                                          child: InkWell(
+                                            onTap: _pickBirthDate,
+                                            child: InputDecorator(
+                                              decoration: InputDecoration(
+                                                labelText: s.text('birth_date'),
+                                                prefixIcon: const Icon(LucideIcons.calendar, size: 18),
+                                                border: const OutlineInputBorder(),
+                                                suffixIcon: _birthDate != null
+                                                    ? IconButton(
+                                                        icon: const Icon(LucideIcons.x, size: 16),
+                                                        onPressed: () => setState(() => _birthDate = null),
+                                                      )
+                                                    : null,
+                                              ),
+                                              child: Text(
+                                                _birthDate == null
+                                                    ? 'Choisir date'
+                                                    : '${DateFormat.yMMMd(Localizations.localeOf(context).toString()).format(_birthDate!)}${_birthDate != null ? ' (${DateTime.now().year - _birthDate!.year} ans)' : ''}',
+                                                style: TextStyle(
+                                                  color: _birthDate == null ? Colors.grey.shade600 : Colors.black87,
+                                                  fontSize: 13.5,
+                                                  fontWeight: _birthDate == null ? FontWeight.normal : FontWeight.w600,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Row(
+                                      children: [
                                         Expanded(
                                           child: TextField(
                                             controller: _nifCinController,
@@ -1413,16 +1466,18 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                             ),
                                           ),
                                         ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: TextField(
+                                            controller: _addressController,
+                                            decoration: InputDecoration(
+                                              labelText: s.text('address'),
+                                              prefixIcon: const Icon(LucideIcons.mapPin, size: 18),
+                                              border: const OutlineInputBorder(),
+                                            ),
+                                          ),
+                                        ),
                                       ],
-                                    ),
-                                    const SizedBox(height: 12),
-                                    TextField(
-                                      controller: _addressController,
-                                      decoration: InputDecoration(
-                                        labelText: s.text('address'),
-                                        prefixIcon: const Icon(LucideIcons.mapPin, size: 18),
-                                        border: const OutlineInputBorder(),
-                                      ),
                                     ),
                                   ],
                                 ),
@@ -1790,26 +1845,59 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _nifCinController,
-                      decoration: InputDecoration(labelText: s.text('nif_cin'), prefixIcon: const Icon(LucideIcons.idCard), border: const OutlineInputBorder(), hintText: '000-000-000-0'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
                     child: DropdownButtonFormField<String>(
                       value: _sex,
-                      decoration: InputDecoration(labelText: s.text('sex'), border: const OutlineInputBorder()),
+                      decoration: InputDecoration(
+                        labelText: s.text('sex'),
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(LucideIcons.user, size: 18),
+                      ),
                       items: [
                         DropdownMenuItem(value: 'male', child: Text(s.text('male'))),
                         DropdownMenuItem(value: 'female', child: Text(s.text('female'))),
+                        DropdownMenuItem(value: 'other', child: Text(s.text('other_sex'))),
                       ],
                       onChanged: (val) => setState(() => _sex = val ?? 'male'),
                     ),
                   ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: InkWell(
+                      onTap: _pickBirthDate,
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: s.text('birth_date'),
+                          prefixIcon: const Icon(LucideIcons.calendar, size: 18),
+                          border: const OutlineInputBorder(),
+                          suffixIcon: _birthDate != null
+                              ? IconButton(
+                                  icon: const Icon(LucideIcons.x, size: 16),
+                                  onPressed: () => setState(() => _birthDate = null),
+                                )
+                              : null,
+                        ),
+                        child: Text(
+                          _birthDate == null
+                              ? 'Choisir date'
+                              : '${DateFormat.yMMMd(Localizations.localeOf(context).toString()).format(_birthDate!)}${_birthDate != null ? ' (${DateTime.now().year - _birthDate!.year} ans)' : ''}',
+                          style: TextStyle(
+                            color: _birthDate == null ? Colors.grey.shade600 : Colors.black87,
+                            fontSize: 12.5,
+                            fontWeight: _birthDate == null ? FontWeight.normal : FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _nifCinController,
+                decoration: InputDecoration(labelText: s.text('nif_cin'), prefixIcon: const Icon(LucideIcons.idCard), border: const OutlineInputBorder(), hintText: '000-000-000-0'),
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _addressController,
                 decoration: InputDecoration(labelText: s.text('address'), prefixIcon: const Icon(LucideIcons.mapPin), border: const OutlineInputBorder()),

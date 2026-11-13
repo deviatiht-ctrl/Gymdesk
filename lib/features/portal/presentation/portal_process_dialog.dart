@@ -75,6 +75,9 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
   String _paymentMethod = 'cash';
   final _referenceController = TextEditingController();
 
+  String _sex = 'male';
+  DateTime? _birthDate;
+
   bool _isProcessing = false;
   String? _errorMessage;
   bool _isCompleted = false;
@@ -133,10 +136,22 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
     try {
       final rows = await db.watchRecords(SyncEntity.members, limit: 50000).first;
       final enrolled = <Member>[];
+      final digits = widget.request.phone.replaceAll(RegExp(r'\D'), '');
       for (final r in rows) {
         try {
           final m = Member(Map<String, dynamic>.from(jsonDecode(r.payload) as Map));
           if (m.fingerprintTemplate?.isNotEmpty ?? false) enrolled.add(m);
+          if (_isRenewal && mounted) {
+            final mDigits = (m.phone ?? m.whatsapp ?? '').replaceAll(RegExp(r'\D'), '');
+            if ((widget.request.memberId != null && m.id == widget.request.memberId) ||
+                (digits.isNotEmpty && mDigits.isNotEmpty && (mDigits.contains(digits) || digits.contains(mDigits))) ||
+                (m.fullName.toLowerCase() == widget.request.fullName.toLowerCase())) {
+              setState(() {
+                if (m.sex != null && m.sex!.isNotEmpty) _sex = m.sex!;
+                if (m.birthDate != null) _birthDate = m.birthDate;
+              });
+            }
+          }
         } catch (_) {}
       }
       _preloadedEnrolledMembers = enrolled;
@@ -382,14 +397,26 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
         await db.save(SyncEntity.subscriptions, subRow, changedAt: now);
         await db.save(SyncEntity.payments, paymentRow, changedAt: now);
 
+        final memberUpdate = Map<String, dynamic>.from(member.row);
+        bool needsUpdate = false;
         if (_fingerprintTemplate != null) {
-          await db.save(SyncEntity.members, {
-            ...member.row,
-            'fingerprint_registered': true,
-            'fingerprint_template': _fingerprintTemplate,
-            'fingerprint_enrolled_at': now.toUtc().toIso8601String(),
-            'status': 'active',
-          }, changedAt: now);
+          memberUpdate['fingerprint_registered'] = true;
+          memberUpdate['fingerprint_template'] = _fingerprintTemplate;
+          memberUpdate['fingerprint_enrolled_at'] = now.toUtc().toIso8601String();
+          memberUpdate['status'] = 'active';
+          needsUpdate = true;
+        }
+        if (_sex.isNotEmpty && member.sex != _sex) {
+          memberUpdate['sex'] = _sex;
+          needsUpdate = true;
+        }
+        if (_birthDate != null && member.birthDate != _birthDate) {
+          memberUpdate['birth_date'] = ymd(dateOnly(_birthDate!));
+          needsUpdate = true;
+        }
+        if (needsUpdate) {
+          memberUpdate['updated_at'] = now.toUtc().toIso8601String();
+          await db.save(SyncEntity.members, memberUpdate, changedAt: now);
         }
       } else {
         // Traitement pour Nouvelle Inscription
@@ -437,6 +464,8 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
           'qr_token': qrToken,
           'first_name': fn,
           'last_name': ln,
+          'sex': _sex,
+          'birth_date': _birthDate == null ? null : ymd(dateOnly(_birthDate!)),
           'phone': phone.isNotEmpty ? phone : null,
           'whatsapp': phone.isNotEmpty ? phone : null,
           'email': validEmail,
@@ -909,6 +938,89 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
                 ),
                 const SizedBox(height: 16),
               ],
+
+              Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isRenewal ? 'Informations membre (Sexe & Date de naissance)' : 'Informations du profil (Sexe & Date de naissance) :',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: _sex,
+                            isDense: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Sexe',
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 'male', child: Text('Homme')),
+                              DropdownMenuItem(value: 'female', child: Text('Femme')),
+                              DropdownMenuItem(value: 'other', child: Text('Autre')),
+                            ],
+                            onChanged: (v) => setState(() => _sex = v ?? 'male'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () async {
+                              final now = DateTime.now();
+                              final picked = await showDatePicker(
+                                context: context,
+                                initialDate: _birthDate ?? DateTime(now.year - 20),
+                                firstDate: DateTime(now.year - 110),
+                                lastDate: now,
+                                initialDatePickerMode: DatePickerMode.year,
+                              );
+                              if (picked != null) {
+                                setState(() => _birthDate = picked);
+                              }
+                            },
+                            child: InputDecorator(
+                              decoration: InputDecoration(
+                                labelText: 'Date de naissance / Anniversaire',
+                                border: const OutlineInputBorder(),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                suffixIcon: _birthDate != null
+                                    ? IconButton(
+                                        icon: const Icon(LucideIcons.x, size: 14),
+                                        onPressed: () => setState(() => _birthDate = null),
+                                      )
+                                    : null,
+                              ),
+                              child: Text(
+                                _birthDate == null
+                                    ? 'Choisir date'
+                                    : '${DateFormat.yMMMd('fr').format(_birthDate!)}${_birthDate != null ? " (${DateTime.now().year - _birthDate!.year} ans)" : ""}',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: _birthDate != null ? FontWeight.w600 : FontWeight.normal,
+                                  color: _birthDate != null ? Colors.black87 : Colors.grey.shade600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
 
               // Section 1 : Formule d'abonnement & Dates (Début et Fin modifiables)
               const Text('1. Formule & Période d’abonnement :', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
