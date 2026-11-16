@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -316,16 +317,34 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     );
   }
 
-  void _pushMemberToW2(Member member, {DateTime? startDate, DateTime? endDate}) {
+  void _pushMemberToW2(Member member, {DateTime? startDate, DateTime? endDate}) async {
     AccessMonitor.instance.invalidate();
-    if (member.fingerprintRegistered && startDate != null && endDate != null) {
+    var fpRegistered = member.fingerprintRegistered;
+    var primaryTmpl = member.fingerprintTemplate;
+    var backupTmpl = member.row['fingerprint_backup_template'] as String?;
+
+    if (!fpRegistered || primaryTmpl == null || primaryTmpl.isEmpty) {
+      try {
+        final rec = await ref.read(appRuntimeProvider).database?.record(SyncEntity.members, member.id);
+        if (rec != null) {
+          final data = jsonDecode(rec.payload) as Map<String, dynamic>;
+          if (data['fingerprint_registered'] == true ||
+              (data['fingerprint_template'] as String?)?.isNotEmpty == true) {
+            fpRegistered = true;
+            primaryTmpl = data['fingerprint_template'] as String?;
+            backupTmpl = data['fingerprint_backup_template'] as String?;
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (fpRegistered && startDate != null && endDate != null) {
       final tmpls = <String>[];
-      if (member.fingerprintTemplate != null && member.fingerprintTemplate!.isNotEmpty) {
-        tmpls.add(member.fingerprintTemplate!);
+      if (primaryTmpl != null && primaryTmpl.isNotEmpty) {
+        tmpls.add(primaryTmpl);
       }
-      if (member.row['fingerprint_backup_template'] is String &&
-          (member.row['fingerprint_backup_template'] as String).isNotEmpty) {
-        tmpls.add(member.row['fingerprint_backup_template'] as String);
+      if (backupTmpl != null && backupTmpl.isNotEmpty) {
+        tmpls.add(backupTmpl);
       }
       if (tmpls.isNotEmpty) {
         unawaited(

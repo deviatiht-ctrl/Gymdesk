@@ -397,7 +397,11 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
         await db.save(SyncEntity.subscriptions, subRow, changedAt: now);
         await db.save(SyncEntity.payments, paymentRow, changedAt: now);
 
-        final memberUpdate = Map<String, dynamic>.from(member.row);
+        final rec = await db.record(SyncEntity.members, member.id);
+        final currentMap = rec != null
+            ? Map<String, dynamic>.from(jsonDecode(rec.payload) as Map)
+            : member.row;
+        final memberUpdate = Map<String, dynamic>.from(currentMap);
         bool needsUpdate = false;
         if (_fingerprintTemplate != null) {
           memberUpdate['fingerprint_registered'] = true;
@@ -405,13 +409,25 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
           memberUpdate['fingerprint_enrolled_at'] = now.toUtc().toIso8601String();
           memberUpdate['status'] = 'active';
           needsUpdate = true;
+        } else {
+          // Préserver l'empreinte existante
+          if (currentMap['fingerprint_template'] != null) {
+            memberUpdate['fingerprint_template'] = currentMap['fingerprint_template'];
+            memberUpdate['fingerprint_registered'] = true;
+          }
+          if (currentMap['fingerprint_backup_template'] != null) {
+            memberUpdate['fingerprint_backup_template'] =
+                currentMap['fingerprint_backup_template'];
+          }
         }
-        if (_sex.isNotEmpty && member.sex != _sex) {
+        if (_sex.isNotEmpty && currentMap['sex'] != _sex) {
           memberUpdate['sex'] = _sex;
           needsUpdate = true;
         }
-        if (_birthDate != null && member.birthDate != _birthDate) {
-          memberUpdate['birth_date'] = ymd(dateOnly(_birthDate!));
+        final existingBirth = currentMap['birth_date'] as String?;
+        final newBirth = _birthDate != null ? ymd(dateOnly(_birthDate!)) : null;
+        if (newBirth != null && existingBirth != newBirth) {
+          memberUpdate['birth_date'] = newBirth;
           needsUpdate = true;
         }
         if (needsUpdate) {

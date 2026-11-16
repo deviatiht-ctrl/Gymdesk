@@ -288,6 +288,8 @@ class MembersRepository {
       number = await db.nextMemberNumber();
       final memberRow = {
         ..._memberRow(id, draft, number, changedAt),
+        'fingerprint_registered': false,
+        'fingerprint_template': null,
         if ((payment?.creditAdded ?? 0) > 0)
           'credit_balance': double.parse(
             payment!.creditAdded.toStringAsFixed(2),
@@ -337,16 +339,35 @@ class MembersRepository {
     }
     _validateRegistration(draft);
     await db.transaction(() async {
-      await db.save(SyncEntity.members, {
-        ...member.row,
+      final existingRecord = await db.record(SyncEntity.members, member.id);
+      final currentMap = existingRecord != null
+          ? Map<String, dynamic>.from(jsonDecode(existingRecord.payload) as Map)
+          : member.row;
+
+      final updatedRow = {
+        ...currentMap,
         ..._memberRow(member.id, draft, member.memberNumber, changedAt),
         'id': member.id,
-        'qr_token': member.qrToken,
-        'status': member.status,
-        'created_at': member.row['created_at'],
-        'created_by': member.row['created_by'],
-        'photo_url': member.photoUrl,
-      }, changedAt: changedAt);
+        'gym_id': session.gymId,
+        'qr_token': currentMap['qr_token'] ?? member.qrToken,
+        'status': currentMap['status'] ?? member.status,
+        'created_at': currentMap['created_at'] ?? member.row['created_at'],
+        'created_by': currentMap['created_by'] ?? member.row['created_by'],
+        'photo_url': currentMap['photo_url'] ?? member.photoUrl,
+        // Préservation absolue des empreintes digitales et données biométriques
+        'fingerprint_registered': currentMap['fingerprint_registered'] == true ||
+            (currentMap['fingerprint_template'] as String?)?.isNotEmpty == true ||
+            member.fingerprintRegistered,
+        'fingerprint_template': currentMap['fingerprint_template'] ?? member.fingerprintTemplate,
+        'fingerprint_backup_template': currentMap['fingerprint_backup_template'] ??
+            member.row['fingerprint_backup_template'],
+        'fingerprint_enrolled_at': currentMap['fingerprint_enrolled_at'] ??
+            member.row['fingerprint_enrolled_at'],
+        'card_number': currentMap['card_number'] ?? member.cardNumber,
+        'credit_balance': currentMap['credit_balance'] ?? member.creditBalance,
+      };
+
+      await db.save(SyncEntity.members, updatedRow, changedAt: changedAt);
       if (draft.photo != null) {
         PersonPhotoCache.invalidate(member.id, photoUrl: member.photoUrl);
         await db.enqueuePhoto(member.id, draft.photo!);
@@ -505,7 +526,11 @@ class MembersRepository {
         }
       }
       if (sex != null || birthDate != null) {
-        final updatedMemberRow = Map<String, dynamic>.from(member.row);
+        final existingRecord = await db.record(SyncEntity.members, member.id);
+        final currentMap = existingRecord != null
+            ? Map<String, dynamic>.from(jsonDecode(existingRecord.payload) as Map)
+            : member.row;
+        final updatedMemberRow = Map<String, dynamic>.from(currentMap);
         if (sex != null && sex.isNotEmpty) {
           updatedMemberRow['sex'] = sex;
         }
@@ -513,6 +538,15 @@ class MembersRepository {
           updatedMemberRow['birth_date'] = ymd(dateOnly(birthDate));
         }
         updatedMemberRow['updated_at'] = changedAt.toUtc().toIso8601String();
+        // Préservation absolue de l'empreinte digitale
+        if (currentMap['fingerprint_template'] != null) {
+          updatedMemberRow['fingerprint_template'] = currentMap['fingerprint_template'];
+          updatedMemberRow['fingerprint_registered'] = true;
+        }
+        if (currentMap['fingerprint_backup_template'] != null) {
+          updatedMemberRow['fingerprint_backup_template'] =
+              currentMap['fingerprint_backup_template'];
+        }
         await db.save(
           SyncEntity.members,
           updatedMemberRow,
@@ -539,7 +573,11 @@ class MembersRepository {
       throw const MemberFailure('invalid_record');
     }
     await db.transaction(() async {
-      final updatedRow = Map<String, dynamic>.from(member.row);
+      final existingRecord = await db.record(SyncEntity.members, member.id);
+      final currentMap = existingRecord != null
+          ? Map<String, dynamic>.from(jsonDecode(existingRecord.payload) as Map)
+          : member.row;
+      final updatedRow = Map<String, dynamic>.from(currentMap);
       if (sex != null && sex.isNotEmpty) {
         updatedRow['sex'] = sex;
       }
@@ -547,6 +585,15 @@ class MembersRepository {
         updatedRow['birth_date'] = ymd(dateOnly(birthDate));
       }
       updatedRow['updated_at'] = changedAt.toUtc().toIso8601String();
+      // Préservation absolue de l'empreinte digitale
+      if (currentMap['fingerprint_template'] != null) {
+        updatedRow['fingerprint_template'] = currentMap['fingerprint_template'];
+        updatedRow['fingerprint_registered'] = true;
+      }
+      if (currentMap['fingerprint_backup_template'] != null) {
+        updatedRow['fingerprint_backup_template'] =
+            currentMap['fingerprint_backup_template'];
+      }
       await db.save(SyncEntity.members, updatedRow, changedAt: changedAt);
     });
   });
@@ -868,8 +915,6 @@ class MembersRepository {
     'notes': draft.notes.trim().isEmpty ? null : draft.notes.trim(),
     'status': 'active',
     'qr_style': null,
-    'fingerprint_registered': false,
-    'fingerprint_template': null,
     'created_by': session.staffId,
     'created_at': changedAt.toUtc().toIso8601String(),
     'updated_at': changedAt.toUtc().toIso8601String(),
