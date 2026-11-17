@@ -8,9 +8,15 @@ DateTime dateOnly(DateTime value) =>
     DateTime.utc(value.year, value.month, value.day);
 
 DateTime gymDate(DateTime instant, String timezone) {
-  final location = tz.getLocation(timezone);
-  final local = tz.TZDateTime.from(instant.toUtc(), location);
-  return DateTime.utc(local.year, local.month, local.day);
+  try {
+    final tzName = timezone.trim().isEmpty ? 'America/Port-au-Prince' : timezone.trim();
+    final location = tz.getLocation(tzName);
+    final local = tz.TZDateTime.from(instant.toUtc(), location);
+    return DateTime.utc(local.year, local.month, local.day);
+  } catch (_) {
+    final local = instant.toLocal();
+    return DateTime.utc(local.year, local.month, local.day);
+  }
 }
 
 String ymd(DateTime date) =>

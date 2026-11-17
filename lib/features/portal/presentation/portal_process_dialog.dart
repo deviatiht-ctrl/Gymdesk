@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -1021,7 +1022,7 @@ class _PortalProcessDialogState extends ConsumerState<PortalProcessDialog> {
                               child: Text(
                                 _birthDate == null
                                     ? 'Choisir date'
-                                    : '${DateFormat.yMMMd('fr').format(_birthDate!)}${_birthDate != null ? " (${DateTime.now().year - _birthDate!.year} ans)" : ""}',
+                                    : '${DateFormat('dd/MM/yyyy').format(_birthDate!)}${_birthDate != null ? " (${DateTime.now().year - _birthDate!.year} ans)" : ""}',
                                 style: TextStyle(
                                   fontSize: 12.5,
                                   fontWeight: _birthDate != null ? FontWeight.w600 : FontWeight.normal,

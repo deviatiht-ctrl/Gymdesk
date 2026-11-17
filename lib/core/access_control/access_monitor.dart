@@ -1,11 +1,11 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/foundation.dart';
 
 import '../../app/runtime.dart';
 import '../biometrics/access_agent_client.dart';
 import '../biometrics/agent_launcher.dart';
-import '../sync/sync_models.dart';
 import 'display_bridge.dart';
 import 'terminal_access_service.dart';
 
@@ -63,18 +63,28 @@ class AccessMonitor {
 
     // Siveye tout chanjman lokal (manm, anprent, abònman, peman, anplwaye) pou
     // pouse nouvo anprent ak dat ekspirasyon sou pòt W2 a otomatikman san bouton.
-    for (final entity in const [
-      SyncEntity.members,
-      SyncEntity.subscriptions,
-      SyncEntity.payments,
-      SyncEntity.employees,
-    ]) {
-      _dbSubs.add(
-        db.watchRecords(entity, limit: 50000).skip(1).listen((_) {
-          notifyDataChanged();
-        }),
-      );
-    }
+    // Requête légère (une signature par entité) au lieu de charger 4 × 50 000
+    // lignes complètes à chaque écriture : évite le ralentissement global.
+    _dbSubs.add(
+      db
+          .customSelect(
+            "SELECT entity, COUNT(*) AS c, "
+            "MAX(json_extract(payload, '\$.updated_at')) AS u, "
+            "SUM(CASE WHEN deleted_at IS NULL THEN 0 ELSE 1 END) AS d "
+            "FROM records WHERE gym_id = ? "
+            "AND entity IN ('members', 'subscriptions', 'payments', 'employees') "
+            "GROUP BY entity ORDER BY entity",
+            variables: [Variable.withString(db.gymId)],
+            readsFrom: {db.records},
+          )
+          .watch()
+          .map((rows) => rows
+              .map((r) => '${r.data['entity']}|${r.data['c']}|${r.data['u']}|${r.data['d']}')
+              .join(';'))
+          .distinct()
+          .skip(1)
+          .listen((_) => notifyDataChanged(), onError: (_) {}),
+    );
 
     unawaited(_initConnection(runtime));
     // Fenêtre « 2e écran » séparée : reçoit chaque décision instantanément.

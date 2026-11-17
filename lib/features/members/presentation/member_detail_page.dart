@@ -508,7 +508,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                         child: Text(
                                           renewBirthDate == null
                                               ? s.text('birth_date')
-                                              : '${DateFormat.yMMMd(locale).format(renewBirthDate!)}${renewBirthDate != null ? " (${DateTime.now().year - renewBirthDate!.year} ans)" : ""}',
+                                              : '${DateFormat('dd/MM/yyyy').format(renewBirthDate!)}${renewBirthDate != null ? " (${DateTime.now().year - renewBirthDate!.year} ans)" : ""}',
                                           style: TextStyle(
                                             fontSize: 12,
                                             fontWeight: renewBirthDate != null ? FontWeight.w600 : FontWeight.normal,
@@ -802,7 +802,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
         sex: renewSex,
         birthDate: renewBirthDate,
       );
-      await runtime.sync?.synchronize();
+      await ref.read(appRuntimeProvider).sync?.synchronize();
     });
     if (created != null) {
       if (mounted) {
@@ -1536,7 +1536,7 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                               s.text('birth_date'),
                               member.birthDate == null
                                   ? null
-                                  : '${DateFormat.yMMMd(locale).format(member.birthDate!)}${member.ageOn(DateTime.now()) != null ? " (${member.ageOn(DateTime.now())} ${s.text('years_old')})" : ""}',
+                                  : '${DateFormat('dd/MM/yyyy').format(member.birthDate!)}${member.ageOn(DateTime.now()) != null ? " (${member.ageOn(DateTime.now())} ${s.text('years_old')})" : ""}',
                             ),
                             if (member.sex == null || member.sex!.isEmpty || member.birthDate == null) ...[
                               const SizedBox(height: 12),

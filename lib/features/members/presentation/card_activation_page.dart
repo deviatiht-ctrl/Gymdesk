@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -1081,7 +1082,7 @@ Mèsi pou konfyans ou, bòn antrènman !''';
                           child: Text(
                             _birthDate == null
                                 ? s.text('birth_date')
-                                : '${DateFormat.yMMMd(Localizations.localeOf(context).toString()).format(_birthDate!)}${_birthDate != null ? " (${DateTime.now().year - _birthDate!.year} ans)" : ""}',
+                                : '${DateFormat('dd/MM/yyyy').format(_birthDate!)}${_birthDate != null ? " (${DateTime.now().year - _birthDate!.year} ans)" : ""}',
                             style: TextStyle(
                               color: _birthDate == null ? Colors.grey.shade600 : Colors.black87,
                               fontSize: 13,

@@ -363,7 +363,6 @@ class MembersRepository {
             member.row['fingerprint_backup_template'],
         'fingerprint_enrolled_at': currentMap['fingerprint_enrolled_at'] ??
             member.row['fingerprint_enrolled_at'],
-        'card_number': currentMap['card_number'] ?? member.cardNumber,
         'credit_balance': currentMap['credit_balance'] ?? member.creditBalance,
       };
 

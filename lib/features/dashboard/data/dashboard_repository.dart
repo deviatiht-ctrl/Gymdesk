@@ -47,23 +47,26 @@ class DashboardRepository {
     Map<String, dynamic>? activeContract;
 
     for (final row in rows) {
-      final payload = Map<String, dynamic>.from(
-        jsonDecode(row.read<String>('payload')) as Map,
-      );
-      final entity = row.read<String>('entity');
-      if (entity == 'members') {
-        members.add(Member(payload));
-      } else if (entity == 'subscriptions') {
-        subscriptions.add(GymSubscription(payload));
-      } else if (entity == 'payments') {
-        payments.add(GymPayment(payload));
-      } else if (entity == 'attendance') {
-        attendance.add(AttendanceEntry(payload));
-      } else if (entity == 'gym_contracts') {
-        if ({'active', 'trial', 'grace'}.contains(payload['status'])) {
-          activeContract = payload;
+      // Une ligne corrompue ne doit jamais faire échouer tout le tableau de bord.
+      try {
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(row.read<String>('payload')) as Map,
+        );
+        final entity = row.read<String>('entity');
+        if (entity == 'members') {
+          members.add(Member(payload));
+        } else if (entity == 'subscriptions') {
+          subscriptions.add(GymSubscription(payload));
+        } else if (entity == 'payments') {
+          payments.add(GymPayment(payload));
+        } else if (entity == 'attendance') {
+          attendance.add(AttendanceEntry(payload));
+        } else if (entity == 'gym_contracts') {
+          if ({'active', 'trial', 'grace'}.contains(payload['status'])) {
+            activeContract = payload;
+          }
         }
-      }
+      } catch (_) {}
     }
 
     final today = gymDate(DateTime.now().toUtc(), session.timezone);
@@ -76,50 +79,58 @@ class DashboardRepository {
     final paymentsBySub = <String, double>{};
     final todaysPayments = <GymPayment>[];
     for (final payment in payments) {
-      if (payment.deletedAt != null) continue;
-      if (payment.subscriptionId != null) {
-        paymentsBySub[payment.subscriptionId!] =
-            (paymentsBySub[payment.subscriptionId!] ?? 0) + payment.amount;
-      }
-      if (gymDate(payment.paidAt, session.timezone) == today) {
-        todaysPayments.add(payment);
-      }
+      try {
+        if (payment.deletedAt != null) continue;
+        if (payment.subscriptionId != null) {
+          paymentsBySub[payment.subscriptionId!] =
+              (paymentsBySub[payment.subscriptionId!] ?? 0) + payment.amount;
+        }
+        if (gymDate(payment.paidAt, session.timezone) == today) {
+          todaysPayments.add(payment);
+        }
+      } catch (_) {}
     }
 
     for (final subscription in subscriptions) {
-      if (subscription.deletedAt != null) continue;
-      if (subscription.status == 'pending') {
-        pendingSubscriptions++;
-        final paid = paymentsBySub[subscription.id] ?? 0.0;
-        pendingAmount += subscription.remainingAfter(paid);
-      }
-      if (subscription.status == 'active' &&
-          !subscription.endDate.isBefore(today) &&
-          !subscription.endDate.isAfter(expiringLimit)) {
-        expiring.add(subscription.memberId);
-      }
+      try {
+        if (subscription.deletedAt != null) continue;
+        if (subscription.status == 'pending') {
+          pendingSubscriptions++;
+          final paid = paymentsBySub[subscription.id] ?? 0.0;
+          pendingAmount += subscription.remainingAfter(paid);
+        }
+        if (subscription.status == 'active' &&
+            !subscription.endDate.isBefore(today) &&
+            !subscription.endDate.isAfter(expiringLimit)) {
+          expiring.add(subscription.memberId);
+        }
+      } catch (_) {}
     }
 
     var entriesToday = 0;
     var deniedToday = 0;
     for (final entry in attendance) {
-      if (gymDate(entry.scannedAt, session.timezone) == today) {
-        if (entry.result.startsWith('granted')) {
-          entriesToday++;
-        } else {
-          deniedToday++;
+      try {
+        if (gymDate(entry.scannedAt, session.timezone) == today) {
+          if (entry.result.startsWith('granted')) {
+            entriesToday++;
+          } else {
+            deniedToday++;
+          }
         }
-      }
+      } catch (_) {}
     }
 
     var activeMembers = 0;
     var suspendedMembers = 0;
     for (final member in members) {
-      if (member.status == 'active' && member.deletedAt == null) {
-        activeMembers++;
-      } else if (member.status == 'suspended') {
-        suspendedMembers++;
-      }
+      try {
+        if (member.status == 'active' && member.deletedAt == null) {
+          activeMembers++;
+        } else if (member.status == 'suspended') {
+          suspendedMembers++;
+        }
+      } catch (_) {}
     }
 
     final snapshot = activeContract?['price_snapshot'] as Map? ?? {};
@@ -130,6 +141,8 @@ class DashboardRepository {
     final gymSettings = session.gym?['settings'] as Map? ?? {};
     final gymOfferId = session.gym?['offer_id']?.toString() ?? gymSettings['offer_id']?.toString() ?? '';
     final gymOfferName = session.gym?['plan_name']?.toString() ?? gymSettings['plan_name']?.toString();
+    final contractMax = _asInt(contractConfig['max_members']);
+    final settingsMax = _asInt(gymSettings['max_members']);
 
     final isUnlimited = offerId == 'plan_enterprise' ||
         offerId == 'unlimited_annual' ||
@@ -141,16 +154,12 @@ class DashboardRepository {
         gymOfferId.toLowerCase().contains('illimit') ||
         (offerName != null && (offerName.toLowerCase().contains('illimit') || offerName.toLowerCase().contains('unlimited'))) ||
         (gymOfferName != null && (gymOfferName.toLowerCase().contains('illimit') || gymOfferName.toLowerCase().contains('unlimited'))) ||
-        (contractConfig['max_members'] != null && (contractConfig['max_members'] as num).toInt() == 0) ||
+        contractMax == 0 ||
         contractConfig['is_unlimited'] == true ||
-        (gymSettings['max_members'] != null && (gymSettings['max_members'] as num).toInt() == 0) ||
+        settingsMax == 0 ||
         gymSettings['is_unlimited'] == true;
 
-    final resolvedMax = isUnlimited
-        ? 0
-        : ((contractConfig['max_members'] as num?)?.toInt() ??
-            (gymSettings['max_members'] as num?)?.toInt() ??
-            1000);
+    final resolvedMax = isUnlimited ? 0 : (contractMax ?? settingsMax ?? 1000);
 
     final resolvedPlanName = offerName ?? gymOfferName ?? (isUnlimited ? 'Plan Illimité' : null);
 
@@ -171,6 +180,12 @@ class DashboardRepository {
       isUnlimitedPlan: isUnlimited,
       planName: resolvedPlanName,
     );
+  }
+
+  static int? _asInt(Object? value) {
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim());
+    return null;
   }
 }
 

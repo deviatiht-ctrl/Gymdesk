@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -1439,7 +1440,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                                               child: Text(
                                                 _birthDate == null
                                                     ? 'Choisir date'
-                                                    : '${DateFormat.yMMMd(Localizations.localeOf(context).toString()).format(_birthDate!)}${_birthDate != null ? ' (${DateTime.now().year - _birthDate!.year} ans)' : ''}',
+                                                    : '${DateFormat('dd/MM/yyyy').format(_birthDate!)}${_birthDate != null ? ' (${DateTime.now().year - _birthDate!.year} ans)' : ''}',
                                                 style: TextStyle(
                                                   color: _birthDate == null ? Colors.grey.shade600 : Colors.black87,
                                                   fontSize: 13.5,
@@ -1879,7 +1880,7 @@ class _EnrollmentWizardPageState extends ConsumerState<EnrollmentWizardPage> {
                         child: Text(
                           _birthDate == null
                               ? 'Choisir date'
-                              : '${DateFormat.yMMMd(Localizations.localeOf(context).toString()).format(_birthDate!)}${_birthDate != null ? ' (${DateTime.now().year - _birthDate!.year} ans)' : ''}',
+                              : '${DateFormat('dd/MM/yyyy').format(_birthDate!)}${_birthDate != null ? ' (${DateTime.now().year - _birthDate!.year} ans)' : ''}',
                           style: TextStyle(
                             color: _birthDate == null ? Colors.grey.shade600 : Colors.black87,
                             fontSize: 12.5,

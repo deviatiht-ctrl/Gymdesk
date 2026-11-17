@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +25,7 @@ import '../../../l10n/app_strings.dart';
 import '../../members/data/members_repository.dart';
 import '../../members/domain/member.dart';
 import '../../settings/data/settings_repository.dart';
+import '../../subscriptions/domain/subscription_rules.dart' show gymDate;
 
 /// Ouvrir l'écran d'accès sur le 2e écran public ou tablette Wi-Fi.
 Future<void> openAccessDisplayWindow([BuildContext? context, bool isTablet = false]) async {
@@ -189,7 +192,87 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     _quoteTimer = Timer.periodic(const Duration(seconds: 9), (_) {
       if (mounted && _decision == null) setState(() => _quote = (_quote + 1) % _frenchQuotes.length);
     });
+    // Compteur « Entrées aujourd'hui » lu depuis la base locale (et non remis à 0
+    // à chaque ouverture de la fenêtre).
+    unawaited(_refreshTodayCount());
+    _countTimer = Timer.periodic(const Duration(seconds: 15), (_) => unawaited(_refreshTodayCount()));
     unawaited(_start());
+  }
+
+  Timer? _countTimer;
+  Timer? _countDebounce;
+  final Map<String, DateTime> _recentShown = {};
+
+  bool _isRecentDuplicate(String key) {
+    final now = DateTime.now();
+    final last = _recentShown[key];
+    if (last != null && now.difference(last) < const Duration(seconds: 4)) {
+      return true;
+    }
+    _recentShown[key] = now;
+    if (_recentShown.length > 60) {
+      _recentShown.removeWhere((_, time) => now.difference(time) > const Duration(minutes: 1));
+    }
+    return false;
+  }
+
+  /// Nombre d'entrées accordées aujourd'hui (présences enregistrées en local ou Supabase).
+  Future<void> _refreshTodayCount() async {
+    final runtime = ref.read(appRuntimeProvider);
+    final db = runtime.database;
+    final session = runtime.session;
+    if (session == null || session.gymId == null) return;
+    try {
+      final today = gymDate(DateTime.now().toUtc(), session.timezone);
+      int count = 0;
+      if (db != null) {
+        final threshold = today.subtract(const Duration(days: 1)).toIso8601String();
+        final rows = await db.customSelect(
+          "SELECT payload FROM records WHERE gym_id = ? AND entity = 'attendance' "
+          "AND deleted_at IS NULL AND json_extract(payload, '\$.scanned_at') >= ?",
+          variables: [Variable.withString(db.gymId), Variable.withString(threshold)],
+          readsFrom: {db.records},
+        ).get();
+        for (final row in rows) {
+          try {
+            final p = jsonDecode(row.read<String>('payload')) as Map;
+            final result = p['result']?.toString() ?? '';
+            final scanned = DateTime.tryParse(p['scanned_at']?.toString() ?? '');
+            if (scanned != null && result.startsWith('granted') && gymDate(scanned, session.timezone) == today) {
+              count++;
+            }
+          } catch (_) {}
+        }
+      }
+
+      // Fallback sur Supabase access_events si le local n'a pas encore synchronisé les présences
+      if (count == 0) {
+        try {
+          final client = Supabase.instance.client;
+          final todayIso = today.toIso8601String();
+          final res = await client
+              .from('access_events')
+              .select('id')
+              .eq('gym_id', session.gymId!)
+              .eq('event_type', 'granted')
+              .gte('occurred_at', todayIso)
+              .timeout(const Duration(seconds: 4));
+          final remoteCount = (res as List).length;
+          if (remoteCount > count) count = remoteCount;
+        } catch (_) {}
+      }
+
+      if (mounted && count != _todayCount) setState(() => _todayCount = count);
+    } catch (_) {}
+  }
+
+  /// Après une décision, relire le compteur une fois la présence écrite.
+  void _scheduleCountRefresh() {
+    _countDebounce?.cancel();
+    _countDebounce = Timer(const Duration(milliseconds: 1500), () {
+      unawaited(_refreshTodayCount());
+      _countDebounce = Timer(const Duration(seconds: 4), () => unawaited(_refreshTodayCount()));
+    });
   }
 
   Future<void> _start() async {
@@ -204,13 +287,15 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     monitor.terminalOnline.addListener(_onMonitorStatus);
     monitor.agentOnline.addListener(_onMonitorStatus);
     _events = monitor.decisions.listen(_onDecision);
+
     final bridge = AccessDisplayBridge.instance;
+    bridge.hostAlive.addListener(_onMonitorStatus);
+    bridge.hostAgentOnline.addListener(_onMonitorStatus);
+    bridge.hostTerminalOnline.addListener(_onMonitorStatus);
+    _bridgeEvents = bridge.decisions.listen(_onDecision);
+    bridge.startDisplay();
+
     if (bridge.launchedAsDisplay) {
-      bridge.hostAlive.addListener(_onMonitorStatus);
-      bridge.hostAgentOnline.addListener(_onMonitorStatus);
-      bridge.hostTerminalOnline.addListener(_onMonitorStatus);
-      _bridgeEvents = bridge.decisions.listen(_onDecision);
-      bridge.startDisplay();
       _hostWatch = Timer.periodic(const Duration(seconds: 3), (_) => _ensureMonitorWhenAlone());
       Timer(const Duration(milliseconds: 2500), _ensureMonitorWhenAlone);
     } else {
@@ -235,10 +320,6 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
               ),
               callback: (payload) {
                 final row = payload.newRecord;
-                if ((AccessMonitor.instance.active || AccessDisplayBridge.instance.hostAlive.value) &&
-                    row['source'] == 'terminal') {
-                  return;
-                }
                 _handleRealtimeAccessEvent(row);
               },
             )
@@ -296,17 +377,20 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     }
 
     final member = decision.person?.entry?.member;
-    final targetId = decision.person?.id ?? decision.person?.memberId ?? member?.id;
+    final targetId = decision.person?.id ?? decision.person?.memberId ?? member?.id ?? decision.uid ?? 'unknown';
+    final dedupeKey = '${decision.outcome.name}_$targetId';
+    if (_isRecentDuplicate(dedupeKey)) return;
+
     if (member != null) {
       unawaited(_loadPhoto(member, decision));
-    } else if (targetId != null) {
+    } else if (targetId != 'unknown') {
       unawaited(_loadPhotoById(targetId, decision, decision.person?.photoUrl));
     }
 
     setState(() {
       _decision = decision;
       _photo = PersonPhotoCache.peek(
-        personId: targetId,
+        personId: targetId == 'unknown' ? null : targetId,
         photoUrl: decision.person?.photoUrl ?? member?.photoUrl,
       );
       _quote = math.Random().nextInt(_frenchQuotes.length);
@@ -314,6 +398,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
         _todayCount++;
       }
     });
+    _scheduleCountRefresh();
 
     _dismiss?.cancel();
     _dismiss = Timer(
@@ -349,6 +434,9 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     final isGranted = eventType == 'granted';
     final snapshot = Map<String, dynamic>.from(row['member_snapshot'] as Map? ?? {});
 
+    final dedupeKey = '${eventType}_${memberId ?? snapshot['id'] ?? 'unknown'}';
+    if (_isRecentDuplicate(dedupeKey)) return;
+
     final person = snapshot.isNotEmpty ? AccessPerson.fromSnapshot(snapshot) : null;
     if (!mounted) return;
     final outcome = isGranted
@@ -363,6 +451,7 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
       _quote = math.Random().nextInt(_frenchQuotes.length);
       if (isGranted) _todayCount++;
     });
+    _scheduleCountRefresh();
     if (targetId != null && targetId.isNotEmpty) {
       unawaited(_loadPhotoById(targetId, decision, targetPhotoUrl));
     }
@@ -409,6 +498,8 @@ class _AccessDisplayPageState extends ConsumerState<AccessDisplayPage> with Tick
     _clock?.cancel();
     _dismiss?.cancel();
     _quoteTimer?.cancel();
+    _countTimer?.cancel();
+    _countDebounce?.cancel();
     _pulse.dispose();
     _biometricService.dispose();
     _agent.dispose();

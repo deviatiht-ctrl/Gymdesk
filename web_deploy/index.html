@@ -313,7 +313,7 @@
   </script>
   <script>
     (function () {
-      var BUILD_VERSION = "20261111_224708";
+      var BUILD_VERSION = "20261116_191000";
       window.__SECURGYM_BUILD_VERSION__ = BUILD_VERSION;
       var scriptLoaded = false;
 
@@ -346,7 +346,7 @@
         try {
           var prev = sessionStorage.getItem('securgym_v_reload_ver');
           var at = Number(sessionStorage.getItem('securgym_v_reload_at') || '0');
-          if (prev === ver && (Date.now() - at) < 15000) return false;
+          if (prev === ver || (Date.now() - at) < 60000) return false;
           sessionStorage.setItem('securgym_v_reload_ver', ver);
           sessionStorage.setItem('securgym_v_reload_at', String(Date.now()));
           return true;
@@ -383,7 +383,7 @@
       var timer = setTimeout(function () {
         if (ctrl) { try { ctrl.abort(); } catch (e) {} }
         injectBootstrap(BUILD_VERSION);
-      }, 1800);
+      }, 1500);
 
       var versionUrl = new URL('version.json?_ts=' + Date.now(), document.baseURI).toString();
       fetch(versionUrl, {
@@ -398,12 +398,14 @@
           var remoteVer = (data && data.version) ? String(data.version).trim() : BUILD_VERSION;
           var storedVer = null;
           try { storedVer = localStorage.getItem('securgym_build_version'); } catch (e) {}
-          var needsCacheWipe = (storedVer !== remoteVer) || (remoteVer !== BUILD_VERSION);
 
-          if (needsCacheWipe) {
+          if (!storedVer) {
+            try { localStorage.setItem('securgym_build_version', remoteVer); } catch (e) {}
+            injectBootstrap(remoteVer);
+          } else if (storedVer !== remoteVer) {
             try { localStorage.setItem('securgym_build_version', remoteVer); } catch (e) {}
             clearSwAndCaches().then(function () {
-              if ((remoteVer !== BUILD_VERSION || (storedVer && storedVer !== remoteVer)) && canReloadNow(remoteVer)) {
+              if (canReloadNow(remoteVer)) {
                 hardReloadWithVersion(remoteVer);
                 return;
               }
