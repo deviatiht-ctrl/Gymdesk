@@ -396,6 +396,22 @@ class WhatsAppNotificationService {
     }
 
     final milestoneKind = daysRemaining == 7 ? 'reminder_7d' : 'reminder_2d';
+
+    // Si se yon rapèl J-2, anile nenpòt rapèl J-7 ki te nan outbox k ap tann pou nimewo sa a
+    if (daysRemaining == 2) {
+      try {
+        await Supabase.instance.client
+            .from('whatsapp_messages_outbox')
+            .update({
+              'status': 'cancelled',
+              'error_message': 'Ranplase pa rapèl J-2 pi fre'
+            })
+            .eq('to_phone', cleanTo)
+            .eq('kind', 'reminder_7d')
+            .eq('status', 'pending');
+      } catch (_) {}
+    }
+
     if (await _hasAlreadySentOrQueued(
       gymId: targetGymId,
       cleanPhone: cleanTo,
@@ -537,6 +553,24 @@ class WhatsAppNotificationService {
           final endDay = p['_endDay'] as DateTime;
           final latest = latestEndByMember[memberId];
           if (latest != null && latest.isAfter(endDay)) {
+            // Manm lan deja renouvle pou pi lwen: anile nenpòt vye rapèl ki te nan outbox k ap tann
+            final phoneRaw = (member['whatsapp']?.toString().isNotEmpty ?? false)
+                ? member['whatsapp'].toString()
+                : member['phone']?.toString() ?? '';
+            final cleanPhone = WhatsAppClient.normalizePhone(phoneRaw);
+            if (cleanPhone.length >= 8) {
+              try {
+                await Supabase.instance.client
+                    .from('whatsapp_messages_outbox')
+                    .update({
+                      'status': 'cancelled',
+                      'error_message': 'Manm lan deja renouvle abònman li'
+                    })
+                    .eq('to_phone', cleanPhone)
+                    .inFilter('kind', ['reminder_7d', 'reminder_2d'])
+                    .eq('status', 'pending');
+              } catch (_) {}
+            }
             continue; // Manm lan deja renouvle pou pi lwen
           }
 
