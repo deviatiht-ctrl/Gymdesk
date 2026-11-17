@@ -184,6 +184,9 @@ class SyncEngine {
           serverTime.difference(lastFull) > const Duration(days: 1);
       if (full) {
         await db.purgeSyncedRecords();
+        if (fresh.gym != null) {
+          await db.putRemote(SyncEntity.gyms, fresh.gym!);
+        }
       }
       const coreEntities = {
         SyncEntity.staff,
@@ -306,7 +309,11 @@ class SyncEngine {
 
         if (op == null) continue;
         if (op.status == 'failed') {
-          return const SyncRejected('queue_blocked');
+          if (retry) {
+            await db.retryOperation(op.id);
+          } else {
+            continue;
+          }
         }
         if (op.status != 'pending') continue;
 

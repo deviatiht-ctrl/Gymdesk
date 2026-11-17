@@ -483,6 +483,15 @@ class LocalDatabase extends _$LocalDatabase {
         }
         await setMetadata('repaired_sync_attendance_v3', 'true');
       }
+
+      final unblockFailed = await metadata('unblocked_failed_outbox_v1');
+      if (unblockFailed != 'true') {
+        await customUpdate(
+          "UPDATE outbox SET status = 'pending', attempts = 0, next_attempt_at = null, last_error = null WHERE status = 'failed'",
+          updates: {outbox},
+        );
+        await setMetadata('unblocked_failed_outbox_v1', 'true');
+      }
     } catch (_) {}
   }
 
@@ -585,9 +594,9 @@ class LocalDatabase extends _$LocalDatabase {
     final entityFilter = entities != null && entities.isNotEmpty
         ? "AND entity IN (${entities.map((e) => "'${e.table}'").join(',')})"
         : "";
-    // 1. Efase sa ki pa nan outbox ankò
+    // 1. Efase sa ki pa nan outbox ankò (nou pa efase 'gyms' paske se done tenant li ye)
     await customUpdate(
-      "DELETE FROM records WHERE gym_id = '$gymId' $entityFilter AND NOT EXISTS ("
+      "DELETE FROM records WHERE gym_id = '$gymId' AND entity != 'gyms' $entityFilter AND NOT EXISTS ("
       "  SELECT 1 FROM outbox WHERE outbox.entity = records.entity "
       "  AND outbox.entity_id = records.id "
       "  AND outbox.status != 'synced'"
@@ -601,12 +610,12 @@ class LocalDatabase extends _$LocalDatabase {
       updates: {records},
       updateKind: UpdateKind.delete,
     );
-    // 3. Reset curseur yo
+    // 3. Reset curseur yo nan tab sync_metadata (pa metadata!)
     if (entities == null) {
-      await customUpdate("DELETE FROM metadata WHERE key LIKE 'cursor:%'", updates: {syncMetadata});
+      await (delete(syncMetadata)..where((t) => t.key.like('cursor:%'))).go();
     } else {
       for (final e in entities) {
-        await customUpdate("DELETE FROM metadata WHERE key = 'cursor:${e.table}'", updates: {syncMetadata});
+        await (delete(syncMetadata)..where((t) => t.key.equals('cursor:${e.table}'))).go();
       }
     }
   }
