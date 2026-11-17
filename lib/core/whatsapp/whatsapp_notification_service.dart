@@ -792,6 +792,7 @@ class WhatsAppNotificationService {
   }) {
     final day = DateFormat('dd/MM/yyyy');
     final formattedDate = day.format(endDate);
+    final isJlFitness = gymName.toLowerCase().contains('jl fitness');
 
     if (lang == 'fr') {
       String headline;
@@ -815,10 +816,7 @@ class WhatsAppNotificationService {
           'Bonjour *$memberName*,\n'
           '$bodyLine\n\n'
           'Pour conserver votre accès empreinte aux portes sans interruption :\n'
-          '1. Passez à l\'accueil de *$gymName* pour renouveler votre formule.\n'
-          '2. Ou faites votre demande de renouvellement en ligne :\n'
-          '👉 $portalUrl\n'
-          '_Connectez-vous avec votre numéro :_ *$phone*\n\n'
+          '${isJlFitness ? "Passez à l\'accueil de *$gymName* pour renouveler votre formule." : "1. Passez à l\'accueil de *$gymName* pour renouveler votre formule.\n2. Ou faites votre demande de renouvellement en ligne :\n👉 $portalUrl\n_Connectez-vous avec votre numéro :_ *$phone*"}\n\n'
           '────────────────────────\n'
           '⚠️ *IMPORTANT :*\n'
           '1. Veuillez enregistrer ce numéro sous le nom *SecurGYM* dans vos contacts.\n'
@@ -845,10 +843,7 @@ class WhatsAppNotificationService {
           'Hello *$memberName*,\n'
           '$bodyLine\n\n'
           'To keep your biometric door access without interruption:\n'
-          '1. Visit *$gymName* reception to renew.\n'
-          '2. Or submit your renewal request online:\n'
-          '👉 $portalUrl\n'
-          '_Log in with your phone number:_ *$phone*\n\n'
+          '${isJlFitness ? "Visit *$gymName* reception to renew." : "1. Visit *$gymName* reception to renew.\n2. Or submit your renewal request online:\n👉 $portalUrl\n_Log in with your phone number:_ *$phone*"}\n\n'
           '────────────────────────\n'
           '⚠️ *IMPORTANT:*\n'
           '1. Please save this number as *SecurGYM* in your contacts.\n'
@@ -877,10 +872,7 @@ class WhatsAppNotificationService {
         'Bonjou *$memberName*,\n'
         '$bodyLine\n\n'
         'Pou w pa pèdi aksè anprent ou devan pòt la epi pou w kontinye antrene san rete :\n'
-        '1. Pase nan resepsyon *$gymName* pou w renouvle l.\n'
-        '2. Oswa fè demand renouvèlman an sou espas manm ou :\n'
-        '👉 $portalUrl\n'
-        '_Konekte ak nimewo telefòn ou :_ *$phone*\n\n'
+        '${isJlFitness ? "Pase nan resepsyon *$gymName* pou w renouvle l." : "1. Pase nan resepsyon *$gymName* pou w renouvle l.\n2. Oswa fè demand renouvèlman an sou espas manm ou :\n👉 $portalUrl\n_Konekte ak nimewo telefòn ou :_ *$phone*"}\n\n'
         '────────────────────────\n'
         '⚠️ *ENPÒTAN :*\n'
         '1. Tanpri anrejistre nimewo sa a nan kontak ou sou non *SecurGYM*.\n'

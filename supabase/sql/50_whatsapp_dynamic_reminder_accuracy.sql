@@ -264,11 +264,19 @@ begin
         v_action := 'Afin d''éviter tout blocage au contrôle d''accès, rapprochez-vous de l''accueil de votre salle pour votre réabonnement.';
       end if;
 
-      v_footer := '📱 *Enregistrez ce contact SecurGYM* pour être notifié de vos reçus et échéances.' || E'\n' ||
-                  'ℹ️ _Pour toute question, contactez directement votre salle' ||
-                  case when v_gym.gym_phone <> '' then ' au ' || v_gym.gym_phone else '' end || '._' || E'\n' ||
-                  '🌐 Votre espace : ' || v_portal_url || E'\n' ||
-                  '🏷️ _Réf: SG-' || v_ref_hash || '_';
+      -- Footer ak enfòmasyon sekirite (Pou JL FITNESS sèlman: pa mete lyen espas manm nan footer)
+      if v_gym.gym_name ilike '%JL FITNESS%' or v_gym.gym_id = '6ed6093d-557d-4bb9-b3ba-f55fedcf65b3' then
+        v_footer := '📱 *Enregistrez ce contact SecurGYM* pour être notifié de vos reçus et échéances.' || E'\n' ||
+                    'ℹ️ _Pour toute question, contactez directement votre salle' ||
+                    case when v_gym.gym_phone <> '' then ' au ' || v_gym.gym_phone else '' end || '._' || E'\n' ||
+                    '🏷️ _Réf: SG-' || v_ref_hash || '_';
+      else
+        v_footer := '📱 *Enregistrez ce contact SecurGYM* pour être notifié de vos reçus et échéances.' || E'\n' ||
+                    'ℹ️ _Pour toute question, contactez directement votre salle' ||
+                    case when v_gym.gym_phone <> '' then ' au ' || v_gym.gym_phone else '' end || '._' || E'\n' ||
+                    '🌐 Votre espace : ' || v_portal_url || E'\n' ||
+                    '🏷️ _Réf: SG-' || v_ref_hash || '_';
+      end if;
 
       v_msg := v_greeting || E'\n\n' ||
                v_intro || E'\n' ||
