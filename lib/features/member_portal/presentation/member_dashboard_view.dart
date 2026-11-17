@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../data/member_portal_repository.dart';
+import '../../../core/gyms/gym_constants.dart';
 import '../data/member_session.dart';
 import 'install_banner.dart';
 import 'member_messages_tab.dart';
@@ -386,6 +387,11 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
   }
 
   Widget _renewButton(Map? pending, {String label = 'Renouveler mon abonnement'}) {
+    final gymName = _gym['name']?.toString();
+    final gymId = _gym['id']?.toString();
+    if (isJlFitnessGym(gymId: gymId, gymName: gymName)) {
+      return const SizedBox.shrink();
+    }
     if (pending != null) {
       return Container(
         padding: const EdgeInsets.all(12),
@@ -416,6 +422,9 @@ class _MemberDashboardViewState extends State<MemberDashboardView> {
   }
 
   Future<void> _openRenewal() async {
+    final gymName = _gym['name']?.toString();
+    final gymId = _gym['id']?.toString();
+    if (isJlFitnessGym(gymId: gymId, gymName: gymName)) return;
     final plans = _list('plans');
     String? selected = plans.isNotEmpty ? plans.first['id'].toString() : null;
     final confirmed = await showModalBottomSheet<bool>(

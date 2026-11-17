@@ -17,6 +17,7 @@ import '../../member_portal/data/member_session.dart';
 import '../../member_portal/presentation/member_ui.dart' show memberAuthError;
 import '../../payments/data/receipt_pdf.dart';
 import '../data/portal_repository.dart';
+import '../../../core/gyms/gym_constants.dart';
 
 class PortalJoinPage extends ConsumerStatefulWidget {
   const PortalJoinPage({super.key, required this.gymCode, this.initialKind, this.createAccount = true});
@@ -71,6 +72,11 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   late final PortalRepository _portalRepo;
 
   String get _cleanGymCode => widget.gymCode.trim();
+  bool get _isJlFitness => isJlFitnessGym(
+        gymId: _gym?['id']?.toString(),
+        gymCode: _cleanGymCode,
+        gymName: _gym?['name']?.toString(),
+      );
   String get _draftStorageKey => 'portal_draft_$_cleanGymCode';
   String get _activeReqStorageKey => 'portal_active_req_$_cleanGymCode';
 
@@ -92,9 +98,9 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
     super.initState();
     _sessionCode = 'SEC-${const Uuid().v4().substring(0, 8).toUpperCase()}';
 
-    if (widget.initialKind == 'renewal') {
+    if (widget.initialKind == 'renewal' && !_isJlFitness) {
       _kind = 'renewal';
-    } else if (widget.initialKind == 'new_membership') {
+    } else {
       _kind = 'new_membership';
     }
 
@@ -160,7 +166,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
               _notesController.text = data['notes'] as String;
             }
             if (widget.initialKind == null && data['kind'] != null) {
-              _kind = data['kind'] as String;
+              _kind = _isJlFitness ? 'new_membership' : data['kind'] as String;
             }
             if (data['plan_id'] != null) {
               _savedDraftPlanId = data['plan_id'] as String;
@@ -222,6 +228,12 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
           } else {
             _selectedPlanId = _plans.first['id'] as String?;
           }
+        }
+        if (_isJlFitness) {
+          _kind = 'new_membership';
+          _doorScanTimer?.cancel();
+          _identifiedMember = null;
+          _memberId = null;
         }
         _loadingGym = false;
       });
@@ -600,6 +612,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   }
 
   void _startDoorScanPolling() {
+    if (_isJlFitness) return;
     _doorScanTimer?.cancel();
     _doorScanTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (!mounted || _kind != 'renewal' || _identifiedMember != null) return;
@@ -618,6 +631,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   }
 
   void _onMemberIdentified(Map<String, dynamic> data) {
+    if (_isJlFitness) return;
     setState(() {
       _identifiedMember = data;
       _memberId = data['member_id']?.toString();
@@ -634,6 +648,10 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
   }
 
   Future<void> _searchMemberManual() async {
+    if (_isJlFitness) {
+      setState(() => _searchError = 'Renouvellement en ligne non disponible pour ce gym.');
+      return;
+    }
     final q = _searchPhoneController.text.trim();
     if (q.length < 4) {
       setState(() => _searchError = 'Entrez au moins 4 chiffres de votre téléphone.');
@@ -1287,36 +1305,38 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
         const SizedBox(height: 20),
 
         // Sélecteur Type de Demande (Inscription vs Renouvellement)
-        Center(
-          child: SegmentedButton<String>(
-            segments: [
-              ButtonSegment(
-                value: 'new_membership',
-                label: Text(s.text('request_kind_new')),
-                icon: const Icon(LucideIcons.userPlus, size: 16),
-              ),
-              ButtonSegment(
-                value: 'renewal',
-                label: Text(s.text('request_kind_renewal')),
-                icon: const Icon(LucideIcons.refreshCw, size: 16),
-              ),
-            ],
-            selected: {_kind},
-            onSelectionChanged: (set) {
-              final newKind = set.first;
-              setState(() {
-                _kind = newKind;
-                if (newKind == 'renewal') {
-                  _startDoorScanPolling();
-                } else {
-                  _doorScanTimer?.cancel();
-                }
-              });
-              _saveDraft();
-            },
+        if (!_isJlFitness) ...[
+          Center(
+            child: SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                  value: 'new_membership',
+                  label: Text(s.text('request_kind_new')),
+                  icon: const Icon(LucideIcons.userPlus, size: 16),
+                ),
+                ButtonSegment(
+                  value: 'renewal',
+                  label: Text(s.text('request_kind_renewal')),
+                  icon: const Icon(LucideIcons.refreshCw, size: 16),
+                ),
+              ],
+              selected: {_kind},
+              onSelectionChanged: (set) {
+                final newKind = set.first;
+                setState(() {
+                  _kind = newKind;
+                  if (newKind == 'renewal') {
+                    _startDoorScanPolling();
+                  } else {
+                    _doorScanTimer?.cancel();
+                  }
+                });
+                _saveDraft();
+              },
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
+          const SizedBox(height: 16),
+        ],
 
         // Bannière d'instruction : rester sur la page jusqu'à la confirmation finale
         Container(
@@ -1381,7 +1401,7 @@ class _PortalJoinPageState extends ConsumerState<PortalJoinPage> {
           const SizedBox(height: 16),
         ],
 
-        if (_kind == 'renewal') ...[
+        if (_kind == 'renewal' && !_isJlFitness) ...[
           if (_identifiedMember != null) ...[
             Container(
               padding: const EdgeInsets.all(16),

@@ -11,6 +11,7 @@ import '../../../app/providers.dart';
 import '../../../core/biometrics/access_agent_client.dart';
 import '../../../core/biometrics/biometric_service.dart';
 import '../data/portal_repository.dart';
+import '../../../core/gyms/gym_constants.dart';
 
 /// Paj Kiosque Libre-Accès pou Borne devan pòt la oswa nan resepsyon an.
 /// Pa mande okenn modpas oswa login, li lye dirèkteman ak kòd gym lan.
@@ -42,6 +43,11 @@ class _PortalKioskPageState extends ConsumerState<PortalKioskPage> with SingleTi
   Timer? _detectedDismissTimer;
 
   String get _cleanCode => widget.gymCode.replaceAll(RegExp(r'/+$'), '').trim();
+  bool get _isJlFitness => isJlFitnessGym(
+        gymId: _gym?['id']?.toString(),
+        gymCode: _cleanCode,
+        gymName: _gym?['name']?.toString(),
+      );
 
   String _joinUrl({required bool isRenewal}) {
     final kind = isRenewal ? 'renewal' : 'new_membership';
@@ -295,18 +301,19 @@ class _PortalKioskPageState extends ConsumerState<PortalKioskPage> with SingleTi
                         ],
                       ),
                     ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF065F46),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    if (!_isJlFitness)
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF065F46),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () {
+                          context.push('/join/$_cleanCode?kind=renewal&account=0');
+                        },
+                        icon: const Icon(LucideIcons.refreshCw, size: 16),
+                        label: const Text('Renouveler', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
-                      onPressed: () {
-                        context.push('/join/$_cleanCode?kind=renewal&account=0');
-                      },
-                      icon: const Icon(LucideIcons.refreshCw, size: 16),
-                      label: const Text('Renouveler', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
                   ],
                 ),
               ),
@@ -321,6 +328,23 @@ class _PortalKioskPageState extends ConsumerState<PortalKioskPage> with SingleTi
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final isWide = constraints.maxWidth >= 720;
+                        if (_isJlFitness) {
+                          return Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 520),
+                              child: _buildKioskCard(
+                                title: 'Nouvelle Inscription',
+                                subtitle: 'Pas encore membre ? Scannez avec votre téléphone pour choisir votre formule et vous inscrire en 1 minute.',
+                                url: newUrl,
+                                accentColor: const Color(0xFF0D9488),
+                                icon: LucideIcons.userPlus,
+                                buttonLabel: 'Ouvrir sur cet écran',
+                                onOpenLocal: () => context.push('/join/$_cleanCode?kind=new_membership&account=0'),
+                                isRenewal: false,
+                              ),
+                            ),
+                          );
+                        }
                         if (isWide) {
                           return Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -409,9 +433,11 @@ class _PortalKioskPageState extends ConsumerState<PortalKioskPage> with SingleTi
                   const SizedBox(width: 12),
                   const Icon(LucideIcons.fingerprint, color: Color(0xFF5EEAD4), size: 24),
                   const SizedBox(width: 10),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Lecteur d’empreinte actif · Posez votre doigt sur le lecteur pour afficher votre profil et renouveler.',
+                      _isJlFitness
+                          ? 'Lecteur d’empreinte actif · Borne de contrôle SecurGYM'
+                          : 'Lecteur d’empreinte actif · Posez votre doigt sur le lecteur pour afficher votre profil et renouveler.',
                       style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 13, fontWeight: FontWeight.w500),
                     ),
                   ),

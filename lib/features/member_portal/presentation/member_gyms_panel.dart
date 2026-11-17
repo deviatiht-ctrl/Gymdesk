@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../data/member_portal_repository.dart';
+import '../../../core/gyms/gym_constants.dart';
 import 'member_ui.dart';
 
 const _brandOrange = Color(0xffff6600);
@@ -55,10 +56,18 @@ class _MemberGymsPanelState extends State<MemberGymsPanel> {
   Widget build(BuildContext context) {
     final q = _search.text.trim().toLowerCase();
     final gyms = (_gyms ?? const <Map<String, dynamic>>[])
-        .where((g) =>
-            q.isEmpty ||
-            (g['name']?.toString().toLowerCase().contains(q) ?? false) ||
-            (g['address']?.toString().toLowerCase().contains(q) ?? false))
+        .where((g) {
+          if (isJlFitnessGym(
+            gymId: g['id']?.toString(),
+            gymCode: g['code']?.toString(),
+            gymName: g['name']?.toString(),
+          )) {
+            return false;
+          }
+          return q.isEmpty ||
+              (g['name']?.toString().toLowerCase().contains(q) ?? false) ||
+              (g['address']?.toString().toLowerCase().contains(q) ?? false);
+        })
         .toList();
 
     final header = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

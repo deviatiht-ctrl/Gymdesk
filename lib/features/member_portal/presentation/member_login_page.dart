@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/widgets/securgym_background.dart';
 import '../data/member_portal_repository.dart';
+import '../../../core/gyms/gym_constants.dart';
 import '../data/member_session.dart';
 import 'member_ui.dart';
 
@@ -89,7 +90,14 @@ class _MemberLoginPageState extends State<MemberLoginPage> {
       });
 
   Future<void> _openGyms() async {
-    final gyms = await _repo.myGyms();
+    final allGyms = await _repo.myGyms();
+    final gyms = allGyms
+        .where((g) => !isJlFitnessGym(
+              gymId: g['id']?.toString(),
+              gymCode: g['code']?.toString(),
+              gymName: g['name']?.toString(),
+            ))
+        .toList();
     if (!mounted) return;
     if (gyms.length == 1) {
       context.go('/m/${gyms.first['id']}');

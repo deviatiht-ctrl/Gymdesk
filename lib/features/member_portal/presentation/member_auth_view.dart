@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../data/member_portal_repository.dart';
+import '../../../core/gyms/gym_constants.dart';
 import '../data/member_session.dart';
 import 'member_ui.dart';
 
@@ -70,6 +71,9 @@ class _MemberAuthViewState extends State<MemberAuthView> {
       });
 
   Future<void> _phoneLogin() => _run(() async {
+        if (isJlFitnessGym(gymId: _gymId, gymName: widget.gym['name']?.toString())) {
+          throw const MemberAuthException('gym_not_found');
+        }
         final text = _phone.text.trim();
         final digits = text.replaceAll(RegExp(r'\D'), '');
         if (digits.length < 8 && text.length < 2) {

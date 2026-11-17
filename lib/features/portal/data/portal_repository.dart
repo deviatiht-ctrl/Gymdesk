@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../domain/portal_request.dart';
+import '../../../core/gyms/gym_constants.dart';
 
 class PortalRepository {
   const PortalRepository(this._client);
@@ -84,6 +85,9 @@ class PortalRepository {
     required String gymCode,
     required String query,
   }) async {
+    if (isJlFitnessGym(gymCode: gymCode)) {
+      return {'found': false};
+    }
     try {
       final res = await _client.rpc('portal_lookup_member', params: {
         'p_gym_code': gymCode,
@@ -98,6 +102,9 @@ class PortalRepository {
 
   /// Rekipere dènye eskanè anprent nan pòt la pou renouvèlman an dirèk.
   Future<Map<String, dynamic>> getLatestDoorScan(String gymCode) async {
+    if (isJlFitnessGym(gymCode: gymCode)) {
+      return {'found': false};
+    }
     try {
       final res = await _client.rpc('portal_latest_door_scan', params: {
         'p_gym_code': gymCode,
