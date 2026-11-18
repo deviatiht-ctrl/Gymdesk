@@ -324,6 +324,7 @@ class GatewayApiTenant {
     this.isMasterAdmin = false,
     this.createdAt,
     this.usage = const GatewayApiUsage(),
+    this.dedicatedAccountIndices = const [],
   });
 
   final String id;
@@ -337,6 +338,7 @@ class GatewayApiTenant {
   final bool isMasterAdmin;
   final DateTime? createdAt;
   final GatewayApiUsage usage;
+  final List<int> dedicatedAccountIndices;
 
   factory GatewayApiTenant.fromJson(Map<String, dynamic> json) {
     return GatewayApiTenant(
@@ -353,6 +355,10 @@ class GatewayApiTenant {
       usage: json['usage'] is Map
           ? GatewayApiUsage.fromJson(Map<String, dynamic>.from(json['usage'] as Map))
           : const GatewayApiUsage(),
+      dedicatedAccountIndices: (json['dedicated_account_indices'] as List?)
+              ?.map((e) => (e as num).toInt())
+              .toList() ??
+          const [],
     );
   }
 }
@@ -1245,9 +1251,29 @@ class WhatsAppClient {
   static String buildAiIntegrationPrompt({
     required String baseUrl,
     required String apiKey,
+    List<int>? dedicatedLines,
+    String? planTier,
   }) {
     final cleanUrl = normalizeGatewayUrl(baseUrl);
     final safeKey = apiKey.trim().isNotEmpty ? apiKey.trim() : '<VOTRE_CLE_API>';
+    final lines = dedicatedLines ?? const [];
+    final effectivePlan = (planTier ?? 'pro').toLowerCase();
+
+    final dedicatedSection = lines.isNotEmpty
+        ? '''=== 2. LIY DÉDIÉES EXCLUSIVES & IZOLASYON TOTAL (PLAN ${effectivePlan.toUpperCase()}) ===
+- Ligne(s) réservée(s) : Ligne #${lines.join(', #')} (Attribuée(s) exclusivement à votre entreprise)
+- GARANTIE D'ISOLATION STRICTE (ZERO-LEAKAGE) :
+  * Tous les messages envoyés avec cette clé API transitent UNIQUEMENT par vos lignes dédiées (#${lines.join(', #')}).
+  * AUCUN message d'une autre entreprise, d'un autre gym ni de la plateforme générale ne passera JAMAIS par vos lignes. Vos cartes SIM sont 100% isolées.
+  * Routage intelligent : Laissez le champ "account_index" vide pour un équilibrage automatique entre vos lignes dédiées, ou forcez un numéro précis via "account_index": ${lines.first}.
+'''
+        : (effectivePlan == 'pro'
+            ? '''=== 2. PLAN PRO : SUPPORT DES LIY DÉDIÉES EXCLUSIVES ===
+- Sur le Plan Pro, vous pouvez attacher 1 ou 2 lignes WhatsApp (SIM) dédiées exclusivement à votre entreprise.
+- Isolation stricte : lorsque configurées, aucun autre message de la plateforme n'emprunte vos lignes.
+'''
+            : '');
+
     return '''Tu dois intégrer l'API REST CVISUAL WhatsApp Gateway dans mon application / site web backend.
 
 === 1. PARAMÈTRES DE CONNEXION ===
@@ -1265,7 +1291,7 @@ RÈGLE DE SÉCURITÉ OBLIGATOIRE :
 - Stocke la clé API côté serveur dans une variable d'environnement (.env : CVISUAL_WA_API_KEY=$safeKey).
 - N'expose JAMAIS cette clé côté navigateur/frontend.
 
-=== 2. ROUTAGE DUAL-LANE & ANTI-BAN META ===
+${dedicatedSection}=== ${dedicatedSection.isNotEmpty ? '3' : '2'}. ROUTAGE DUAL-LANE & ANTI-BAN META ===
 1) FAST LANE (Instantané ~2.5s-6.5s, prioritaire, sans limite 25/jour) :
    - kind : "receipt", "welcome", "otp", "test", "manual_direct"
    - mode="sync" -> HTTP 200 (envoi immédiat si connecté, sinon 503 WHATSAPP_OFFLINE)
@@ -1357,6 +1383,7 @@ Crée le client HTTP backend complet avec CVISUAL_WA_API_KEY, vérification GET 
     String planTier = 'pro',
     int? dailyQuota,
     int? monthlyQuota,
+    List<int>? dedicatedAccountIndices,
   }) async {
     final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/api-keys');
     final res = await http
@@ -1369,8 +1396,29 @@ Crée le client HTTP backend complet avec CVISUAL_WA_API_KEY, vérification GET 
             'plan_tier': planTier,
             if (dailyQuota != null) 'daily_quota': dailyQuota,
             if (monthlyQuota != null) 'monthly_quota': monthlyQuota,
+            if (dedicatedAccountIndices != null && dedicatedAccountIndices.isNotEmpty)
+              'dedicated_account_indices': dedicatedAccountIndices,
             'is_active': true,
           }),
+        )
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true || data['tenant'] is! Map) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
+    return GatewayApiTenant.fromJson(Map<String, dynamic>.from(data['tenant'] as Map));
+  }
+
+  Future<GatewayApiTenant> updateApiTenantDedicatedLines(
+    String tenantId,
+    List<int> dedicatedAccountIndices,
+  ) async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/tenants/$tenantId');
+    final res = await http
+        .patch(
+          uri,
+          headers: _adminHeaders(includeJson: true),
+          body: jsonEncode({'dedicated_account_indices': dedicatedAccountIndices}),
         )
         .timeout(const Duration(seconds: 15));
     final data = _decodeJsonResponse(res);

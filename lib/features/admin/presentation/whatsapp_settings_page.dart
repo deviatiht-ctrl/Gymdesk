@@ -3446,7 +3446,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
     final created = await showDialog<GatewayApiTenant>(
       context: context,
-      builder: (ctx) => _CreateExternalApiKeyDialog(client: client),
+      builder: (ctx) => _CreateExternalApiKeyDialog(client: client, accounts: _accountsList),
     );
     if (created == null || !mounted) return;
     _revealedTenantIds.add(created.id);
@@ -3460,6 +3460,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     final prompt = WhatsAppClient.buildAiIntegrationPrompt(
       baseUrl: baseUrl,
       apiKey: created.apiKey,
+      dedicatedLines: created.dedicatedAccountIndices,
+      planTier: created.planTier,
     );
     await showDialog<void>(
       context: context,
@@ -3524,11 +3526,13 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     );
   }
 
-  void _showAiPromptDialog(String apiKey, String label) {
+  void _showAiPromptDialog(String apiKey, String label, {List<int>? dedicatedLines, String? planTier}) {
     final baseUrl = _masterKeyInfo?.baseUrl ?? WhatsAppClient.normalizeGatewayUrl(_gatewayUrlController.text.trim());
     final prompt = WhatsAppClient.buildAiIntegrationPrompt(
       baseUrl: baseUrl,
       apiKey: apiKey,
+      dedicatedLines: dedicatedLines,
+      planTier: planTier,
     );
     showDialog<void>(
       context: context,
@@ -3976,6 +3980,27 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ),
             ],
           ),
+          if (tenant.dedicatedAccountIndices.isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F766E).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.35)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.shieldCheck, size: 13, color: Color(0xFF0F766E)),
+                  const SizedBox(width: 5),
+                  Text(
+                    '🔒 Liy Dedye : Liy #${tenant.dedicatedAccountIndices.join(', #')} (Eksklizif)',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                  ),
+                ],
+              ),
+            ),
           const SizedBox(height: 8),
           Container(
             width: double.infinity,
@@ -4015,8 +4040,19 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                 label: const Text('Copier Clé'),
                 style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
               ),
+              OutlinedButton.icon(
+                onPressed: () => _showEditDedicatedLinesDialog(tenant),
+                icon: const Icon(LucideIcons.shield, size: 13, color: Color(0xFF0F766E)),
+                label: const Text('Liy Dedye', style: TextStyle(color: Color(0xFF0F766E))),
+                style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+              ),
               FilledButton.tonalIcon(
-                onPressed: () => _showAiPromptDialog(tenant.apiKey, tenant.name),
+                onPressed: () => _showAiPromptDialog(
+                  tenant.apiKey,
+                  tenant.name,
+                  dedicatedLines: tenant.dedicatedAccountIndices,
+                  planTier: tenant.planTier,
+                ),
                 icon: const Icon(LucideIcons.sparkles, size: 13),
                 label: const Text('Prompt IA'),
                 style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
@@ -4532,11 +4568,117 @@ class _WhatsAppChatViewerDialogState extends State<_WhatsAppChatViewerDialog> {
 }
 
 
+  Future<void> _showEditDedicatedLinesDialog(GatewayApiTenant tenant) async {
+    final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+    final selected = Set<int>.from(tenant.dedicatedAccountIndices);
+    final isPro = tenant.planTier.toLowerCase() == 'pro';
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(LucideIcons.shieldCheck, color: Color(0xFF0F766E), size: 20),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Liy Dedye — ${tenant.name}')),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Plan ${tenant.planTier.toUpperCase()} • ${isPro ? "Chwazi 1 oswa 2 liy dedye eksklizif" : "Chwazi liy dedye"}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${selected.length} / ${isPro ? '2' : 'illimité'} seleksyone',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_accountsList.isEmpty)
+                    const Text('Okenn liy pa konekte nan cluster a.', style: TextStyle(color: Colors.grey))
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: _accountsList.map((acc) {
+                        final idx = acc.accountIndex;
+                        final isSelected = selected.contains(idx);
+                        final canSelect = isSelected || !isPro || selected.length < 2;
+                        return FilterChip(
+                          label: Text('Liy #$idx (${acc.label})'),
+                          selected: isSelected,
+                          onSelected: canSelect
+                              ? (val) {
+                                  setDlgState(() {
+                                    if (val) {
+                                      selected.add(idx);
+                                    } else {
+                                      selected.remove(idx);
+                                    }
+                                  });
+                                }
+                              : null,
+                        );
+                      }).toList(),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                onPressed: () async {
+                  try {
+                    await client.updateApiTenantDedicatedLines(tenant.id, selected.toList());
+                    if (!ctx.mounted) return;
+                    Navigator.pop(ctx, true);
+                  } catch (e) {
+                    if (!ctx.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: Colors.red,
+                        content: Text('Erreur: ${e.toString().replaceFirst("Exception: ", "")}'),
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Anrejistre'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (updated == true) {
+      await _loadApiIntegrationData(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Liy dedye yo mete ajou pou "${tenant.name}".')),
+      );
+    }
+  }
+
 /// Dyalòg dedye pou kreye yon nouvo kle API pou yon lòt sit web ekstèn
 class _CreateExternalApiKeyDialog extends StatefulWidget {
-  const _CreateExternalApiKeyDialog({required this.client});
+  const _CreateExternalApiKeyDialog({
+    required this.client,
+    this.accounts = const [],
+  });
 
   final WhatsAppClient client;
+  final List<WhatsAppAccountInfo> accounts;
 
   @override
   State<_CreateExternalApiKeyDialog> createState() => _CreateExternalApiKeyDialogState();
@@ -4547,6 +4689,7 @@ class _CreateExternalApiKeyDialogState extends State<_CreateExternalApiKeyDialog
   final _emailCtrl = TextEditingController();
   final _dailyCtrl = TextEditingController(text: '100');
   final _monthlyCtrl = TextEditingController(text: '3000');
+  final Set<int> _selectedLines = {};
   String _planTier = 'pro';
   bool _submitting = false;
   String? _error;
@@ -4602,6 +4745,7 @@ class _CreateExternalApiKeyDialogState extends State<_CreateExternalApiKeyDialog
         planTier: _planTier,
         dailyQuota: daily,
         monthlyQuota: monthly,
+        dedicatedAccountIndices: _selectedLines.toList(),
       );
       if (!mounted) return;
       Navigator.pop(context, created);
@@ -4653,11 +4797,81 @@ class _CreateExternalApiKeyDialogState extends State<_CreateExternalApiKeyDialog
                 decoration: const InputDecoration(labelText: 'Forfait'),
                 items: const [
                   DropdownMenuItem(value: 'starter', child: Text('Starter (15 / jour • 300 / mois)')),
-                  DropdownMenuItem(value: 'pro', child: Text('Pro Business (100 / jour • 3 000 / mois)')),
-                  DropdownMenuItem(value: 'enterprise', child: Text('Enterprise (5 000 / jour • 100 000 / mois)')),
+                  DropdownMenuItem(value: 'pro', child: Text('Pro Business (100 / jour • 3 000 / mois • 1-2 Liy Dedye)')),
+                  DropdownMenuItem(value: 'enterprise', child: Text('Enterprise (5 000 / jour • 100 000 / mois • Liy Dedye)')),
                 ],
-                onChanged: _submitting ? null : _onPlanChanged,
+                onChanged: _submitting
+                    ? null
+                    : (val) {
+                        _onPlanChanged(val);
+                        if (val == 'starter') {
+                          setState(() => _selectedLines.clear());
+                        }
+                      },
               ),
+              if (_planTier != 'starter') ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0F766E).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            '🔒 Liy WhatsApp Dedye Eksklizif',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                          ),
+                          Text(
+                            '${_selectedLines.length} / ${_planTier == 'pro' ? 2 : 'illimité'}',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Tout mesaj ap pase sou liy sa yo sèlman. Okenn lòt antrepriz ni lòt gym pap ka pase sou yo.',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 8),
+                      if (widget.accounts.isEmpty)
+                        const Text('Okenn liy pa konekte nan cluster a.', style: TextStyle(fontSize: 11, color: Colors.grey))
+                      else
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: widget.accounts.map((acc) {
+                            final idx = acc.accountIndex;
+                            final isSelected = _selectedLines.contains(idx);
+                            final canSelect = isSelected || _planTier != 'pro' || _selectedLines.length < 2;
+                            return FilterChip(
+                              label: Text('Liy #$idx (${acc.label})'),
+                              selected: isSelected,
+                              visualDensity: VisualDensity.compact,
+                              onSelected: canSelect
+                                  ? (val) {
+                                      setState(() {
+                                        if (val) {
+                                          _selectedLines.add(idx);
+                                        } else {
+                                          _selectedLines.remove(idx);
+                                        }
+                                      });
+                                    }
+                                  : null,
+                            );
+                          }).toList(),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               Row(
                 children: [
