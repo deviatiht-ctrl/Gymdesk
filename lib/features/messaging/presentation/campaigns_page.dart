@@ -9,6 +9,8 @@ import '../../../core/sync/sync_models.dart';
 import '../../../l10n/app_strings.dart';
 import '../../../core/whatsapp/whatsapp_client.dart';
 import '../../../core/whatsapp/whatsapp_notification_service.dart';
+import '../../../core/whatsapp/whatsapp_antiban_helper.dart';
+import '../../members/data/members_repository.dart';
 
 class CampaignsPage extends ConsumerStatefulWidget {
   const CampaignsPage({super.key});
@@ -28,7 +30,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
 
   String _channel = 'email'; // 'email' | 'whatsapp'
   String _templateKey = 'inactive_winback';
-  String _filterStatus = 'all'; // Tout manm parètTous les membres s'affichent par défaut
+  String _filterStatus = 'all'; // 'all' | 'active' | 'expired'
+  int _totalActiveMembers = 0;
+  int _totalExpiredMembers = 0;
+  int _totalAllMembers = 0;
 
   bool _loadingPreview = false;
   List<Map<String, dynamic>> _previewRecipients = [];
@@ -149,27 +154,48 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     final gymId = runtime.session?.gymId;
     final List<Map<String, dynamic>> rawMembers = [];
 
-    // 1. Lire d'abord dans la base locale Drift (SQLite) si disponible (Offline-first)
-    if (runtime.database != null && gymId != null) {
+    // 1. Lire d'abord avec MembersRepository (calcul précis de validité d'abonnement Offline-first)
+    if (runtime.database != null && gymId != null && runtime.session != null) {
       try {
-        final rows = await runtime.database!
-            .watchRecords(SyncEntity.members, limit: 10000)
-            .first;
-        for (final row in rows) {
-          try {
-            final p = jsonDecode(row.payload) as Map<String, dynamic>;
-            rawMembers.add({
-              'member_id': p['id']?.toString() ?? '',
-              'name': '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}'.trim(),
-              'email': p['email']?.toString() ?? '',
-              'phone': p['phone']?.toString() ?? '',
-              'whatsapp': p['whatsapp']?.toString() ?? '',
-              'status': p['status']?.toString() ?? 'active',
-              'plan_name': 'Abonnement Gym',
-            });
-          } catch (_) {}
+        final repo = MembersRepository(runtime.client, runtime.database!, runtime.session!);
+        final entries = await repo.watch().first;
+        for (final entry in entries) {
+          final m = entry.member;
+          final isValid = entry.validity.valid;
+          rawMembers.add({
+            'member_id': m.id,
+            'name': '${m.firstName} ${m.lastName}'.trim(),
+            'email': m.email?.trim() ?? '',
+            'phone': m.phone?.trim() ?? '',
+            'whatsapp': m.whatsapp?.trim() ?? '',
+            'status': isValid ? 'active' : 'expired',
+            'is_active': isValid,
+            'plan_name': 'Abonnement Gym',
+            'days_left': entry.validity.daysLeft,
+          });
         }
-      } catch (_) {}
+      } catch (_) {
+        // Fallback lecture directe table SQLite si exception
+        try {
+          final rows = await runtime.database!
+              .watchRecords(SyncEntity.members, limit: 10000)
+              .first;
+          for (final row in rows) {
+            try {
+              final p = jsonDecode(row.payload) as Map<String, dynamic>;
+              rawMembers.add({
+                'member_id': p['id']?.toString() ?? '',
+                'name': '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}'.trim(),
+                'email': p['email']?.toString() ?? '',
+                'phone': p['phone']?.toString() ?? '',
+                'whatsapp': p['whatsapp']?.toString() ?? '',
+                'status': p['status']?.toString() ?? 'active',
+                'plan_name': 'Abonnement Gym',
+              });
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
     }
 
     // 2. Si la base locale n'avait aucun membre ou n'était pas initialisée, interroger Supabase
@@ -202,6 +228,11 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       } catch (_) {}
     }
 
+    // Kalkile kantite manm pou badges yo
+    final totalAll = rawMembers.length;
+    final totalActive = rawMembers.where((m) => m['status'] == 'active').length;
+    final totalExpired = rawMembers.where((m) => m['status'] == 'expired' || m['status'] == 'inactive').length;
+
     // 3. Appliquer le filtre sélectionné (Tous, Inactifs, Actifs)
     final filtered = rawMembers.where((m) {
       final st = m['status']?.toString().toLowerCase() ?? '';
@@ -216,6 +247,9 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
 
     if (mounted) {
       setState(() {
+        _totalAllMembers = totalAll;
+        _totalActiveMembers = totalActive;
+        _totalExpiredMembers = totalExpired;
         _previewRecipients = filtered;
         _selectedMemberIds.clear();
         for (final m in filtered) {
@@ -382,6 +416,102 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     }
   }
 
+  void _showAntiBanPreviewDialog() {
+    final body = _bodyController.text.trim();
+    final title = _titleController.text.trim();
+    final gymName = ref.read(appRuntimeProvider).session?.name ?? 'SecurGYM';
+    final s = AppStrings.of(context);
+
+    if (body.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tanpri ekri mesaj la anvan pou w ka wè varyasyon yo.')),
+      );
+      return;
+    }
+
+    final variations = WhatsAppAntiBanHelper.generatePreviewVariations(
+      body: body,
+      gymName: gymName,
+      title: title.isNotEmpty ? title : null,
+      lang: s.locale.languageCode,
+      count: 3,
+    );
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(LucideIcons.shieldCheck, color: Color(0xFF15803D)),
+            SizedBox(width: 8),
+            Text('Aperçu Varyasyon Anti-Ban', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SizedBox(
+          width: 550,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Men kijan 3 manm diferan ap resevwa menm kanpay la ak varyasyon inik pou pwoteje kont WhatsApp lan :',
+                  style: TextStyle(fontSize: 13, color: Colors.black87),
+                ),
+                const SizedBox(height: 12),
+                for (int i = 0; i < variations.length; i++) ...[
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFDCFCE7),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'Varyasyon ${i + 1}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF15803D)),
+                              ),
+                            ),
+                            const Spacer(),
+                            const Text(
+                              '🛡️ Anprent inik enkli',
+                              style: TextStyle(fontSize: 11, color: Colors.grey),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(variations[i], style: const TextStyle(fontSize: 13, height: 1.4)),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Fèmen'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _sendWhatsAppCampaign(
     List<Map<String, dynamic>> recipients,
     String title,
@@ -435,39 +565,204 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     );
 
     int sentCount = 0;
-    for (int i = 0; i < recipients.length; i++) {
-      if (!mounted) break;
-      final m = recipients[i];
-      final rawPhone = (m['whatsapp']?.toString().isNotEmpty ?? false)
-          ? m['whatsapp'].toString()
-          : m['phone']?.toString() ?? '';
-      final phone = WhatsAppClient.normalizePhone(rawPhone);
-      if (phone.length < 8) continue;
+    int failedCount = 0;
+    bool isCancelled = false;
 
-      final memberName = m['name']?.toString() ?? '';
-      final personalizedBody = body
-          .replaceAll('{nom}', memberName)
-          .replaceAll('{gym}', gymName)
-          .replaceAll('{gym_name}', gymName);
-      final fullMsg = '*$title*\n\n$personalizedBody$footer';
+    // Bwat dyalòg pwogresyon an dirèk ak Pwoteksyon Anti-Ban
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            String currentRecipient = '';
+            String progressStatus = 'Preparasyon pou voye...';
+            int coolingSeconds = 0;
+            bool started = false;
 
-      final res = await waClient.sendMessage(
-        to: phone,
-        message: fullMsg,
-        kind: 'marketing',
-        gymId: gymId,
-      );
-      if (res.success) {
-        sentCount++;
-      }
-      if (i < recipients.length - 1) {
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-      }
-    }
+            void runSendingLoop() async {
+              for (int i = 0; i < recipients.length; i++) {
+                if (isCancelled || !mounted) break;
+                final m = recipients[i];
+                final rawPhone = (m['whatsapp']?.toString().isNotEmpty ?? false)
+                    ? m['whatsapp'].toString()
+                    : m['phone']?.toString() ?? '';
+                final phone = WhatsAppClient.normalizePhone(rawPhone);
+                if (phone.length < 8) {
+                  failedCount++;
+                  continue;
+                }
 
+                final memberName = m['name']?.toString() ?? '';
+                if (dialogCtx.mounted) {
+                  setDialogState(() {
+                    currentRecipient = '$memberName ($phone)';
+                    progressStatus = 'N ap voye bay: $currentRecipient';
+                    coolingSeconds = 0;
+                  });
+                }
+
+                // Tèks varye ak pwoteksyon Anti-Ban (Spintax + Hash Cryptographique Envizib)
+                final fullMsg = WhatsAppAntiBanHelper.humanizeMessage(
+                  body: body,
+                  memberName: memberName,
+                  gymName: gymName,
+                  title: title,
+                  footer: footer,
+                  lang: s.locale.languageCode,
+                  recipientIndex: i,
+                  addZeroWidthFingerprint: true,
+                );
+
+                final res = await waClient.sendMessage(
+                  to: phone,
+                  message: fullMsg,
+                  kind: 'marketing',
+                  gymId: gymId,
+                );
+
+                if (res.success) {
+                  sentCount++;
+                } else {
+                  failedCount++;
+                }
+
+                // Reta entèlijan ant chak voye
+                if (i < recipients.length - 1 && !isCancelled) {
+                  final isCool = WhatsAppAntiBanHelper.isCoolingBreak(index: i + 1);
+                  if (isCool) {
+                    for (int sec = 12; sec > 0; sec--) {
+                      if (isCancelled || !mounted) break;
+                      if (dialogCtx.mounted) {
+                        setDialogState(() {
+                          coolingSeconds = sec;
+                          progressStatus = '⏳ Pòz refwadisman Anti-Ban ($sec s) pou pwoteje kont lan...';
+                        });
+                      }
+                      await Future<void>.delayed(const Duration(seconds: 1));
+                    }
+                  } else {
+                    final delay = WhatsAppAntiBanHelper.getPacingDelay(index: i + 1);
+                    final sec = (delay.inMilliseconds / 1000).toStringAsFixed(1);
+                    if (dialogCtx.mounted) {
+                      setDialogState(() {
+                        progressStatus = '🛡️ Reta Anti-Ban ($sec s) anvan pwochen moun...';
+                      });
+                    }
+                    await Future<void>.delayed(delay);
+                  }
+                }
+              }
+
+              if (dialogCtx.mounted) {
+                Navigator.of(dialogCtx).pop();
+              }
+            }
+
+            if (!started) {
+              started = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) => runSendingLoop());
+            }
+
+            final progress = recipients.isNotEmpty ? (sentCount + failedCount) / recipients.length : 0.0;
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(LucideIcons.send, color: Color(0xFF15803D)),
+                  SizedBox(width: 8),
+                  Text('Voye Kanpay WhatsApp', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: SizedBox(
+                width: 450,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFF15803D)),
+                          SizedBox(width: 6),
+                          Text(
+                            'Pwoteksyon Anti-Ban Aktif (Varyasyon + Reta entèlijan)',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(
+                      value: progress.clamp(0.0, 1.0),
+                      minHeight: 8,
+                      backgroundColor: Colors.grey.shade200,
+                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF15803D)),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Mesaj voye : $sentCount / ${recipients.length}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        ),
+                        if (failedCount > 0)
+                          Text(
+                            '$failedCount echwe',
+                            style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      progressStatus,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: coolingSeconds > 0 ? const Color(0xFFB45309) : Colors.black87,
+                        fontWeight: coolingSeconds > 0 ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                  onPressed: () {
+                    isCancelled = true;
+                    if (dialogCtx.mounted) {
+                      setDialogState(() {
+                        progressStatus = 'Kanpe voye a...';
+                      });
+                    }
+                  },
+                  icon: const Icon(LucideIcons.octagonAlert, size: 16),
+                  label: const Text('Kanpe voye a (Annuler)'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    // 3. Anrejistre kanpay la nan baz done Supabase
     try {
       final gymId = runtime.session?.gymId;
-      if (gymId != null) {
+      if (gymId != null && sentCount > 0) {
         await Supabase.instance.client.from('campaigns').insert({
           'gym_id': gymId,
           'title': title,
@@ -484,8 +779,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$sentCount / ${recipients.length} ${s.text('campaign_whatsapp_sent_summary')}'),
-          backgroundColor: const Color(0xFF059669),
+          content: Text(
+            isCancelled
+                ? 'Kanpay kanpe : $sentCount voye sou ${recipients.length} manm.'
+                : '$sentCount / ${recipients.length} ${s.text('campaign_whatsapp_sent_summary')}',
+          ),
+          backgroundColor: sentCount > 0 ? const Color(0xFF059669) : Colors.amber.shade800,
         ),
       );
       _loadHistory();
@@ -668,22 +967,59 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                               ),
                             ],
                           ),
-                          DropdownButton<String>(
-                            value: _filterStatus,
-                            underline: const SizedBox(),
-                            icon: const Icon(LucideIcons.chevronDown, size: 16),
-                            items: [
-                              DropdownMenuItem(value: 'expired', child: Text(s.text('filter_inactive_members'))),
-                              DropdownMenuItem(value: 'active', child: Text(s.text('filter_active_members'))),
-                              DropdownMenuItem(value: 'expiring', child: Text(s.text('filter_expiring_soon'))),
-                              DropdownMenuItem(value: 'all', child: Text(s.text('filter_all_members'))),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              ChoiceChip(
+                                avatar: const Icon(LucideIcons.users, size: 16),
+                                label: Text('Tout Moun ($_totalAllMembers)'),
+                                selected: _filterStatus == 'all',
+                                selectedColor: const Color(0xFFCCFBF1),
+                                labelStyle: TextStyle(
+                                  color: _filterStatus == 'all' ? const Color(0xFF0F766E) : Colors.black87,
+                                  fontWeight: _filterStatus == 'all' ? FontWeight.bold : FontWeight.normal,
+                                ),
+                                onSelected: (val) {
+                                  if (val) {
+                                    setState(() => _filterStatus = 'all');
+                                    _runPreview();
+                                  }
+                                },
+                              ),
+                              ChoiceChip(
+                                avatar: const Icon(LucideIcons.checkCircle2, size: 16, color: Color(0xFF15803D)),
+                                label: Text('Moun ki Aktif sèlman ($_totalActiveMembers)'),
+                                selected: _filterStatus == 'active',
+                                selectedColor: const Color(0xFFDCFCE7),
+                                labelStyle: TextStyle(
+                                  color: _filterStatus == 'active' ? const Color(0xFF15803D) : Colors.black87,
+                                  fontWeight: _filterStatus == 'active' ? FontWeight.bold : FontWeight.normal,
+                                ),
+                                onSelected: (val) {
+                                  if (val) {
+                                    setState(() => _filterStatus = 'active');
+                                    _runPreview();
+                                  }
+                                },
+                              ),
+                              ChoiceChip(
+                                avatar: const Icon(LucideIcons.alertTriangle, size: 16, color: Color(0xFFB91C1C)),
+                                label: Text('Inaktif / Ekspire ($_totalExpiredMembers)'),
+                                selected: _filterStatus == 'expired',
+                                selectedColor: const Color(0xFFFEE2E2),
+                                labelStyle: TextStyle(
+                                  color: _filterStatus == 'expired' ? const Color(0xFFB91C1C) : Colors.black87,
+                                  fontWeight: _filterStatus == 'expired' ? FontWeight.bold : FontWeight.normal,
+                                ),
+                                onSelected: (val) {
+                                  if (val) {
+                                    setState(() => _filterStatus = 'expired');
+                                    _runPreview();
+                                  }
+                                },
+                              ),
                             ],
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => _filterStatus = val);
-                                _runPreview();
-                              }
-                            },
                           ),
                         ],
                       ),
@@ -867,18 +1203,89 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                   ),
                 ),
                 const SizedBox(height: 16),
-                Row(
+                if (_channel == 'whatsapp') ...[
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF86EFAC)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(LucideIcons.shieldCheck, color: Color(0xFF15803D), size: 20),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'Pwoteksyon Anti-Ban Meta Aktif',
+                                style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF15803D), fontSize: 14),
+                              ),
+                            ),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF15803D),
+                                side: const BorderSide(color: Color(0xFF86EFAC)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              ),
+                              icon: const Icon(LucideIcons.sparkles, size: 14),
+                              label: const Text('Teste varyasyon tèks', style: TextStyle(fontSize: 12)),
+                              onPressed: _showAntiBanPreviewDialog,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Chak mesaj ap voye ak yon anprent dijital inik (zero-width hash) plis yon reta 3.5s - 6s ant chak moun pou WhatsApp pa janm wè 2 mesaj idantik. Ou ka itilize tou fòma {opsyon 1|opsyon 2} pou varye mo yo otomatikman.',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF166534), height: 1.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Text('Tags dynamiques : ', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                    const Text('Tags & Spintax : ', style: TextStyle(fontSize: 13, color: Colors.grey)),
                     ActionChip(
                       label: Text(s.text('insert_tag_nom')),
                       onPressed: () => _insertTag('{nom}'),
                     ),
-                    const SizedBox(width: 8),
+                    ActionChip(
+                      label: const Text('{prenom}'),
+                      tooltip: 'Premye non manm lan sèlman',
+                      onPressed: () => _insertTag('{prenom}'),
+                    ),
                     ActionChip(
                       label: Text(s.text('insert_tag_gym')),
                       onPressed: () => _insertTag('{gym}'),
                     ),
+                    if (_channel == 'whatsapp') ...[
+                      ActionChip(
+                        avatar: const Icon(LucideIcons.sun, size: 14, color: Colors.amber),
+                        label: const Text('{salitasyon}'),
+                        tooltip: 'Chanje Bonjou / Bonswa otomatik selon lè a',
+                        onPressed: () => _insertTag('{salitasyon}'),
+                      ),
+                      ActionChip(
+                        avatar: const Icon(LucideIcons.heartHandshake, size: 14, color: Colors.green),
+                        label: const Text('{konklizyon}'),
+                        tooltip: 'Varye konklizyon ak fòmil politès yo',
+                        onPressed: () => _insertTag('{konklizyon}'),
+                      ),
+                      ActionChip(
+                        avatar: const Icon(LucideIcons.shuffle, size: 14, color: Colors.teal),
+                        label: const Text('{Opsyon 1|Opsyon 2}'),
+                        tooltip: 'Mete yon varyasyon Spintax',
+                        onPressed: () => _insertTag('{Bonjou|Bonswa} {nom}! {Nou kontan enfòme w ke|Nou pase fè w sonje ke} '),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 8),

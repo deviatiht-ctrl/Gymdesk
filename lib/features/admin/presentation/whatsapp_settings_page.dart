@@ -4086,6 +4086,110 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     );
   }
 
+
+  Future<void> _showEditDedicatedLinesDialog(GatewayApiTenant tenant) async {
+    final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+    final selected = Set<int>.from(tenant.dedicatedAccountIndices);
+    final isPro = tenant.planTier.toLowerCase() == 'pro';
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(LucideIcons.shieldCheck, color: Color(0xFF0F766E), size: 20),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Liy Dedye — ${tenant.name}')),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Plan ${tenant.planTier.toUpperCase()} • ${isPro ? "Chwazi 1 oswa 2 liy dedye eksklizif" : "Chwazi liy dedye"}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${selected.length} / ${isPro ? '2' : 'illimité'} seleksyone',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_accountsList.isEmpty)
+                    const Text('Okenn liy pa konekte nan cluster a.', style: TextStyle(color: Colors.grey))
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: _accountsList.map((acc) {
+                        final idx = acc.accountIndex;
+                        final isSelected = selected.contains(idx);
+                        final canSelect = isSelected || !isPro || selected.length < 2;
+                        return FilterChip(
+                          label: Text('Liy #$idx (${acc.label})'),
+                          selected: isSelected,
+                          onSelected: canSelect
+                              ? (val) {
+                                  setDlgState(() {
+                                    if (val) {
+                                      selected.add(idx);
+                                    } else {
+                                      selected.remove(idx);
+                                    }
+                                  });
+                                }
+                              : null,
+                        );
+                      }).toList(),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                onPressed: () async {
+                  try {
+                    await client.updateApiTenantDedicatedLines(tenant.id, selected.toList());
+                    if (!ctx.mounted) return;
+                    Navigator.pop(ctx, true);
+                  } catch (e) {
+                    if (!ctx.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: Colors.red,
+                        content: Text('Erreur: ${e.toString().replaceFirst("Exception: ", "")}'),
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Anrejistre'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (updated == true) {
+      await _loadApiIntegrationData(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Liy dedye yo mete ajou pou "${tenant.name}".')),
+      );
+    }
+  }
+
+
 }
 
 /// Fenêtre Agrandie Interactive pou wè ak reponn mesaj WhatsApp dirèkteman sou liy konekte a
@@ -4565,110 +4669,10 @@ class _WhatsAppChatViewerDialogState extends State<_WhatsAppChatViewerDialog> {
       ],
     );
   }
+
 }
 
 
-  Future<void> _showEditDedicatedLinesDialog(GatewayApiTenant tenant) async {
-    final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
-    final selected = Set<int>.from(tenant.dedicatedAccountIndices);
-    final isPro = tenant.planTier.toLowerCase() == 'pro';
-
-    final updated = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlgState) {
-          return AlertDialog(
-            title: Row(
-              children: [
-                const Icon(LucideIcons.shieldCheck, color: Color(0xFF0F766E), size: 20),
-                const SizedBox(width: 8),
-                Expanded(child: Text('Liy Dedye — ${tenant.name}')),
-              ],
-            ),
-            content: SizedBox(
-              width: 420,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Plan ${tenant.planTier.toUpperCase()} • ${isPro ? "Chwazi 1 oswa 2 liy dedye eksklizif" : "Chwazi liy dedye"}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${selected.length} / ${isPro ? '2' : 'illimité'} seleksyone',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_accountsList.isEmpty)
-                    const Text('Okenn liy pa konekte nan cluster a.', style: TextStyle(color: Colors.grey))
-                  else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: _accountsList.map((acc) {
-                        final idx = acc.accountIndex;
-                        final isSelected = selected.contains(idx);
-                        final canSelect = isSelected || !isPro || selected.length < 2;
-                        return FilterChip(
-                          label: Text('Liy #$idx (${acc.label})'),
-                          selected: isSelected,
-                          onSelected: canSelect
-                              ? (val) {
-                                  setDlgState(() {
-                                    if (val) {
-                                      selected.add(idx);
-                                    } else {
-                                      selected.remove(idx);
-                                    }
-                                  });
-                                }
-                              : null,
-                        );
-                      }).toList(),
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Annuler'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
-                onPressed: () async {
-                  try {
-                    await client.updateApiTenantDedicatedLines(tenant.id, selected.toList());
-                    if (!ctx.mounted) return;
-                    Navigator.pop(ctx, true);
-                  } catch (e) {
-                    if (!ctx.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        backgroundColor: Colors.red,
-                        content: Text('Erreur: ${e.toString().replaceFirst("Exception: ", "")}'),
-                      ),
-                    );
-                  }
-                },
-                child: const Text('Anrejistre'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-
-    if (updated == true) {
-      await _loadApiIntegrationData(silent: true);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Liy dedye yo mete ajou pou "${tenant.name}".')),
-      );
-    }
-  }
 
 /// Dyalòg dedye pou kreye yon nouvo kle API pou yon lòt sit web ekstèn
 class _CreateExternalApiKeyDialog extends StatefulWidget {
