@@ -72,7 +72,7 @@ const PACING_CONFIG = {
   batchPauseDurationMs: 600000,      // Poz 10 minit (aplike SÈLMAN sou rapèl frèt)
 
   defaultReminderDailyLimit: 25,     // SÈLMAN rapèl frèt ki limite a 25 pa jou
-  maxTransactionalDailyLimit: 200,   // Enskripsyon & Renouvèlman PA GEN LIMIT 25 LA (lib jiska 200/jou)
+  maxTransactionalDailyLimit: 2000,   // Enskripsyon & Renouvèlman PA GEN LIMIT 25 LA (lib jiska 200/jou)
 };
 
 // 1. Chaje konfigirasyon lokal
@@ -311,7 +311,7 @@ class WhatsAppAccountInstance {
     if (this.isBusy) return false;
 
     // SÈLMAN resi peman renouvèlman/enskripsyon, byenvini, ak tès admin ki tranzaksyonèl priyorite!
-    const isPriority = ['receipt', 'welcome', 'test'].includes(messageKind);
+    const isPriority = ['receipt', 'welcome', 'test', 'manual', 'manual_direct', 'campaign', 'announcement', 'broadcast', 'marketing'].includes(String(messageKind || '').toLowerCase());
 
     // 1. LIMIT KANTITE PA JOU (Daily Quota):
     if (!isPriority) {
@@ -688,7 +688,7 @@ class WhatsAppAccountInstance {
       this.lastSentAt = Date.now();
       this.sentToday += 1;
 
-      const isPriority = ['receipt', 'welcome', 'test'].includes(messageKind);
+      const isPriority = ['receipt', 'welcome', 'test', 'manual', 'manual_direct', 'campaign', 'announcement', 'broadcast', 'marketing'].includes(String(messageKind || '').toLowerCase());
       if (isPriority) {
         this.sentTransactionalToday += 1;
         this.lastTransactionalSentAt = Date.now();
@@ -950,7 +950,7 @@ class AccountCluster {
       let assignedAccount = null;
 
       // 1. Chèche mesaj tranzaksyonèl priyoritè an premye (Enskripsyon / Renouvèlman / Resi: 3 a 5 minit)
-      const priorityUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=in.(receipt,welcome,test)&order=created_at.asc&limit=1`;
+      const priorityUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=in.(receipt,welcome,test,manual,manual_direct,campaign,announcement,broadcast,marketing)&order=created_at.asc&limit=1`;
       const pRes = await fetch(priorityUrl, {
         method: 'GET',
         headers: {
@@ -974,7 +974,7 @@ class AccountCluster {
       if (!item) {
         const candidateReminderAcc = this.getNextAvailableAccount('reminder');
         if (candidateReminderAcc) {
-          const reminderUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=not.in.(receipt,welcome,test)&order=created_at.asc&limit=1`;
+          const reminderUrl = `${SUPABASE_URL}/rest/v1/whatsapp_messages_outbox?status=eq.pending&kind=not.in.(receipt,welcome,test,manual,manual_direct,campaign,announcement,broadcast,marketing)&order=created_at.asc&limit=1`;
           const rRes = await fetch(reminderUrl, {
             method: 'GET',
             headers: {
@@ -1029,7 +1029,8 @@ class AccountCluster {
       const chatId = `${cleanPhone}@c.us`;
 
       try {
-        const msgKind = ['receipt', 'welcome', 'test'].includes(item.kind) ? item.kind : 'reminder';
+        const isPriorityKind = ['receipt', 'welcome', 'test', 'manual', 'manual_direct', 'campaign', 'announcement', 'broadcast', 'marketing'].includes(String(item.kind || '').toLowerCase());
+        const msgKind = isPriorityKind ? item.kind : 'reminder';
         const pdfB64 = normalizePdfBase64(item.pdf_base64 || item.pdfBase64);
         let pdfName = String(item.pdf_file_name || item.pdfFileName || 'Recu.pdf').trim();
         if (!pdfName.toLowerCase().endsWith('.pdf')) pdfName += '.pdf';
