@@ -31,6 +31,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   String _channel = 'email'; // 'email' | 'whatsapp'
   String _templateKey = 'inactive_winback';
   String _filterStatus = 'all'; // 'all' | 'active' | 'expired'
+  String _speedMode = 'safe'; // 'safe' (15s-27s), 'moderate' (8s-14s), 'fast' (4s-7s)
   int _totalActiveMembers = 0;
   int _totalExpiredMembers = 0;
   int _totalAllMembers = 0;
@@ -456,24 +457,22 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   }
 
   void _showAntiBanPreviewDialog() {
-    final body = _bodyController.text.trim();
-    final title = _titleController.text.trim();
-    final gymName = ref.read(appRuntimeProvider).session?.name ?? 'SecurGYM';
     final s = AppStrings.of(context);
-
+    final body = _bodyController.text.trim();
     if (body.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tanpri ekri mesaj la anvan pou w ka wè varyasyon yo.')),
+        const SnackBar(content: Text('Tanpri mete yon tèks nan kò mesaj la anvan pou w ka wè aperçu a.')),
       );
       return;
     }
+    final runtime = ref.read(appRuntimeProvider);
+    final gym = runtime.session?.gym ?? const <String, dynamic>{};
+    final gymName = gym['name'] as String? ?? 'SecurGYM';
 
-    final variations = WhatsAppAntiBanHelper.generatePreviewVariations(
+    final variations = WhatsAppAntiBanHelper.generateSemanticAnglesPreview(
       body: body,
       gymName: gymName,
-      title: title.isNotEmpty ? title : null,
       lang: s.locale.languageCode,
-      count: 3,
     );
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -483,10 +482,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
         backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
         title: Row(
           children: [
-            const Icon(LucideIcons.shieldCheck, color: Color(0xFF15803D)),
+            const Icon(LucideIcons.bot, color: Color(0xFF15803D)),
             const SizedBox(width: 8),
             Text(
-              'Aperçu Varyasyon Anti-Ban',
+              '🤖 Aperçu 5 Gwo Ang Semantik (IA Anti-Ban)',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -496,24 +495,25 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
           ],
         ),
         content: SizedBox(
-          width: 550,
+          width: 580,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Men kijan 3 manm diferan ap resevwa menm kanpay la ak varyasyon inik pou pwoteje kont WhatsApp lan :',
+                  'Pou WhatsApp pa janm detekte spam oswa mesaj menm jan, motè IA a re-ekri mesaj la an 5 ang semantik diferan (Ofisyèl, Amikal, Planifikasyon, Flash, Respè). Chak manm resevwa yon estrikti fraz diferan :',
                   style: TextStyle(
                     fontSize: 13,
+                    height: 1.4,
                     color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 for (int i = 0; i < variations.length; i++) ...[
                   Container(
                     width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 12),
+                    margin: const EdgeInsets.only(bottom: 14),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
@@ -528,23 +528,23 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7),
-                                borderRadius: BorderRadius.circular(4),
+                                borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
-                                'Varyasyon ${i + 1}',
+                                variations[i]['title'] ?? 'Ang ${i + 1}',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 11,
+                                  fontSize: 12,
                                   color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
                                 ),
                               ),
                             ),
                             const Spacer(),
                             Text(
-                              '🛡️ Anprent inik enkli',
+                              '🛡️ Hash SHA-256 Inik',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: isDark ? const Color(0xFF94A3B8) : Colors.grey,
@@ -552,12 +552,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 10),
                         Text(
-                          variations[i],
+                          variations[i]['content'] ?? '',
                           style: TextStyle(
                             fontSize: 13,
-                            height: 1.4,
+                            height: 1.45,
                             color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B),
                           ),
                         ),
@@ -578,91 +578,6 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       ),
     );
   }
-
-  Future<void> _sendWhatsAppCampaign(
-    List<Map<String, dynamic>> recipients,
-    String title,
-    String body,
-    AppStrings s,
-  ) async {
-    final runtime = ref.read(appRuntimeProvider);
-    final gymId = runtime.session?.gymId;
-    final notifService = ref.read(whatsAppNotificationServiceProvider);
-
-    // 1. Verifye si gym nan gen aksè abònman WhatsApp aktif (pa sispann, pa ekspire)
-    final access = await notifService.checkGymAccess(gymId: gymId);
-    if (!access.hasAccess) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('⚠️ ${access.message}'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 7),
-          ),
-        );
-        setState(() => _isSending = false);
-      }
-      return;
-    }
-
-    // 2. Verifye si sèvis WhatsApp la konekte sou aparèy la
-    final waClient = ref.read(whatsAppClientProvider);
-    final waState = await waClient.checkStatus();
-
-    if (!waState.isReady) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ WhatsApp pa konekte. Tanpri ale nan Panèl Admin > WhatsApp pou konekte li anvan.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        setState(() => _isSending = false);
-      }
-      return;
-    }
-
-    final gym = runtime.session?.gym ?? const <String, dynamic>{};
-    final gymName = gym['name'] as String? ?? 'SecurGYM';
-    final gymPhone = gym['phone'] as String? ?? '';
-    final footer = WhatsAppNotificationService.buildCampaignFooter(
-      gymName: gymName,
-      gymPhone: gymPhone,
-      lang: s.locale.languageCode,
-    );
-
-    // Bwat dyalòg pwogresyon an dirèk ak Pwoteksyon Anti-Ban (StatefulWidget pou evite paralèl loop)
-    if (!mounted) return;
-    final sentCount = await showDialog<int>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => _WhatsAppCampaignProgressDialog(
-        recipients: recipients,
-        title: title,
-        body: body,
-        footer: footer,
-        gymId: gymId,
-        gymName: gymName,
-        waClient: waClient,
-        lang: s.locale.languageCode,
-      ),
-    ) ?? 0;
-
-    // 3. Anrejistre kanpay la nan baz done Supabase
-    try {
-      final gymId = runtime.session?.gymId;
-      if (gymId != null && sentCount > 0) {
-        await Supabase.instance.client.from('campaigns').insert({
-          'gym_id': gymId,
-          'title': title,
-          'subject': title,
-          'body_text': body,
-          'template_key': _templateKey,
-          'channels': ['whatsapp'],
-          'recipient_count': sentCount,
-          'status': 'sent',
-        });
-      }
     } catch (_) {}
 
     if (mounted) {
@@ -1186,20 +1101,70 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                                 ),
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               ),
-                              icon: const Icon(LucideIcons.sparkles, size: 14),
-                              label: const Text('Teste varyasyon tèks', style: TextStyle(fontSize: 12)),
+                              icon: const Icon(LucideIcons.bot, size: 14),
+                              label: const Text('🤖 Preview 5 Ang Diferan (IA)', style: TextStyle(fontSize: 12)),
                               onPressed: _showAntiBanPreviewDialog,
                             ),
                           ],
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Chak mesaj ap voye ak yon anprent dijital inik (zero-width hash) plis yon reta 3.5s - 5.5s ant chak moun pou WhatsApp pa janm wè 2 mesaj idantik. Ou ka itilize tou fòma {opsyon 1|opsyon 2} oswa klike sou "✨ Fòma Anti-Ban Otomatik" pou varye mo yo otomatikman.',
+                          'Chak mesaj ap pase nan yon motè semantik IA ki jenere 5 ang diferan (Ofisyèl, Amikal, Planifikasyon, Flash, Respè) ak anprent kriptografik inik pou WhatsApp pa janm wè 2 mesaj menm jan. Chwazi ritm delè a :',
                           style: TextStyle(
                             fontSize: 12,
                             color: isDark ? const Color(0xFFA7F3D0) : const Color(0xFF166534),
                             height: 1.4,
                           ),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(LucideIcons.timer, size: 16, color: Color(0xFF15803D)),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Ritm Delè Anti-Ban :',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            DropdownButton<String>(
+                              value: _speedMode,
+                              isDense: true,
+                              dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
+                              ),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'safe',
+                                  child: Text('🛡️ Maksimòm (15s - 27s + 60s pòz) - Rekòmande pou 100+ moun'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'moderate',
+                                  child: Text('⚡ Modere (8s - 14s + 30s pòz)'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'fast',
+                                  child: Text('🚀 Estanda (4s - 7s)'),
+                                ),
+                              ],
+                              onChanged: (val) {
+                                if (val != null) setState(() => _speedMode = val);
+                              },
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1536,6 +1501,7 @@ class _WhatsAppCampaignProgressDialog extends StatefulWidget {
     required this.gymName,
     required this.waClient,
     required this.lang,
+    this.speedMode = 'safe',
   });
 
   final List<Map<String, dynamic>> recipients;
@@ -1546,6 +1512,7 @@ class _WhatsAppCampaignProgressDialog extends StatefulWidget {
   final String gymName;
   final WhatsAppClient waClient;
   final String lang;
+  final String speedMode;
 
   @override
   State<_WhatsAppCampaignProgressDialog> createState() => _WhatsAppCampaignProgressDialogState();
@@ -1555,6 +1522,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
   int _sentCount = 0;
   int _failedCount = 0;
   bool _isCancelled = false;
+  bool _isPaused = false;
   String _currentRecipient = '';
   String _progressStatus = 'Preparasyon pou voye...';
   int _coolingSeconds = 0;
@@ -1568,6 +1536,13 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
   Future<void> _startSending() async {
     for (int i = 0; i < widget.recipients.length; i++) {
       if (_isCancelled || !mounted) break;
+
+      // Poz entèaktif
+      while (_isPaused && !_isCancelled && mounted) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+      if (_isCancelled || !mounted) break;
+
       final m = widget.recipients[i];
       final rawPhone = (m['whatsapp']?.toString().isNotEmpty ?? false)
           ? m['whatsapp'].toString()
@@ -1579,15 +1554,16 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
       }
 
       final memberName = m['name']?.toString() ?? '';
+      final currentAngleNum = (i % 5) + 1;
       if (mounted) {
         setState(() {
           _currentRecipient = '$memberName ($phone)';
-          _progressStatus = 'N ap voye bay: $_currentRecipient';
+          _progressStatus = 'Voye bay: $_currentRecipient (Ang Semantik #$currentAngleNum/5)';
           _coolingSeconds = 0;
         });
       }
 
-      // Tèks varye ak pwoteksyon Anti-Ban (Spintax + Hash Cryptographique Envizib)
+      // Tèks varye ak motè IA semantik (50+ Ang Diferan + Spintax + Hash Cryptographique Envizib)
       final fullMsg = WhatsAppAntiBanHelper.humanizeMessage(
         body: widget.body,
         memberName: memberName,
@@ -1597,6 +1573,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
         lang: widget.lang,
         recipientIndex: i,
         addZeroWidthFingerprint: true,
+        useSemanticArchetypes: true,
       );
 
       // Voye ak kind 'manual_direct' pou pase nan Fast Lane imedya sou WhatsApp Web
@@ -1617,27 +1594,39 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
         });
       }
 
-      // Reta entèlijan ant chak voye (Anti-Ban Jitter 3.5s - 5.5s)
+      // Reta entèlijan ant chak voye dapre mòd sekirite chwazi a
       if (i < widget.recipients.length - 1 && !_isCancelled) {
-        final isCool = WhatsAppAntiBanHelper.isCoolingBreak(index: i + 1);
+        final isCool = WhatsAppAntiBanHelper.isCoolingBreak(index: i + 1, speedMode: widget.speedMode);
         if (isCool) {
-          for (int sec = 10; sec > 0; sec--) {
+          final coolSecs = WhatsAppAntiBanHelper.getCoolingDurationSeconds(speedMode: widget.speedMode);
+          for (int sec = coolSecs; sec > 0; sec--) {
             if (_isCancelled || !mounted) break;
-            setState(() {
-              _coolingSeconds = sec;
-              _progressStatus = '⏳ Pòz refwadisman Anti-Ban ($sec s) pou pwoteje kont lan...';
-            });
+            while (_isPaused && !_isCancelled && mounted) {
+              await Future<void>.delayed(const Duration(milliseconds: 300));
+            }
+            if (mounted) {
+              setState(() {
+                _coolingSeconds = sec;
+                _progressStatus = '⏳ Pòz refwadisman Anti-Ban ($sec s) pou reset algoritm Meta a...';
+              });
+            }
             await Future<void>.delayed(const Duration(seconds: 1));
           }
         } else {
-          final delay = WhatsAppAntiBanHelper.getPacingDelay(index: i + 1);
-          final sec = (delay.inMilliseconds / 1000).toStringAsFixed(1);
-          if (mounted) {
-            setState(() {
-              _progressStatus = '🛡️ Reta Anti-Ban ($sec s) anvan pwochen moun...';
-            });
+          final delay = WhatsAppAntiBanHelper.getPacingDelay(index: i + 1, speedMode: widget.speedMode);
+          final totalSec = (delay.inMilliseconds / 1000).ceil();
+          for (int s = totalSec; s > 0; s--) {
+            if (_isCancelled || !mounted) break;
+            while (_isPaused && !_isCancelled && mounted) {
+              await Future<void>.delayed(const Duration(milliseconds: 300));
+            }
+            if (mounted) {
+              setState(() {
+                _progressStatus = '🛡️ Reta Anti-Ban ($s s) anvan pwochen moun (Ang #${((i + 1) % 5) + 1}/5)...';
+              });
+            }
+            await Future<void>.delayed(const Duration(seconds: 1));
           }
-          await Future<void>.delayed(delay);
         }
       }
     }
@@ -1662,7 +1651,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
           const Icon(LucideIcons.send, color: Color(0xFF15803D)),
           const SizedBox(width: 8),
           Text(
-            'Voye Kanpay WhatsApp',
+            'Voye Kanpay WhatsApp (Anti-Ban Pro)',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -1672,7 +1661,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
         ],
       ),
       content: SizedBox(
-        width: 450,
+        width: 480,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1689,7 +1678,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
                   const Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFF15803D)),
                   const SizedBox(width: 6),
                   Text(
-                    'Pwoteksyon Anti-Ban Aktif (Varyasyon + Reta entèlijan)',
+                    'Motè IA Semantik (5 Ang Diferan) + Reta Imèn (${widget.speedMode})',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -1727,14 +1716,22 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
               ],
             ),
             const SizedBox(height: 8),
-            Text(
-              _progressStatus,
-              style: TextStyle(
-                fontSize: 13,
-                color: _coolingSeconds > 0
-                    ? const Color(0xFFF59E0B)
-                    : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
-                fontWeight: _coolingSeconds > 0 ? FontWeight.bold : FontWeight.normal,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _progressStatus,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: _coolingSeconds > 0
+                      ? const Color(0xFFF59E0B)
+                      : (_isPaused ? Colors.amber.shade700 : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155))),
+                  fontWeight: (_coolingSeconds > 0 || _isPaused) ? FontWeight.bold : FontWeight.normal,
+                ),
               ),
             ),
           ],
@@ -1743,12 +1740,31 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
       actions: [
         OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.red,
-            side: const BorderSide(color: Colors.red),
+            foregroundColor: _isPaused ? Colors.green : Colors.amber.shade700,
+            side: BorderSide(color: _isPaused ? Colors.green : Colors.amber.shade700),
+          ),
+          onPressed: () {
+            setState(() {
+              _isPaused = !_isPaused;
+              if (_isPaused) {
+                _progressStatus = '⏸️ Kanpay an poz. Klike "Kontinye voye" lè w pare.';
+              } else {
+                _progressStatus = 'Repriz voye kanpay la...';
+              }
+            });
+          },
+          icon: Icon(_isPaused ? LucideIcons.play : LucideIcons.pause, size: 16),
+          label: Text(_isPaused ? 'Kontinye voye' : 'Fè yon pòz (Pause)'),
+        ),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red.shade700,
+            foregroundColor: Colors.white,
           ),
           onPressed: () {
             setState(() {
               _isCancelled = true;
+              _isPaused = false;
               _progressStatus = 'Kanpe voye a...';
             });
             Navigator.of(context).pop(_sentCount);
@@ -1759,4 +1775,3 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
       ],
     );
   }
-}
