@@ -326,6 +326,7 @@ class GatewayApiTenant {
     this.usage = const GatewayApiUsage(),
     this.dedicatedAccountIndices = const [],
     this.expiresAt,
+    this.autoReplyEnabled = true,
   });
 
   final String id;
@@ -341,6 +342,7 @@ class GatewayApiTenant {
   final GatewayApiUsage usage;
   final List<int> dedicatedAccountIndices;
   final DateTime? expiresAt;
+  final bool autoReplyEnabled;
 
   bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
   int? get daysRemaining {
@@ -369,6 +371,7 @@ class GatewayApiTenant {
               .toList() ??
           const [],
       expiresAt: json['expires_at'] != null ? DateTime.tryParse(json['expires_at'].toString()) : null,
+      autoReplyEnabled: json['auto_reply'] is Map ? (json['auto_reply']['enabled'] != false) : true,
     );
   }
 }
@@ -1448,6 +1451,7 @@ Crée le client HTTP backend complet avec CVISUAL_WA_API_KEY, vérification GET 
     DateTime? expiresAt,
     bool clearExpiresAt = false,
     int? durationDays,
+    bool? autoReplyEnabled,
   }) async {
     final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/tenants/$tenantId');
     final Map<String, dynamic> body = {};

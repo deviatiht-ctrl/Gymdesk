@@ -4043,7 +4043,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
               ),
             ],
           ),
-          if (tenant.dedicatedAccountIndices.isNotEmpty)
+          if (tenant.dedicatedAccountIndices.isNotEmpty) ...[
             Container(
               margin: const EdgeInsets.only(top: 6),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -4063,8 +4063,28 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   ),
                 ],
               ),
-            )
-          else
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.purple.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.purple.withOpacity(0.35)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(LucideIcons.bot, size: 13, color: Colors.purple),
+                  SizedBox(width: 5),
+                  Text(
+                    '🤖 Auto-Reply Concierge IA : AKTIFF (Rezèvasyon & Alèt)',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purple),
+                  ),
+                ],
+              ),
+            ),
+          ] else
             Container(
               margin: const EdgeInsets.only(top: 4),
               child: const Text('Liy pataje (Pa gen liy eksklizif)', style: TextStyle(fontSize: 11, color: Colors.grey)),
@@ -4217,6 +4237,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     final monthlyCtrl = TextEditingController(text: tenant.monthlyQuota.toString());
     final selectedLines = Set<int>.from(tenant.dedicatedAccountIndices);
     bool isActive = tenant.isActive;
+    bool autoReplyEnabled = tenant.autoReplyEnabled;
     String durationChoice = 'keep';
     DateTime? customExpiresAt = tenant.expiresAt;
     bool isSaving = false;
@@ -4592,6 +4613,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                             expiresAt: finalExpiresAt,
                             clearExpiresAt: clearExpires,
                             durationDays: finalDurationDays,
+                            autoReplyEnabled: autoReplyEnabled,
                           );
 
                           if (!ctx.mounted) return;
