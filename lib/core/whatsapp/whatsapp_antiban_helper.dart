@@ -8,7 +8,8 @@ import 'dart:math';
 /// 3. Empreinte Invisible Zero-Width Unicode (`\u200B`, `\u200C`, `\u200D`, `\uFEFF`) :
 ///    rann chak mesaj gen yon anprent kriptografik (hash SHA-256) 100% inik pou WhatsApp pa
 ///    janm detekte repetisyon menm si tèks vizib la ta sanble.
-/// 4. Pacing Delays & Cool-off : reta 3.5s - 6.0s ant chak voye + ti pòz 12s chak 15 mesaj.
+/// 4. Pacing Delays & Cool-off : reta 3.5s - 5.5s ant chak voye + ti pòz 12s chak 15 mesaj.
+/// 5. Auto-Spintaxify : transfòme yon tèks senp (egz: fèmen a 4h demen) an fòma varye Anti-Ban.
 class WhatsAppAntiBanHelper {
   static final Random _rng = Random();
 
@@ -52,6 +53,7 @@ class WhatsAppAntiBanHelper {
     'N ap tann ou avèk plezi !',
     'Kenbe fò epi rete an sante !',
     'Ak tout respè,',
+    'Mèsi pou konpreyansyon w !',
     'Mèsi pou fidelite w !',
     'Bon antrenman !',
   ];
@@ -62,7 +64,8 @@ class WhatsAppAntiBanHelper {
     'Au plaisir de vous retrouver à la salle !',
     'Restez en forme et motivé(e) !',
     'Bien cordialement,',
-    'Merci pour votre confiance !',
+    'Merci pour votre compréhension !',
+    'Merci pour votre fidélité !',
     'Bon entraînement !',
   ];
 
@@ -74,7 +77,6 @@ class WhatsAppAntiBanHelper {
     final regex = RegExp(r'\{([^{}]+)\}');
 
     String current = text;
-    // Bouk pou sipòte menm si ta gen blòk imbrike (nested)
     int iterations = 0;
     while (regex.hasMatch(current) && iterations < 10) {
       current = current.replaceAllMapped(regex, (match) {
@@ -147,6 +149,7 @@ class WhatsAppAntiBanHelper {
         'Looking forward to seeing you at the gym!',
         'Stay fit and healthy!',
         'Best regards,',
+        'Thank you for your understanding!',
         'Have a great workout!',
       ];
       return list[rng.nextInt(list.length)];
@@ -154,11 +157,33 @@ class WhatsAppAntiBanHelper {
     return _closingsHt[rng.nextInt(_closingsHt.length)];
   }
 
-  /// 5. TRANSFÒME EPI PÈSONALIZE MESAJ LA POU YON MANM (Anti-Ban Pro)
-  /// Rann chak mesaj inik sou 3 nivo :
-  /// 1. Ranplasman tags: {nom}, {prenom}, {gym}, {date}, {salitasyon}, {konklizyon}
-  /// 2. Evalyasyon Spintax {opsyon A|opsyon B}
-  /// 3. Anprent envizib zero-width micro-fingerprint
+  /// 5. TRANSFÒME YON ANONS SENP AN FÒMA SPINTAX POU ANTI-BAN (Auto-Spintaxify)
+  /// Egzamen antre: "Gym nan ap femen a 4h demen se pa oraire abituelli"
+  /// Sòti: "{Bonjou|Bonswa|Salitasyon} {nom},\n\n{Ti avi sa a se pou enfòme w ke|Nou pase enfòme w ke|Tanpri pran nòt ke} Gym nan ap femen a 4h demen...\n\n{Mèsi pou konpreyansyon w !|N ap tann ou pou pwochen antrenman yo !|Kenbe fò !}"
+  static String autoSpintaxifyAnnouncement(String rawText, {String lang = 'ht'}) {
+    final clean = rawText.trim();
+    if (clean.isEmpty) return '';
+
+    final isFr = lang.startsWith('fr');
+    if (isFr) {
+      return '{Bonjour|Bonjour à vous|Salutations} {nom},\n\n'
+          '{Nous vous informons que|Veuillez noter que|Un petit message important :}\n'
+          '$clean\n\n'
+          '{Merci pour votre compréhension !|Au plaisir de vous retrouver à la salle !|Bien cordialement,}';
+    }
+
+    return '{Bonjou|Bonswa|Salitasyon} {nom},\n\n'
+        '{Ti avi sa a se pou enfòme w ke|Nou pase enfòme w ke|Tanpri pran nòt ke|N ap enfòme w ke} '
+        '$clean\n\n'
+        '{Mèsi pou konpreyansyon w !|N ap tann ou pou pwochen antrenman yo !|Kenbe fò epi pase yon bon jounen !}';
+  }
+
+  /// 6. TRANSFÒME EPI PÈSONALIZE MESAJ LA POU YON MANM (Anti-Ban Pro)
+  /// Rann chak mesaj inik sou 4 nivo :
+  /// 1. Salitasyon & Konklizyon otomatik si mesaj la pa t genyen (pou mesaj custom toujou varye)
+  /// 2. Ranplasman tags: {nom}, {prenom}, {gym}, {date}, {salitasyon}, {konklizyon}
+  /// 3. Evalyasyon Spintax {opsyon A|opsyon B}
+  /// 4. Anprent envizib zero-width micro-fingerprint pou hash SHA-256 inik
   static String humanizeMessage({
     required String body,
     required String memberName,
@@ -202,6 +227,38 @@ class WhatsAppAntiBanHelper {
           .replaceAll('{closing}', closing);
     }
 
+    // Si se yon mesaj custom ki pa kòmanse ak yon salitasyon, ajoute yon salitasyon natirèl otomatik
+    final trimmedLower = text.trim().toLowerCase();
+    final hasGreeting = trimmedLower.startsWith('bonjou') ||
+        trimmedLower.startsWith('bonswa') ||
+        trimmedLower.startsWith('bonjour') ||
+        trimmedLower.startsWith('salut') ||
+        trimmedLower.startsWith('hello') ||
+        trimmedLower.startsWith('hi ') ||
+        trimmedLower.startsWith('salitasyon') ||
+        trimmedLower.startsWith('chè') ||
+        trimmedLower.startsWith('cher');
+
+    if (!hasGreeting && !text.contains('{')) {
+      final dynamicGreeting = getRandomGreeting(memberName: memberName, lang: lang);
+      text = '$dynamicGreeting\n\n$text';
+    }
+
+    // Si li pa gen konklizyon, ajoute yon ti fòmil politès amikal
+    final hasClosing = trimmedLower.endsWith('mèsi !') ||
+        trimmedLower.endsWith('mèsi.') ||
+        trimmedLower.endsWith('merci !') ||
+        trimmedLower.endsWith('merci.') ||
+        trimmedLower.endsWith('cordialement,') ||
+        trimmedLower.endsWith('cordialement') ||
+        trimmedLower.endsWith('bonne journée !') ||
+        trimmedLower.endsWith('pase yon bon jounen !');
+
+    if (!hasClosing && !text.contains('}')) {
+      final dynamicClosing = getRandomClosing(lang: lang);
+      text = '$text\n\n$dynamicClosing';
+    }
+
     // Aplike Spintax
     text = parseSpintax(text);
 
@@ -215,7 +272,6 @@ class WhatsAppAntiBanHelper {
     if (addZeroWidthFingerprint) {
       final fp1 = generateZeroWidthFingerprint(recipientIndex * 31 + DateTime.now().microsecond);
       final fp2 = generateZeroWidthFingerprint(recipientIndex * 17 + 7);
-      // Mete anprent la apre premye paragraf la ak nan tout fen mesaj la
       if (fullMessage.contains('\n')) {
         final firstBreak = fullMessage.indexOf('\n');
         fullMessage = fullMessage.substring(0, firstBreak) +
@@ -230,17 +286,15 @@ class WhatsAppAntiBanHelper {
     return fullMessage;
   }
 
-  /// 6. KAlKILE RETA ENTÈLIJAN ANT CHAK VOYE (Pacing Delay)
+  /// 7. KALKILE RETA ENTÈLIJAN ANT CHAK VOYE (Pacing Delay)
   /// Retounen kantite milisegonn pou tann ant voye :
-  /// - Reta estanda : 3,500ms a 6,000ms (ak jitter o aza)
-  /// - Si se chak 15 mesaj (index % 15 == 0) : pòz refwadisman 12,000ms (12 segonn)
+  /// - Reta estanda : 3,500ms a 5,500ms (ak jitter o aza)
+  /// - Si se chak 15 mesaj (index % 15 == 0) : ti pòz refwadisman 10,000ms (10 segonn)
   static Duration getPacingDelay({required int index}) {
     if (index > 0 && index % 15 == 0) {
-      // Pòz refwadisman sekirite apre chak 15 mesaj
-      return const Duration(milliseconds: 12000);
+      return const Duration(milliseconds: 10000);
     }
-    // Reta ak jitter o aza ant 3.5s ak 6.0s
-    final jitterMs = 3500 + _rng.nextInt(2500);
+    final jitterMs = 3500 + _rng.nextInt(2000); // 3.5s - 5.5s
     return Duration(milliseconds: jitterMs);
   }
 
@@ -249,8 +303,7 @@ class WhatsAppAntiBanHelper {
     return index > 0 && index % 15 == 0;
   }
 
-  /// 7. JENERE EGZANP VARYASYON POU PREVIEW
-  /// Pèmèt itilizatè a wè kijan menm mesaj la ap parèt diferan pou plizyè manm.
+  /// 8. JENERE EGZANP VARYASYON POU PREVIEW
   static List<String> generatePreviewVariations({
     required String body,
     required String gymName,
@@ -276,7 +329,7 @@ class WhatsAppAntiBanHelper {
         title: title,
         lang: lang,
         recipientIndex: i,
-        addZeroWidthFingerprint: false, // Pa bezwen nan preview vizyèl
+        addZeroWidthFingerprint: false,
       );
       variations.add(spun);
     }

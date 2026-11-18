@@ -209,18 +209,33 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
           final list = List<Map<String, dynamic>>.from(res as List? ?? []);
           rawMembers.addAll(list);
         } catch (_) {
-          var query = client.from('members').select('id, first_name, last_name, email, phone, whatsapp, status');
+          var query = client.from('members').select('id, first_name, last_name, email, phone, whatsapp, status, subscriptions(id, status, end_date, deleted_at)');
           if (gymId != null) query = query.eq('gym_id', gymId);
           final membersRes = await query;
+          final today = DateTime.now().toUtc();
+          final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
           for (final m in (membersRes as List)) {
             final p = m as Map<String, dynamic>;
+            final subs = p['subscriptions'] as List? ?? [];
+            bool hasValidSub = false;
+            for (final s in subs) {
+              final subMap = s as Map<String, dynamic>;
+              if (subMap['deleted_at'] == null && subMap['status'] != 'cancelled') {
+                final endDate = subMap['end_date']?.toString() ?? '';
+                if (endDate.compareTo(todayStr) >= 0) {
+                  hasValidSub = true;
+                  break;
+                }
+              }
+            }
             rawMembers.add({
               'member_id': p['id']?.toString() ?? '',
               'name': '${p['first_name'] ?? ''} ${p['last_name'] ?? ''}'.trim(),
               'email': p['email']?.toString() ?? '',
               'phone': p['phone']?.toString() ?? '',
               'whatsapp': p['whatsapp']?.toString() ?? '',
-              'status': p['status']?.toString() ?? 'active',
+              'status': hasValidSub ? 'active' : 'expired',
+              'is_active': hasValidSub,
               'plan_name': 'Abonnement Gym',
             });
           }
@@ -303,6 +318,30 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
         _selectedMemberIds.remove(id);
       }
     });
+  }
+
+  void _autoFormatAntiBan() {
+    final currentText = _bodyController.text.trim();
+    if (currentText.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tanpri ekri mesaj ou anvan, pou nou ka fòmate l pou Anti-Ban.')),
+      );
+      return;
+    }
+    final s = AppStrings.of(context);
+    final spintax = WhatsAppAntiBanHelper.autoSpintaxifyAnnouncement(
+      currentText,
+      lang: s.locale.languageCode,
+    );
+    setState(() {
+      _bodyController.text = spintax;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('✨ Mesaj ou an fòmate kounye a ak varyasyon Anti-Ban !'),
+        backgroundColor: Color(0xFF0F766E),
+      ),
+    );
   }
 
   void _insertTag(String tag) {
@@ -437,14 +476,23 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       count: 3,
     );
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Row(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Row(
           children: [
-            Icon(LucideIcons.shieldCheck, color: Color(0xFF15803D)),
-            SizedBox(width: 8),
-            Text('Aperçu Varyasyon Anti-Ban', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Icon(LucideIcons.shieldCheck, color: Color(0xFF15803D)),
+            const SizedBox(width: 8),
+            Text(
+              'Aperçu Varyasyon Anti-Ban',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+            ),
           ],
         ),
         content: SizedBox(
@@ -454,9 +502,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Men kijan 3 manm diferan ap resevwa menm kanpay la ak varyasyon inik pou pwoteje kont WhatsApp lan :',
-                  style: TextStyle(fontSize: 13, color: Colors.black87),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 for (int i = 0; i < variations.length; i++) ...[
@@ -465,9 +516,11 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -477,23 +530,37 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFDCFCE7),
+                                color: isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
                                 'Varyasyon ${i + 1}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF15803D)),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                  color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
+                                ),
                               ),
                             ),
                             const Spacer(),
-                            const Text(
+                            Text(
                               '🛡️ Anprent inik enkli',
-                              style: TextStyle(fontSize: 11, color: Colors.grey),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: isDark ? const Color(0xFF94A3B8) : Colors.grey,
+                              ),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Text(variations[i], style: const TextStyle(fontSize: 13, height: 1.4)),
+                        Text(
+                          variations[i],
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.4,
+                            color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF1E293B),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -618,7 +685,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                 final res = await waClient.sendMessage(
                   to: phone,
                   message: fullMsg,
-                  kind: 'marketing',
+                  kind: 'campaign',
                   gymId: gymId,
                 );
 
@@ -667,13 +734,22 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
 
             final progress = recipients.isNotEmpty ? (sentCount + failedCount) / recipients.length : 0.0;
 
+            final isDark = Theme.of(context).brightness == Brightness.dark;
             return AlertDialog(
+              backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Row(
+              title: Row(
                 children: [
-                  Icon(LucideIcons.send, color: Color(0xFF15803D)),
-                  SizedBox(width: 8),
-                  Text('Voye Kanpay WhatsApp', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Icon(LucideIcons.send, color: Color(0xFF15803D)),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Voye Kanpay WhatsApp',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                  ),
                 ],
               ),
               content: SizedBox(
@@ -685,17 +761,21 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFDCFCE7),
+                        color: isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFF15803D)),
-                          SizedBox(width: 6),
+                          const Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFF15803D)),
+                          const SizedBox(width: 6),
                           Text(
                             'Pwoteksyon Anti-Ban Aktif (Varyasyon + Reta entèlijan)',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
+                            ),
                           ),
                         ],
                       ),
@@ -704,7 +784,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                     LinearProgressIndicator(
                       value: progress.clamp(0.0, 1.0),
                       minHeight: 8,
-                      backgroundColor: Colors.grey.shade200,
+                      backgroundColor: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
                       valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF15803D)),
                       borderRadius: BorderRadius.circular(4),
                     ),
@@ -714,7 +794,11 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                       children: [
                         Text(
                           'Mesaj voye : $sentCount / ${recipients.length}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
                         ),
                         if (failedCount > 0)
                           Text(
@@ -728,7 +812,9 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                       progressStatus,
                       style: TextStyle(
                         fontSize: 13,
-                        color: coolingSeconds > 0 ? const Color(0xFFB45309) : Colors.black87,
+                        color: coolingSeconds > 0
+                            ? const Color(0xFFF59E0B)
+                            : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
                         fontWeight: coolingSeconds > 0 ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
@@ -767,10 +853,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
           'gym_id': gymId,
           'title': title,
           'subject': title,
-          'body': body,
+          'body_text': body,
           'template_key': _templateKey,
-          'channel': 'whatsapp',
-          'recipients_count': sentCount,
+          'channels': ['whatsapp'],
+          'recipient_count': sentCount,
           'status': 'sent',
         });
       }
@@ -863,6 +949,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   }
 
   Widget _buildComposeTab(AppStrings s) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Center(
@@ -902,10 +989,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
               // 1. Barre de choix du Modèle Gym
               Card(
                 elevation: 0,
-                color: const Color(0xFFF8FAFC),
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: Colors.grey.shade300),
+                  side: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -918,7 +1005,11 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                           const SizedBox(width: 8),
                           Text(
                             s.text('template_label'),
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
                           ),
                         ],
                       ),
@@ -945,9 +1036,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
               // 2. Section Filtre & Sélection des Membres
               Card(
                 elevation: 0,
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: Colors.grey.shade300),
+                  side: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -963,7 +1055,11 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                               const SizedBox(width: 8),
                               Text(
                                 s.text('target_audience'),
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                ),
                               ),
                             ],
                           ),
@@ -975,9 +1071,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                                 avatar: const Icon(LucideIcons.users, size: 16),
                                 label: Text('Tout Moun ($_totalAllMembers)'),
                                 selected: _filterStatus == 'all',
-                                selectedColor: const Color(0xFFCCFBF1),
+                                backgroundColor: isDark ? const Color(0xFF0F172A) : null,
+                                selectedColor: isDark ? const Color(0xFF134E4A) : const Color(0xFFCCFBF1),
                                 labelStyle: TextStyle(
-                                  color: _filterStatus == 'all' ? const Color(0xFF0F766E) : Colors.black87,
+                                  color: _filterStatus == 'all'
+                                      ? (isDark ? const Color(0xFF5EEAD4) : const Color(0xFF0F766E))
+                                      : (isDark ? const Color(0xFFCBD5E1) : Colors.black87),
                                   fontWeight: _filterStatus == 'all' ? FontWeight.bold : FontWeight.normal,
                                 ),
                                 onSelected: (val) {
@@ -991,9 +1090,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                                 avatar: const Icon(LucideIcons.checkCircle2, size: 16, color: Color(0xFF15803D)),
                                 label: Text('Moun ki Aktif sèlman ($_totalActiveMembers)'),
                                 selected: _filterStatus == 'active',
-                                selectedColor: const Color(0xFFDCFCE7),
+                                backgroundColor: isDark ? const Color(0xFF0F172A) : null,
+                                selectedColor: isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7),
                                 labelStyle: TextStyle(
-                                  color: _filterStatus == 'active' ? const Color(0xFF15803D) : Colors.black87,
+                                  color: _filterStatus == 'active'
+                                      ? (isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D))
+                                      : (isDark ? const Color(0xFFCBD5E1) : Colors.black87),
                                   fontWeight: _filterStatus == 'active' ? FontWeight.bold : FontWeight.normal,
                                 ),
                                 onSelected: (val) {
@@ -1007,9 +1109,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                                 avatar: const Icon(LucideIcons.alertTriangle, size: 16, color: Color(0xFFB91C1C)),
                                 label: Text('Inaktif / Ekspire ($_totalExpiredMembers)'),
                                 selected: _filterStatus == 'expired',
-                                selectedColor: const Color(0xFFFEE2E2),
+                                backgroundColor: isDark ? const Color(0xFF0F172A) : null,
+                                selectedColor: isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2),
                                 labelStyle: TextStyle(
-                                  color: _filterStatus == 'expired' ? const Color(0xFFB91C1C) : Colors.black87,
+                                  color: _filterStatus == 'expired'
+                                      ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C))
+                                      : (isDark ? const Color(0xFFCBD5E1) : Colors.black87),
                                   fontWeight: _filterStatus == 'expired' ? FontWeight.bold : FontWeight.normal,
                                 ),
                                 onSelected: (val) {
@@ -1057,7 +1162,10 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                         children: [
                           Text(
                             '${_selectedMemberIds.length} / ${_filteredRecipients.length} ${s.text('selected_members_count')}',
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? const Color(0xFF5EEAD4) : const Color(0xFF0F766E),
+                            ),
                           ),
                           IconButton(
                             icon: const Icon(LucideIcons.refreshCw, size: 16),
@@ -1068,18 +1176,19 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                       ),
                       const Divider(),
                       Container(
-                        height: 200,
+                        height: 220,
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
                           borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
                         ),
                         child: _loadingPreview
                             ? const Center(child: CircularProgressIndicator())
                             : _filteredRecipients.isEmpty
-                                ? Center(child: Text(s.text('no_recipients_found')))
+                                ? Center(child: Text(s.text('no_recipients_found'), style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))))
                                 : ListView.separated(
                                     itemCount: _filteredRecipients.length,
-                                    separatorBuilder: (_, index) => const Divider(height: 1),
+                                    separatorBuilder: (_, index) => Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200),
                                     itemBuilder: (context, idx) {
                                       final item = _filteredRecipients[idx];
                                       final id = item['member_id']?.toString() ?? '';
@@ -1101,12 +1210,20 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                                         },
                                         title: Row(
                                           children: [
-                                            Text(item['name']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                            Text(
+                                              item['name']?.toString() ?? '',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                              ),
+                                            ),
                                             const SizedBox(width: 8),
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                               decoration: BoxDecoration(
-                                                color: isInactive ? const Color(0xFFFEE2E2) : const Color(0xFFDCFCE7),
+                                                color: isInactive
+                                                    ? (isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2))
+                                                    : (isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7)),
                                                 borderRadius: BorderRadius.circular(4),
                                               ),
                                               child: Text(
@@ -1114,7 +1231,9 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                                                 style: TextStyle(
                                                   fontSize: 10,
                                                   fontWeight: FontWeight.bold,
-                                                  color: isInactive ? const Color(0xFFB91C1C) : const Color(0xFF15803D),
+                                                  color: isInactive
+                                                      ? (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C))
+                                                      : (isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D)),
                                                 ),
                                               ),
                                             ),
@@ -1127,22 +1246,44 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                                 margin: const EdgeInsets.only(right: 6),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFFFEF3C7),
+                                                  color: isDark ? const Color(0xFF78350F) : const Color(0xFFFEF3C7),
                                                   borderRadius: BorderRadius.circular(4),
                                                 ),
-                                                child: const Text('Sans email (WhatsApp)', style: TextStyle(fontSize: 10, color: Color(0xFFB45309), fontWeight: FontWeight.bold)),
+                                                child: Text(
+                                                  'Sans email (WhatsApp)',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    color: isDark ? const Color(0xFFFDE68A) : const Color(0xFFB45309),
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
                                               )
                                             else
-                                              Text(item['email'].toString(), style: const TextStyle(fontSize: 12)),
+                                              Text(
+                                                item['email'].toString(),
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                                                ),
+                                              ),
                                             if (item['phone'] != null && item['phone'].toString().isNotEmpty)
-                                              Text(' • ${item['phone']}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                                              Text(
+                                                ' • ${item['phone']}',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: isDark ? const Color(0xFF64748B) : Colors.grey.shade600,
+                                                ),
+                                              ),
                                           ],
                                         ),
                                         secondary: CircleAvatar(
-                                          backgroundColor: const Color(0xFFE2E8F0),
+                                          backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
                                           child: Text(
                                             (item['name']?.toString() ?? 'M').substring(0, 1).toUpperCase(),
-                                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: isDark ? Colors.white : const Color(0xFF475569),
+                                            ),
                                           ),
                                         ),
                                       );
@@ -1209,9 +1350,11 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                     margin: const EdgeInsets.only(bottom: 14),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF0FDF4),
+                      color: isDark ? const Color(0xFF064E3B).withOpacity(0.35) : const Color(0xFFF0FDF4),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF86EFAC)),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF059669) : const Color(0xFF86EFAC),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1220,16 +1363,22 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                           children: [
                             const Icon(LucideIcons.shieldCheck, color: Color(0xFF15803D), size: 20),
                             const SizedBox(width: 8),
-                            const Expanded(
+                            Expanded(
                               child: Text(
                                 'Pwoteksyon Anti-Ban Meta Aktif',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF15803D), fontSize: 14),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
+                                  fontSize: 14,
+                                ),
                               ),
                             ),
                             OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF15803D),
-                                side: const BorderSide(color: Color(0xFF86EFAC)),
+                                foregroundColor: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
+                                side: BorderSide(
+                                  color: isDark ? const Color(0xFF059669) : const Color(0xFF86EFAC),
+                                ),
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                               ),
                               icon: const Icon(LucideIcons.sparkles, size: 14),
@@ -1239,9 +1388,13 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                           ],
                         ),
                         const SizedBox(height: 6),
-                        const Text(
-                          'Chak mesaj ap voye ak yon anprent dijital inik (zero-width hash) plis yon reta 3.5s - 6s ant chak moun pou WhatsApp pa janm wè 2 mesaj idantik. Ou ka itilize tou fòma {opsyon 1|opsyon 2} pou varye mo yo otomatikman.',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF166534), height: 1.4),
+                        Text(
+                          'Chak mesaj ap voye ak yon anprent dijital inik (zero-width hash) plis yon reta 3.5s - 5.5s ant chak moun pou WhatsApp pa janm wè 2 mesaj idantik. Ou ka itilize tou fòma {opsyon 1|opsyon 2} oswa klike sou "✨ Fòma Anti-Ban Otomatik" pou varye mo yo otomatikman.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? const Color(0xFFA7F3D0) : const Color(0xFF166534),
+                            height: 1.4,
+                          ),
                         ),
                       ],
                     ),
@@ -1252,7 +1405,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                   runSpacing: 6,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    const Text('Tags & Spintax : ', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                    Text('Tags & Spintax : ', style: TextStyle(fontSize: 13, color: isDark ? const Color(0xFF94A3B8) : Colors.grey)),
                     ActionChip(
                       label: Text(s.text('insert_tag_nom')),
                       onPressed: () => _insertTag('{nom}'),
@@ -1267,6 +1420,12 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                       onPressed: () => _insertTag('{gym}'),
                     ),
                     if (_channel == 'whatsapp') ...[
+                      ActionChip(
+                        avatar: const Icon(LucideIcons.wand2, size: 14, color: Colors.teal),
+                        label: const Text('✨ Fòma Anti-Ban Otomatik', style: TextStyle(fontWeight: FontWeight.bold)),
+                        tooltip: 'Transfòme mesaj ou an fòma Spintax Anti-Ban otomatik pou varye chak mesaj',
+                        onPressed: _autoFormatAntiBan,
+                      ),
                       ActionChip(
                         avatar: const Icon(LucideIcons.sun, size: 14, color: Colors.amber),
                         label: const Text('{salitasyon}'),
@@ -1338,13 +1497,17 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   }
 
   Widget _buildTemplateChip(String key, String label, AppStrings s) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isSelected = _templateKey == key;
     return ChoiceChip(
       selected: isSelected,
       label: Text(label),
-      selectedColor: const Color(0xFFCCFBF1),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : null,
+      selectedColor: isDark ? const Color(0xFF134E4A) : const Color(0xFFCCFBF1),
       labelStyle: TextStyle(
-        color: isSelected ? const Color(0xFF0F766E) : Colors.black87,
+        color: isSelected
+            ? (isDark ? const Color(0xFF5EEAD4) : const Color(0xFF0F766E))
+            : (isDark ? const Color(0xFFE2E8F0) : Colors.black87),
         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
       ),
       onSelected: (_) => _applyTemplate(key, s),
@@ -1499,12 +1662,16 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   }
 
   Widget _buildHistoryTab(AppStrings s) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (_loadingHistory) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_history.isEmpty) {
       return Center(
-        child: Text(s.text('campaign_history')),
+        child: Text(
+          s.text('campaign_history'),
+          style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+        ),
       );
     }
     return ListView.builder(
@@ -1514,19 +1681,35 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
         final item = _history[idx];
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+          ),
           child: ListTile(
-            leading: const CircleAvatar(
-              backgroundColor: Color(0xFFE0F2FE),
-              child: Icon(LucideIcons.mailCheck, color: Color(0xFF0369A1)),
+            leading: CircleAvatar(
+              backgroundColor: isDark ? const Color(0xFF0C4A6E) : const Color(0xFFE0F2FE),
+              child: Icon(LucideIcons.mailCheck, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0369A1)),
             ),
-            title: Text(item['title']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text('${item['subject']}\n${item['created_at']?.toString().substring(0, 16) ?? ''}'),
+            title: Text(
+              item['title']?.toString() ?? '',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+            ),
+            subtitle: Text(
+              '${item['subject'] ?? ''}\n${item['created_at']?.toString().substring(0, 16) ?? ''}',
+              style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+            ),
             isThreeLine: true,
             trailing: Chip(
               label: Text('${item['recipient_count'] ?? 0}'),
-              backgroundColor: const Color(0xFFDCFCE7),
-              labelStyle: const TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold),
+              backgroundColor: isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7),
+              labelStyle: TextStyle(
+                color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         );

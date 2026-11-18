@@ -525,7 +525,17 @@ class WhatsAppClient {
   String get effectiveBaseUrl => normalizeGatewayUrl(baseUrl);
 
   static bool isFastLaneKind(String kind) {
-    return const {'receipt', 'welcome', 'otp', 'test', 'manual_direct'}.contains(kind.trim().toLowerCase());
+    final k = kind.trim().toLowerCase();
+    return const {
+      'receipt',
+      'welcome',
+      'otp',
+      'test',
+      'manual_direct',
+      'campaign',
+      'marketing',
+      'announcement',
+    }.contains(k);
   }
 
   /// Netwaye epi mete nimewo nan bon fòma entènasyonal (egz: 50937001122)
@@ -742,6 +752,12 @@ class WhatsAppClient {
           return WhatsAppSendResult(
             success: false,
             error: data['error']?.toString() ?? 'Mesaj bloke pa pwoteksyon Anti-Ban.',
+          );
+        }
+        if (data['ok'] == false && data['error'] != null) {
+          return WhatsAppSendResult(
+            success: false,
+            error: data['error'].toString(),
           );
         }
       } catch (e) {
