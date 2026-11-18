@@ -61,7 +61,6 @@ class AccessDisplayBridge {
   }
 
   void publishDecision(AccessDecision decision) {
-    if (_heartbeat == null) return;
     _platform.hostPost(jsonEncode({
       'type': 'decision',
       'sid': _sid,

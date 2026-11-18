@@ -492,6 +492,15 @@ class LocalDatabase extends _$LocalDatabase {
         );
         await setMetadata('unblocked_failed_outbox_v1', 'true');
       }
+
+      final unblockFailedV2 = await metadata('unblocked_failed_outbox_v2');
+      if (unblockFailedV2 != 'true') {
+        await customUpdate(
+          "UPDATE outbox SET status = 'pending', attempts = 0, next_attempt_at = null, last_error = null WHERE status = 'failed' OR last_error = 'access_denied'",
+          updates: {outbox},
+        );
+        await setMetadata('unblocked_failed_outbox_v2', 'true');
+      }
     } catch (_) {}
   }
 
@@ -502,6 +511,7 @@ class LocalDatabase extends _$LocalDatabase {
         status: Value('pending'),
         nextAttemptAt: Value(null),
         lastError: Value(null),
+        attempts: Value(0),
       ),
     );
   }

@@ -293,6 +293,9 @@ class SyncEngine {
   }
 
   Future<SyncRejected?> _push({bool retry = false}) async {
+    if (retry) {
+      await db.retryFailed();
+    }
     SyncRejected? firstError;
     final failedEntityIds = <String>{};
 

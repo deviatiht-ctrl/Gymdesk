@@ -610,11 +610,13 @@ class TerminalAccessService {
   /// Ranje evènman an menm jan ak yon ranje `access_events` (popup lokal enstantane).
   static Map<String, dynamic> eventRowFor(AccessDecision decision, {String source = 'terminal'}) {
     final snapshot = snapshotFor(decision);
+    final rawId = decision.person?.memberId ?? decision.person?.entry?.member.id ?? snapshot['member_id']?.toString();
+    final isUuid = rawId != null && RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(rawId);
     return {
       'event_type': eventTypeFor(decision),
       'source': source,
       'reason': snapshot['reason'],
-      'member_id': ?decision.person?.entry?.member.id,
+      'member_id': isUuid ? rawId : null,
       'member_snapshot': snapshot,
     };
   }

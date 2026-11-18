@@ -39,6 +39,11 @@ class AccessMonitor {
   Stream<AccessDecision> get decisions => _decisions.stream;
   TerminalAccessService? get service => _service;
 
+  void notifyDecision(AccessDecision decision) {
+    AccessDisplayBridge.instance.publishDecision(decision);
+    if (!_decisions.isClosed) _decisions.add(decision);
+  }
+
   /// Vre lè PC sa a konekte ak ajan lokal la epi trete evènman tèminal la li menm —
   /// ekran yo dwe inyore evènman realtime `source=terminal` (se PC sa a ki te pibliye yo).
   bool get active => _events != null && agentOnline.value;
@@ -49,7 +54,7 @@ class AccessMonitor {
     if (session == null ||
         db == null ||
         session.gymId == null ||
-        !{'owner', 'supervisor', 'reception'}.contains(session.role)) {
+        (!{'owner', 'supervisor', 'manager', 'reception'}.contains(session.role) && !session.canAccessControl)) {
       stop();
       return;
     }

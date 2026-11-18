@@ -77,6 +77,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
 
     _startBiometricListener();
     _biometricService.checkSensorConnection();
+    unawaited(_biometricService.startCapture());
     _initTerminal();
   }
 
@@ -309,13 +310,16 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       );
 
       if (matched == null) {
+        final d = const AccessDecision(AccessOutcome.unrecognized);
         setState(() {
           _status = AccessStatus.deniedUnrecognized;
           _matchedMember = null;
+          _matchedName = null;
           _processing = false;
         });
+        AccessMonitor.instance.notifyDecision(d);
         unawaited(_terminalService.recordAccessEvent(
-          decision: const AccessDecision(AccessOutcome.unrecognized),
+          decision: d,
           source: 'app',
         ));
         _scheduleDismiss(const Duration(seconds: 4));
@@ -349,6 +353,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
         isAccessOk ? AccessOutcome.granted : AccessOutcome.denied,
         person: entry != null ? AccessPerson.member(entry) : null,
       );
+      AccessMonitor.instance.notifyDecision(decision);
       unawaited(_terminalService.recordAccessEvent(decision: decision, source: 'app'));
     }
 
@@ -356,6 +361,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
       setState(() {
         _status = AccessStatus.granted;
         _matchedMember = member;
+        _matchedName = member.fullName;
         _matchedIsEmployee = false;
         _matchedPersonId = member.id;
         _matchedPhotoUrl = member.photoUrl;
@@ -388,6 +394,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
             ? AccessStatus.deniedExpired
             : AccessStatus.deniedNoSubscription;
         _matchedMember = member;
+        _matchedName = member.fullName;
         _matchedIsEmployee = false;
         _matchedPersonId = member.id;
         _matchedPhotoUrl = member.photoUrl;
@@ -710,6 +717,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                                       onPressed: () async {
                                         final termOk = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
                                         await _biometricService.checkSensorConnection();
+                                        unawaited(_biometricService.startCapture());
                                         if (mounted) setState(() => _terminalOnline = termOk);
                                       },
                                     ),
@@ -794,6 +802,7 @@ class _DoorAccessPageState extends ConsumerState<DoorAccessPage> {
                               onPressed: () async {
                                 final termOk = await _agent.watchTerminal(terminalIp: _cfg.terminalIp);
                                 await _biometricService.checkSensorConnection();
+                                unawaited(_biometricService.startCapture());
                                 if (mounted) setState(() => _terminalOnline = termOk);
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
