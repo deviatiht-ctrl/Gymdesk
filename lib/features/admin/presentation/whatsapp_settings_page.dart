@@ -854,60 +854,78 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           // Si se Super Admin, ofri chwa ant de onglet yo
           if (isSuperAdmin) ...[
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-              color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    ChoiceChip(
-                      label: Text(s.text('whatsapp_tab_settings')),
-                      selected: _selectedTabIndex == 0,
-                      onSelected: (val) {
-                        _controlAutoTimer?.cancel();
-                        setState(() => _selectedTabIndex = 0);
-                      },
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+              color: theme.colorScheme.surfaceVariant.withOpacity(0.35),
+              child: Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ChoiceChip(
+                    avatar: const Icon(LucideIcons.settings, size: 15),
+                    label: Text(s.text('whatsapp_tab_settings')),
+                    selected: _selectedTabIndex == 0,
+                    onSelected: (val) {
+                      _controlAutoTimer?.cancel();
+                      setState(() => _selectedTabIndex = 0);
+                    },
+                  ),
+                  ChoiceChip(
+                    avatar: const Icon(LucideIcons.crown, size: 15, color: Colors.amber),
+                    label: Text(s.text('whatsapp_tab_super_admin')),
+                    selected: _selectedTabIndex == 1,
+                    onSelected: (val) {
+                      _controlAutoTimer?.cancel();
+                      setState(() => _selectedTabIndex = 1);
+                      _loadGymsAccessList();
+                    },
+                  ),
+                  ChoiceChip(
+                    avatar: const Icon(LucideIcons.bot, size: 15, color: Color(0xFF0F766E)),
+                    label: Text(s.text('whatsapp_tab_message_control')),
+                    selected: _selectedTabIndex == 2,
+                    onSelected: (val) {
+                      setState(() => _selectedTabIndex = 2);
+                      _loadControlOverview();
+                      _startControlAutoLoop();
+                      if (_controlAutoVerifyEnabled) {
+                        _runControlDispatchBatch(
+                          includeMissed: true,
+                          includeRenewals: true,
+                          retryFailed: false,
+                          silent: true,
+                        );
+                      }
+                    },
+                  ),
+                  ChoiceChip(
+                    avatar: const Icon(LucideIcons.key, size: 15, color: Colors.indigo),
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(s.text('whatsapp_tab_api_integration')),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.indigo.withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'PRO & EXTERNE',
+                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.indigo),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    ChoiceChip(
-                      label: Text(s.text('whatsapp_tab_super_admin')),
-                      selected: _selectedTabIndex == 1,
-                      onSelected: (val) {
-                        _controlAutoTimer?.cancel();
-                        setState(() => _selectedTabIndex = 1);
-                        _loadGymsAccessList();
-                      },
-                    ),
-                    const SizedBox(width: 10),
-                    ChoiceChip(
-                      label: Text(s.text('whatsapp_tab_message_control')),
-                      selected: _selectedTabIndex == 2,
-                      onSelected: (val) {
-                        setState(() => _selectedTabIndex = 2);
-                        _loadControlOverview();
-                        _startControlAutoLoop();
-                        if (_controlAutoVerifyEnabled) {
-                          _runControlDispatchBatch(
-                            includeMissed: true,
-                            includeRenewals: true,
-                            retryFailed: false,
-                            silent: true,
-                          );
-                        }
-                      },
-                    ),
-                    const SizedBox(width: 10),
-                    ChoiceChip(
-                      label: Text(s.text('whatsapp_tab_api_integration')),
-                      selected: _selectedTabIndex == 3,
-                      onSelected: (val) {
-                        _controlAutoTimer?.cancel();
-                        setState(() => _selectedTabIndex = 3);
-                        _loadApiIntegrationData();
-                      },
-                    ),
-                  ],
-                ),
+                    selected: _selectedTabIndex == 3,
+                    onSelected: (val) {
+                      _controlAutoTimer?.cancel();
+                      setState(() => _selectedTabIndex = 3);
+                      _loadApiIntegrationData();
+                    },
+                  ),
+                ],
               ),
             ),
           ],
@@ -2803,6 +2821,51 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
       child: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
         children: [
+          // Banner Raccourci vers Clés API & Lignes Dédiées Externes
+          Card(
+            elevation: 0,
+            margin: const EdgeInsets.only(bottom: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: Colors.indigo, width: 1.3),
+            ),
+            color: Colors.indigo.withOpacity(0.06),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  const Icon(LucideIcons.key, color: Colors.indigo, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text(
+                          'API WhatsApp & Lignes Dédiées (Sites Externes / DALIGHT)',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Configurez les lignes SIM exclusives (Liy Dedye), quotas, durées et clés API isolées pour les autres entreprises.',
+                          style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.indigo),
+                    onPressed: () {
+                      _controlAutoTimer?.cancel();
+                      setState(() => _selectedTabIndex = 3);
+                      _loadApiIntegrationData();
+                    },
+                    icon: const Icon(LucideIcons.arrowRight, size: 14),
+                    label: const Text('Ouvrir API & Lignes Dédiées'),
+                  ),
+                ],
+              ),
+            ),
+          ),
           // Header Intelligence Automatique
           Card(
             elevation: 0,
@@ -3938,7 +4001,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Text(tenant.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              Text(tenant.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
               if (tenant.isMasterAdmin)
                 Chip(
                   label: const Text('MASTER', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold)),
@@ -3946,8 +4009,8 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   visualDensity: VisualDensity.compact,
                 ),
               Chip(
-                label: Text(tenant.planTier.toUpperCase(), style: const TextStyle(fontSize: 10.5)),
-                backgroundColor: Colors.indigo.withOpacity(0.1),
+                label: Text(tenant.planTier.toUpperCase(), style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold)),
+                backgroundColor: Colors.indigo.withOpacity(0.12),
                 visualDensity: VisualDensity.compact,
               ),
               Container(
@@ -3957,7 +4020,7 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  tenant.isActive ? 'Actif' : 'Désactivé',
+                  tenant.isActive ? 'Actif' : 'Bloqué / Désactivé',
                   style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -3983,24 +4046,71 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
           if (tenant.dedicatedAccountIndices.isNotEmpty)
             Container(
               margin: const EdgeInsets.only(top: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFF0F766E).withOpacity(0.12),
+                color: const Color(0xFF0F766E).withOpacity(0.14),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.35)),
+                border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.4)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(LucideIcons.shieldCheck, size: 13, color: Color(0xFF0F766E)),
+                  const Icon(LucideIcons.shieldCheck, size: 14, color: Color(0xFF0F766E)),
+                  const SizedBox(width: 6),
+                  Text(
+                    '🔒 Liy Dedye : Liy #${tenant.dedicatedAccountIndices.join(', #')} (Eksklizif pou ${tenant.name})',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              child: const Text('Liy pataje (Pa gen liy eksklizif)', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ),
+          if (tenant.expiresAt != null) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: (tenant.isExpired ? Colors.red : Colors.green).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: (tenant.isExpired ? Colors.red : Colors.green).withOpacity(0.35)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    tenant.isExpired ? LucideIcons.alertTriangle : LucideIcons.calendarCheck,
+                    size: 13,
+                    color: tenant.isExpired ? Colors.red : Colors.green,
+                  ),
                   const SizedBox(width: 5),
                   Text(
-                    '🔒 Liy Dedye : Liy #${tenant.dedicatedAccountIndices.join(', #')} (Eksklizif)',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                    tenant.isExpired
+                        ? '⚠️ Clé Expirée le ${tenant.expiresAt!.day.toString().padLeft(2, '0')}/${tenant.expiresAt!.month.toString().padLeft(2, '0')}/${tenant.expiresAt!.year}'
+                        : '📅 Valide jusqu\'au ${tenant.expiresAt!.day.toString().padLeft(2, '0')}/${tenant.expiresAt!.month.toString().padLeft(2, '0')}/${tenant.expiresAt!.year} (${tenant.daysRemaining ?? 0} jours restants)',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.bold,
+                      color: tenant.isExpired ? Colors.red : Colors.green,
+                    ),
                   ),
                 ],
               ),
             ),
+          ] else ...[
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(LucideIcons.infinity, size: 13, color: Colors.grey),
+                SizedBox(width: 4),
+                Text('Sans expiration (Illimité)', style: TextStyle(fontSize: 11, color: Colors.grey)),
+              ],
+            ),
+          ],
           const SizedBox(height: 8),
           Container(
             width: double.infinity,
@@ -4020,6 +4130,15 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F766E),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () => _showEditTenantDetailsDialog(tenant),
+                icon: const Icon(LucideIcons.edit3, size: 14),
+                label: const Text('✏️ Modifier & Gérer Tout'),
+              ),
               OutlinedButton.icon(
                 onPressed: () {
                   setState(() {
@@ -4086,6 +4205,430 @@ class _WhatsAppSettingsPageState extends ConsumerState<WhatsAppSettingsPage> {
     );
   }
 
+
+
+  Future<void> _showEditTenantDetailsDialog(GatewayApiTenant tenant) async {
+    final theme = Theme.of(context);
+    final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());
+    final nameCtrl = TextEditingController(text: tenant.name);
+    final emailCtrl = TextEditingController(text: tenant.email ?? '');
+    String planTier = tenant.planTier;
+    final dailyCtrl = TextEditingController(text: tenant.dailyQuota.toString());
+    final monthlyCtrl = TextEditingController(text: tenant.monthlyQuota.toString());
+    final selectedLines = Set<int>.from(tenant.dedicatedAccountIndices);
+    bool isActive = tenant.isActive;
+    String durationChoice = 'keep';
+    DateTime? customExpiresAt = tenant.expiresAt;
+    bool isSaving = false;
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          final isPro = planTier.toLowerCase() == 'pro';
+          final isStarter = planTier.toLowerCase() == 'starter';
+
+          String expiryPreviewText = '';
+          if (durationChoice == 'keep') {
+            if (tenant.expiresAt != null) {
+              final d = tenant.daysRemaining ?? 0;
+              final dateStr = '${tenant.expiresAt!.day.toString().padLeft(2, '0')}/${tenant.expiresAt!.month.toString().padLeft(2, '0')}/${tenant.expiresAt!.year}';
+              expiryPreviewText = 'Ekspirasyon aktyèl : $dateStr (${tenant.isExpired ? "EKSPIRÉ" : "$d jou ki rete"})';
+            } else {
+              expiryPreviewText = 'Ekspirasyon aktyèl : San limit (Illimité)';
+            }
+          } else if (durationChoice == 'unlimited') {
+            expiryPreviewText = 'Nouvo estati : San limit (Pa gen ekspirasyon)';
+          } else if (durationChoice == 'custom') {
+            if (customExpiresAt != null) {
+              final d = customExpiresAt!.difference(DateTime.now()).inDays;
+              final dateStr = '${customExpiresAt!.day.toString().padLeft(2, '0')}/${customExpiresAt!.month.toString().padLeft(2, '0')}/${customExpiresAt!.year}';
+              expiryPreviewText = 'Dat chwazi : $dateStr (${d >= 0 ? "$d jou ki rete" : "Dat pase"})';
+            } else {
+              expiryPreviewText = 'Tanpri chwazi yon dat personnalisé';
+            }
+          } else {
+            final days = int.tryParse(durationChoice) ?? 30;
+            final targetDate = DateTime.now().add(Duration(days: days));
+            final dateStr = '${targetDate.day.toString().padLeft(2, '0')}/${targetDate.month.toString().padLeft(2, '0')}/${targetDate.year}';
+            expiryPreviewText = 'Ap ekspire : $dateStr (nan $days jou)';
+          }
+
+          return AlertDialog(
+            title: Row(
+              children: [
+                const Icon(LucideIcons.edit3, color: Color(0xFF0F766E), size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Modifier & Gérer : ${tenant.name}',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          Column(
+                            children: [
+                              const Text('Jodi a', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${tenant.usage.sentToday} / ${tenant.dailyQuota}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                          Column(
+                            children: [
+                              const Text('Mwa sa a', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${tenant.usage.sentThisMonth} / ${tenant.monthlyQuota}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ],
+                          ),
+                          Column(
+                            children: [
+                              const Text('Liy Eksklizif', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                              const SizedBox(height: 2),
+                              Text(
+                                tenant.dedicatedAccountIndices.isEmpty
+                                    ? 'Pataje'
+                                    : 'Liy #${tenant.dedicatedAccountIndices.join(', #')}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F766E)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: nameCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Nom de l\'Entreprise / Site *',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: emailCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Email de contact',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: planTier,
+                            decoration: const InputDecoration(
+                              labelText: 'Plan / Forfait',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 'starter', child: Text('Starter (15/j · 300/m)')),
+                              DropdownMenuItem(value: 'pro', child: Text('Pro Business (1-2 Liy Eksklizif)')),
+                              DropdownMenuItem(value: 'enterprise', child: Text('Enterprise (Liy Eksklizif)')),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) {
+                                setDlgState(() {
+                                  planTier = val;
+                                  if (val == 'starter') selectedLines.clear();
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: theme.dividerColor),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  isActive ? 'Clé Active' : 'Clé Bloquée',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12.5,
+                                    color: isActive ? Colors.green : Colors.red,
+                                  ),
+                                ),
+                                Switch(
+                                  value: isActive,
+                                  activeColor: Colors.green,
+                                  onChanged: (val) => setDlgState(() => isActive = val),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    if (!isStarter) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F766E).withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFF0F766E)),
+                                const SizedBox(width: 6),
+                                const Text(
+                                  'Liy WhatsApp Dedye Eksklizif (1-2 Liy)',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F766E)),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${selectedLines.length} / ${isPro ? 2 : "illimité"}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F766E)),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Tout mesaj antrepriz sa a ap pase sèlman sou liy ou chwazi yo. Okenn lòt antrepriz oswa gym pap janm pase sou yo.',
+                              style: TextStyle(fontSize: 11, color: Colors.grey),
+                            ),
+                            const SizedBox(height: 8),
+                            if (_accountsList.isEmpty)
+                              const Text('Okenn liy pa konekte nan cluster a.', style: TextStyle(color: Colors.grey, fontSize: 12))
+                            else
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: _accountsList.map((acc) {
+                                  final idx = acc.accountIndex;
+                                  final isSelected = selectedLines.contains(idx);
+                                  final canToggle = isSelected || !isPro || selectedLines.length < 2;
+                                  return FilterChip(
+                                    avatar: Icon(isSelected ? LucideIcons.check : LucideIcons.smartphone, size: 13),
+                                    label: Text('Liy #$idx (${acc.label})'),
+                                    selected: isSelected,
+                                    selectedColor: const Color(0xFF0F766E).withOpacity(0.2),
+                                    onSelected: canToggle
+                                        ? (val) {
+                                            setDlgState(() {
+                                              if (val) {
+                                                selectedLines.add(idx);
+                                              } else {
+                                                selectedLines.remove(idx);
+                                              }
+                                            });
+                                          }
+                                        : null,
+                                  );
+                                }).toList(),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: dailyCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Quota Journalier (msg/jour)',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: monthlyCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Quota Mensuel (msg/mois)',
+                              isDense: true,
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: durationChoice,
+                      decoration: const InputDecoration(
+                        labelText: 'Durée de validité / Expiration',
+                        isDense: true,
+                        border: OutlineInputBorder(),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'keep', child: Text('Garder l\'expiration actuelle')),
+                        DropdownMenuItem(value: 'unlimited', child: Text('Illimité (Sans expiration)')),
+                        DropdownMenuItem(value: '30', child: Text('Définir / Prolonger : 30 Jours (+1 Mois)')),
+                        DropdownMenuItem(value: '60', child: Text('Définir / Prolonger : 60 Jours (+2 Mois)')),
+                        DropdownMenuItem(value: '90', child: Text('Définir / Prolonger : 90 Jours (+3 Mois)')),
+                        DropdownMenuItem(value: '180', child: Text('Définir / Prolonger : 180 Jours (+6 Mois)')),
+                        DropdownMenuItem(value: '365', child: Text('Définir / Prolonger : 365 Jours (+1 An)')),
+                        DropdownMenuItem(value: 'custom', child: Text('Date personnalisée...')),
+                      ],
+                      onChanged: (val) async {
+                        if (val == 'custom') {
+                          final picked = await showDatePicker(
+                            context: ctx,
+                            initialDate: customExpiresAt ?? DateTime.now().add(const Duration(days: 30)),
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now().add(const Duration(days: 3650)),
+                          );
+                          if (picked != null) {
+                            setDlgState(() {
+                              durationChoice = 'custom';
+                              customExpiresAt = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
+                            });
+                          }
+                        } else if (val != null) {
+                          setDlgState(() => durationChoice = val);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      expiryPreviewText,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: tenant.isExpired && durationChoice == 'keep' ? Colors.red : const Color(0xFF0F766E),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(ctx, false),
+                child: const Text('Annuler'),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final name = nameCtrl.text.trim();
+                        if (name.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Le nom de l\'entreprise est obligatoire.')),
+                          );
+                          return;
+                        }
+
+                        final daily = int.tryParse(dailyCtrl.text.trim()) ?? tenant.dailyQuota;
+                        final monthly = int.tryParse(monthlyCtrl.text.trim()) ?? tenant.monthlyQuota;
+
+                        setDlgState(() => isSaving = true);
+                        try {
+                          DateTime? finalExpiresAt;
+                          bool clearExpires = false;
+                          int? finalDurationDays;
+
+                          if (durationChoice == 'unlimited') {
+                            clearExpires = true;
+                          } else if (durationChoice == 'custom' && customExpiresAt != null) {
+                            finalExpiresAt = customExpiresAt;
+                          } else if (durationChoice != 'keep') {
+                            finalDurationDays = int.tryParse(durationChoice);
+                          }
+
+                          await client.updateTenantDetails(
+                            tenantId: tenant.id,
+                            name: name,
+                            email: emailCtrl.text.trim(),
+                            planTier: planTier,
+                            dailyQuota: daily,
+                            monthlyQuota: monthly,
+                            isActive: isActive,
+                            dedicatedAccountIndices: selectedLines.toList(),
+                            expiresAt: finalExpiresAt,
+                            clearExpiresAt: clearExpires,
+                            durationDays: finalDurationDays,
+                          );
+
+                          if (!ctx.mounted) return;
+                          Navigator.pop(ctx, true);
+                        } catch (e) {
+                          setDlgState(() => isSaving = false);
+                          if (!ctx.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: Colors.red,
+                              content: Text('Erreur: ${e.toString().replaceFirst("Exception: ", "")}'),
+                            ),
+                          );
+                        }
+                      },
+                icon: isSaving
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(LucideIcons.save, size: 15),
+                label: const Text('Enregistrer Tout'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (updated == true) {
+      await _loadApiIntegrationData(silent: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF0F766E),
+          content: Text('Modifications enregistrées avec succès pour "${tenant.name}".'),
+        ),
+      );
+    }
+  }
 
   Future<void> _showEditDedicatedLinesDialog(GatewayApiTenant tenant) async {
     final client = WhatsAppClient(baseUrl: _gatewayUrlController.text.trim());

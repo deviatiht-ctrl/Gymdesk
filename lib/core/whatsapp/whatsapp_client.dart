@@ -325,6 +325,7 @@ class GatewayApiTenant {
     this.createdAt,
     this.usage = const GatewayApiUsage(),
     this.dedicatedAccountIndices = const [],
+    this.expiresAt,
   });
 
   final String id;
@@ -339,6 +340,14 @@ class GatewayApiTenant {
   final DateTime? createdAt;
   final GatewayApiUsage usage;
   final List<int> dedicatedAccountIndices;
+  final DateTime? expiresAt;
+
+  bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
+  int? get daysRemaining {
+    if (expiresAt == null) return null;
+    final diff = expiresAt!.difference(DateTime.now()).inDays;
+    return diff < 0 ? 0 : diff;
+  }
 
   factory GatewayApiTenant.fromJson(Map<String, dynamic> json) {
     return GatewayApiTenant(
@@ -359,6 +368,7 @@ class GatewayApiTenant {
               ?.map((e) => (e as num).toInt())
               .toList() ??
           const [],
+      expiresAt: json['expires_at'] != null ? DateTime.tryParse(json['expires_at'].toString()) : null,
     );
   }
 }
@@ -1416,6 +1426,53 @@ Crée le client HTTP backend complet avec CVISUAL_WA_API_KEY, vérification GET 
               'dedicated_account_indices': dedicatedAccountIndices,
             'is_active': true,
           }),
+        )
+        .timeout(const Duration(seconds: 15));
+    final data = _decodeJsonResponse(res);
+    if (res.statusCode >= 400 || data['ok'] != true || data['tenant'] is! Map) {
+      throw Exception(data['error']?.toString() ?? 'HTTP ${res.statusCode}');
+    }
+    return GatewayApiTenant.fromJson(Map<String, dynamic>.from(data['tenant'] as Map));
+  }
+
+
+  Future<GatewayApiTenant> updateTenantDetails({
+    required String tenantId,
+    String? name,
+    String? email,
+    String? planTier,
+    int? dailyQuota,
+    int? monthlyQuota,
+    bool? isActive,
+    List<int>? dedicatedAccountIndices,
+    DateTime? expiresAt,
+    bool clearExpiresAt = false,
+    int? durationDays,
+  }) async {
+    final uri = Uri.parse('$effectiveBaseUrl/api/v1/admin/tenants/$tenantId');
+    final Map<String, dynamic> body = {};
+    if (name != null) body['name'] = name.trim();
+    if (email != null) body['email'] = email.trim();
+    if (planTier != null) body['plan_tier'] = planTier;
+    if (dailyQuota != null) body['daily_quota'] = dailyQuota;
+    if (monthlyQuota != null) body['monthly_quota'] = monthlyQuota;
+    if (isActive != null) body['is_active'] = isActive;
+    if (dedicatedAccountIndices != null) {
+      body['dedicated_account_indices'] = dedicatedAccountIndices;
+    }
+    if (clearExpiresAt) {
+      body['expires_at'] = null;
+    } else if (expiresAt != null) {
+      body['expires_at'] = expiresAt.toUtc().toIso8601String();
+    } else if (durationDays != null) {
+      body['duration_days'] = durationDays;
+    }
+
+    final res = await http
+        .patch(
+          uri,
+          headers: _adminHeaders(includeJson: true),
+          body: jsonEncode(body),
         )
         .timeout(const Duration(seconds: 15));
     final data = _decodeJsonResponse(res);
