@@ -390,13 +390,13 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
     final subject = _subjectController.text.trim();
     final body = _bodyController.text.trim();
 
-    if (title.isEmpty || body.isEmpty) {
+    if (body.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(s.text('fill_required_fields'))),
       );
       return;
     }
-    if (_channel == 'email' && subject.isEmpty) {
+    if (_channel == 'email' && (title.isEmpty || subject.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(s.text('fill_required_fields'))),
       );
@@ -631,219 +631,22 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       lang: s.locale.languageCode,
     );
 
-    int sentCount = 0;
-    int failedCount = 0;
-    bool isCancelled = false;
-
-    // Bwat dyalòg pwogresyon an dirèk ak Pwoteksyon Anti-Ban
+    // Bwat dyalòg pwogresyon an dirèk ak Pwoteksyon Anti-Ban (StatefulWidget pou evite paralèl loop)
     if (!mounted) return;
-    await showDialog<void>(
+    final sentCount = await showDialog<int>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogCtx) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            String currentRecipient = '';
-            String progressStatus = 'Preparasyon pou voye...';
-            int coolingSeconds = 0;
-            bool started = false;
-
-            void runSendingLoop() async {
-              for (int i = 0; i < recipients.length; i++) {
-                if (isCancelled || !mounted) break;
-                final m = recipients[i];
-                final rawPhone = (m['whatsapp']?.toString().isNotEmpty ?? false)
-                    ? m['whatsapp'].toString()
-                    : m['phone']?.toString() ?? '';
-                final phone = WhatsAppClient.normalizePhone(rawPhone);
-                if (phone.length < 8) {
-                  failedCount++;
-                  continue;
-                }
-
-                final memberName = m['name']?.toString() ?? '';
-                if (dialogCtx.mounted) {
-                  setDialogState(() {
-                    currentRecipient = '$memberName ($phone)';
-                    progressStatus = 'N ap voye bay: $currentRecipient';
-                    coolingSeconds = 0;
-                  });
-                }
-
-                // Tèks varye ak pwoteksyon Anti-Ban (Spintax + Hash Cryptographique Envizib)
-                final fullMsg = WhatsAppAntiBanHelper.humanizeMessage(
-                  body: body,
-                  memberName: memberName,
-                  gymName: gymName,
-                  title: title,
-                  footer: footer,
-                  lang: s.locale.languageCode,
-                  recipientIndex: i,
-                  addZeroWidthFingerprint: true,
-                );
-
-                final res = await waClient.sendMessage(
-                  to: phone,
-                  message: fullMsg,
-                  kind: 'campaign',
-                  gymId: gymId,
-                );
-
-                if (res.success) {
-                  sentCount++;
-                } else {
-                  failedCount++;
-                }
-
-                // Reta entèlijan ant chak voye
-                if (i < recipients.length - 1 && !isCancelled) {
-                  final isCool = WhatsAppAntiBanHelper.isCoolingBreak(index: i + 1);
-                  if (isCool) {
-                    for (int sec = 12; sec > 0; sec--) {
-                      if (isCancelled || !mounted) break;
-                      if (dialogCtx.mounted) {
-                        setDialogState(() {
-                          coolingSeconds = sec;
-                          progressStatus = '⏳ Pòz refwadisman Anti-Ban ($sec s) pou pwoteje kont lan...';
-                        });
-                      }
-                      await Future<void>.delayed(const Duration(seconds: 1));
-                    }
-                  } else {
-                    final delay = WhatsAppAntiBanHelper.getPacingDelay(index: i + 1);
-                    final sec = (delay.inMilliseconds / 1000).toStringAsFixed(1);
-                    if (dialogCtx.mounted) {
-                      setDialogState(() {
-                        progressStatus = '🛡️ Reta Anti-Ban ($sec s) anvan pwochen moun...';
-                      });
-                    }
-                    await Future<void>.delayed(delay);
-                  }
-                }
-              }
-
-              if (dialogCtx.mounted) {
-                Navigator.of(dialogCtx).pop();
-              }
-            }
-
-            if (!started) {
-              started = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) => runSendingLoop());
-            }
-
-            final progress = recipients.isNotEmpty ? (sentCount + failedCount) / recipients.length : 0.0;
-
-            final isDark = Theme.of(context).brightness == Brightness.dark;
-            return AlertDialog(
-              backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: Row(
-                children: [
-                  const Icon(LucideIcons.send, color: Color(0xFF15803D)),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Voye Kanpay WhatsApp',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : const Color(0xFF0F172A),
-                    ),
-                  ),
-                ],
-              ),
-              content: SizedBox(
-                width: 450,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFF15803D)),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Pwoteksyon Anti-Ban Aktif (Varyasyon + Reta entèlijan)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    LinearProgressIndicator(
-                      value: progress.clamp(0.0, 1.0),
-                      minHeight: 8,
-                      backgroundColor: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
-                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF15803D)),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Mesaj voye : $sentCount / ${recipients.length}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
-                          ),
-                        ),
-                        if (failedCount > 0)
-                          Text(
-                            '$failedCount echwe',
-                            style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      progressStatus,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: coolingSeconds > 0
-                            ? const Color(0xFFF59E0B)
-                            : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
-                        fontWeight: coolingSeconds > 0 ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
-                  ),
-                  onPressed: () {
-                    isCancelled = true;
-                    if (dialogCtx.mounted) {
-                      setDialogState(() {
-                        progressStatus = 'Kanpe voye a...';
-                      });
-                    }
-                  },
-                  icon: const Icon(LucideIcons.octagonAlert, size: 16),
-                  label: const Text('Kanpe voye a (Annuler)'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
+      builder: (dialogCtx) => _WhatsAppCampaignProgressDialog(
+        recipients: recipients,
+        title: title,
+        body: body,
+        footer: footer,
+        gymId: gymId,
+        gymName: gymName,
+        waClient: waClient,
+        lang: s.locale.languageCode,
+      ),
+    ) ?? 0;
 
     // 3. Anrejistre kanpay la nan baz done Supabase
     try {
@@ -866,8 +669,8 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            isCancelled
-                ? 'Kanpay kanpe : $sentCount voye sou ${recipients.length} manm.'
+            sentCount < recipients.length
+                ? 'Kanpay sispann oswa fini : $sentCount voye sou ${recipients.length} manm.'
                 : '$sentCount / ${recipients.length} ${s.text('campaign_whatsapp_sent_summary')}',
           ),
           backgroundColor: sentCount > 0 ? const Color(0xFF059669) : Colors.amber.shade800,
@@ -1331,18 +1134,20 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
                 TextField(
                   controller: _titleController,
                   decoration: InputDecoration(
-                    labelText: '${s.text('campaign_title_field')} *',
+                    labelText: _channel == 'whatsapp' ? 'Tit Kanpay la (Antèt mesaj la, opsyonèl)' : '${s.text('campaign_title_field')} *',
                     border: const OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _subjectController,
-                  decoration: InputDecoration(
-                    labelText: '${s.text('campaign_subject_field')} *',
-                    border: const OutlineInputBorder(),
+                if (_channel == 'email') ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _subjectController,
+                    decoration: InputDecoration(
+                      labelText: '${s.text('campaign_subject_field')} *',
+                      border: const OutlineInputBorder(),
+                    ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 16),
                 if (_channel == 'whatsapp') ...[
                   Container(
@@ -1714,6 +1519,244 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
           ),
         );
       },
+    );
+  }
+}
+
+
+/// Dyalòg Pwogresyon Kanpay WhatsApp ak Pwoteksyon Anti-Ban
+/// StatefulWidget endepandan pou garanti ekzekisyon strikteman sekansyèl (1 sèl loop, 0 paralèl)
+class _WhatsAppCampaignProgressDialog extends StatefulWidget {
+  const _WhatsAppCampaignProgressDialog({
+    required this.recipients,
+    required this.title,
+    required this.body,
+    required this.footer,
+    required this.gymId,
+    required this.gymName,
+    required this.waClient,
+    required this.lang,
+  });
+
+  final List<Map<String, dynamic>> recipients;
+  final String title;
+  final String body;
+  final String footer;
+  final String? gymId;
+  final String gymName;
+  final WhatsAppClient waClient;
+  final String lang;
+
+  @override
+  State<_WhatsAppCampaignProgressDialog> createState() => _WhatsAppCampaignProgressDialogState();
+}
+
+class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgressDialog> {
+  int _sentCount = 0;
+  int _failedCount = 0;
+  bool _isCancelled = false;
+  String _currentRecipient = '';
+  String _progressStatus = 'Preparasyon pou voye...';
+  int _coolingSeconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startSending());
+  }
+
+  Future<void> _startSending() async {
+    for (int i = 0; i < widget.recipients.length; i++) {
+      if (_isCancelled || !mounted) break;
+      final m = widget.recipients[i];
+      final rawPhone = (m['whatsapp']?.toString().isNotEmpty ?? false)
+          ? m['whatsapp'].toString()
+          : m['phone']?.toString() ?? '';
+      final phone = WhatsAppClient.normalizePhone(rawPhone);
+      if (phone.length < 8) {
+        if (mounted) setState(() => _failedCount++);
+        continue;
+      }
+
+      final memberName = m['name']?.toString() ?? '';
+      if (mounted) {
+        setState(() {
+          _currentRecipient = '$memberName ($phone)';
+          _progressStatus = 'N ap voye bay: $_currentRecipient';
+          _coolingSeconds = 0;
+        });
+      }
+
+      // Tèks varye ak pwoteksyon Anti-Ban (Spintax + Hash Cryptographique Envizib)
+      final fullMsg = WhatsAppAntiBanHelper.humanizeMessage(
+        body: widget.body,
+        memberName: memberName,
+        gymName: widget.gymName,
+        title: widget.title.isNotEmpty ? widget.title : null,
+        footer: widget.footer,
+        lang: widget.lang,
+        recipientIndex: i,
+        addZeroWidthFingerprint: true,
+      );
+
+      // Voye ak kind 'manual_direct' pou pase nan Fast Lane imedya sou WhatsApp Web
+      final res = await widget.waClient.sendMessage(
+        to: phone,
+        message: fullMsg,
+        kind: 'manual_direct',
+        gymId: widget.gymId,
+      );
+
+      if (mounted) {
+        setState(() {
+          if (res.success) {
+            _sentCount++;
+          } else {
+            _failedCount++;
+          }
+        });
+      }
+
+      // Reta entèlijan ant chak voye (Anti-Ban Jitter 3.5s - 5.5s)
+      if (i < widget.recipients.length - 1 && !_isCancelled) {
+        final isCool = WhatsAppAntiBanHelper.isCoolingBreak(index: i + 1);
+        if (isCool) {
+          for (int sec = 10; sec > 0; sec--) {
+            if (_isCancelled || !mounted) break;
+            setState(() {
+              _coolingSeconds = sec;
+              _progressStatus = '⏳ Pòz refwadisman Anti-Ban ($sec s) pou pwoteje kont lan...';
+            });
+            await Future<void>.delayed(const Duration(seconds: 1));
+          }
+        } else {
+          final delay = WhatsAppAntiBanHelper.getPacingDelay(index: i + 1);
+          final sec = (delay.inMilliseconds / 1000).toStringAsFixed(1);
+          if (mounted) {
+            setState(() {
+              _progressStatus = '🛡️ Reta Anti-Ban ($sec s) anvan pwochen moun...';
+            });
+          }
+          await Future<void>.delayed(delay);
+        }
+      }
+    }
+
+    if (mounted) {
+      Navigator.of(context).pop(_sentCount);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final total = widget.recipients.length;
+    final processed = _sentCount + _failedCount;
+    final progress = total > 0 ? (processed / total) : 0.0;
+
+    return AlertDialog(
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(
+        children: [
+          const Icon(LucideIcons.send, color: Color(0xFF15803D)),
+          const SizedBox(width: 8),
+          Text(
+            'Voye Kanpay WhatsApp',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 450,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF14532D) : const Color(0xFFDCFCE7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(LucideIcons.shieldCheck, size: 16, color: Color(0xFF15803D)),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Pwoteksyon Anti-Ban Aktif (Varyasyon + Reta entèlijan)',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF15803D),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              minHeight: 8,
+              backgroundColor: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF15803D)),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Mesaj voye : $_sentCount / $total',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                ),
+                if (_failedCount > 0)
+                  Text(
+                    '$_failedCount echwe',
+                    style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _progressStatus,
+              style: TextStyle(
+                fontSize: 13,
+                color: _coolingSeconds > 0
+                    ? const Color(0xFFF59E0B)
+                    : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
+                fontWeight: _coolingSeconds > 0 ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.red,
+            side: const BorderSide(color: Colors.red),
+          ),
+          onPressed: () {
+            setState(() {
+              _isCancelled = true;
+              _progressStatus = 'Kanpe voye a...';
+            });
+            Navigator.of(context).pop(_sentCount);
+          },
+          icon: const Icon(LucideIcons.octagonAlert, size: 16),
+          label: const Text('Kanpe voye a (Annuler)'),
+        ),
+      ],
     );
   }
 }
