@@ -1,5 +1,5 @@
 -- =============================================================================
--- 50_fix_sync_permissions_and_unblock_outbox.sql
+-- 51_fix_sync_permissions_and_unblock_outbox.sql
 -- 1. Permettre au personnel de réception (ex: Lourdmia Coq / caissières / secrétaires)
 --    de synchroniser les abonnements, les paiements, les membres et les archivages (tombstones)
 --    sans être bloqués par 'access_denied' (erreur 42501).
