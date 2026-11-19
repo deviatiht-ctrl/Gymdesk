@@ -148,6 +148,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
     var permReportsView = person.canViewReports;
     var permPlansManage = person.canManagePlans;
     var permAccessControl = person.canAccessControl;
+    var permValidateRenewals = person.canValidateRenewals;
 
     void applyPreset(String job, StateSetter setDialog) {
       setDialog(() {
@@ -161,6 +162,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
           permReportsView = false;
           permPlansManage = false;
           permAccessControl = true;
+          permValidateRenewals = false;
         } else if (job == 'secretaire' || job == 'secretaire_caissiere') {
           role = 'reception';
           permMembersAdd = true;
@@ -170,6 +172,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
           permReportsView = true;
           permPlansManage = true;
           permAccessControl = true;
+          permValidateRenewals = false;
         } else if (job == 'superviseur') {
           role = 'supervisor';
           permMembersAdd = true;
@@ -179,6 +182,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
           permReportsView = true;
           permPlansManage = true;
           permAccessControl = true;
+          permValidateRenewals = true;
         }
       });
     }
@@ -295,6 +299,17 @@ class _StaffPageState extends ConsumerState<StaffPage> {
                     value: permAccessControl,
                     onChanged: (v) => setDialog(() => permAccessControl = v ?? true),
                   ),
+                  CheckboxListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(s.text('perm_validate_renewals')),
+                    subtitle: Text(
+                      s.text('perm_validate_renewals_desc'),
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    value: permValidateRenewals,
+                    onChanged: (v) => setDialog(() => permValidateRenewals = v ?? false),
+                  ),
                 ],
               ),
             ),
@@ -324,6 +339,7 @@ class _StaffPageState extends ConsumerState<StaffPage> {
         'can_view_reports': permReportsView,
         'can_manage_plans': permPlansManage,
         'can_access_control': permAccessControl,
+        'can_validate_renewals': permValidateRenewals,
       };
       await _repository.updateAccess(
         person,

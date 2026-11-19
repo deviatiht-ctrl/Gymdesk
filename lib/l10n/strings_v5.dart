@@ -77,6 +77,12 @@ const stringsV5 = <String, List<String>>{
   'perm_reports_view': ['Gade rapò finansye', 'Voir les rapports', 'View reports'],
   'perm_plans_manage': ['Jere fòmil & pri', 'Gérer les formules & tarifs', 'Manage plans & pricing'],
   'perm_access_control': ['Kontwòl pòt & scan', 'Contrôle d’accès & scan', 'Door access control'],
+  'perm_validate_renewals': ['Valide renouvèlman', 'Valider les renouvellements', 'Validate renewals'],
+  'perm_validate_renewals_desc': [
+    'Otorize kasyè a valide e aktive renouvèlman abònman yo dirèkteman.',
+    'Autoriser à valider et activer immédiatement les renouvellements d’abonnements.',
+    'Authorize validating and activating subscription renewals immediately.',
+  ],
   'preset_applied': ['Dwa yo aplike selon pòs la', 'Droits ajustés selon le poste', 'Permissions set for role'],
   // Debloke pa anprent (Phase 6.3)
   'scan_fingerprint_to_unlock': ['Scanne anprent pou debloke', 'Scanner l’empreinte pour déverrouiller', 'Scan fingerprint to unlock'],

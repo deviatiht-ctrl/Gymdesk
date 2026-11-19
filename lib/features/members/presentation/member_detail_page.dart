@@ -385,7 +385,9 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     );
     String method = 'cash';
     var keepCredit = false;
-    var markValid = true;
+    final session = ref.read(appRuntimeProvider).session;
+    final canValidateRenewals = session?.canValidateRenewals ?? false;
+    var markValid = canValidateRenewals;
     var replacePrevious = replaceTarget != null;
     DateTime start = replaceTarget != null ? dateOnly(replaceTarget.startDate) : dateOnly(DateTime.now());
     DateTime end = subscriptionEnd(start, plan?.durationDays ?? 30);
@@ -633,32 +635,68 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F766E)),
                     ),
                     const SizedBox(height: 10),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: markValid ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: markValid ? const Color(0xFF6EE7B7) : const Color(0xFFFDE68A),
-                        ),
-                      ),
-                      child: SwitchListTile(
-                        dense: true,
-                        title: Text(
-                          markValid ? 'Statut : Valide (Actif) immédiatement ✓' : 'Statut : En attente de validation',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: markValid ? const Color(0xFF065F46) : const Color(0xFF92400E),
+                    if (canValidateRenewals)
+                      Container(
+                        decoration: BoxDecoration(
+                          color: markValid ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: markValid ? const Color(0xFF6EE7B7) : const Color(0xFFFDE68A),
                           ),
                         ),
-                        subtitle: const Text(
-                          'Active directement l\'abonnement et l\'accès porte W2',
-                          style: TextStyle(fontSize: 11),
+                        child: SwitchListTile(
+                          dense: true,
+                          title: Text(
+                            markValid ? 'Statut : Valide (Actif) immédiatement ✓' : 'Statut : En attente de validation',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                              color: markValid ? const Color(0xFF065F46) : const Color(0xFF92400E),
+                            ),
+                          ),
+                          subtitle: const Text(
+                            'Active directement l\'abonnement et l\'accès porte W2',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                          value: markValid,
+                          onChanged: (v) => setDialog(() => markValid = v),
                         ),
-                        value: markValid,
-                        onChanged: (v) => setDialog(() => markValid = v),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFDE68A)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(LucideIcons.lock, size: 20, color: Color(0xFFB45309)),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Statut : En attente de validation (Obligatoire)',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: Color(0xFF92400E),
+                                    ),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    'Ou pa gen dwa pou valide renouvèlman dirèkteman. Abònman an ap anrejistre "En attente" pou yon responsab valide li.',
+                                    style: TextStyle(fontSize: 11, color: Color(0xFFB45309)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                     if (plan?.flexible ?? false) ...[
                       const SizedBox(height: 14),
                       TextFormField(
@@ -772,6 +810,9 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
     if (selectedPrice < 0 || amount < 0 || amount > selectedPrice) {
       _error('invalid_record');
       return;
+    }
+    if (!canValidateRenewals) {
+      markValid = false;
     }
     final command = amount > 0
         ? PaymentCommand(
@@ -952,12 +993,25 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
   }
 
   Future<void> _validateSubscriptionNow(Member member, GymSubscription subscription) async {
+    final canValidate = ref.read(appRuntimeProvider).session?.canValidateRenewals ?? false;
+    if (!canValidate) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Ou pa gen otorizasyon pou valide abònman sa a. Mande yon sipèvizè.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
     await _run(() => _subscriptions.validateRenewal(subscription, changedAt: _now));
     _pushMemberToW2(member, startDate: subscription.startDate, endDate: subscription.endDate);
   }
 
   Future<void> _editSubscription(Member member, GymSubscription subscription) async {
     final s = AppStrings.of(context);
+    final canValidate = ref.read(appRuntimeProvider).session?.canValidateRenewals ?? false;
     final plans = await _plans.watch().first;
     final activePlans = plans.where((p) => p.active && p.deletedAt == null).toList();
     if (!mounted) return;
@@ -1076,10 +1130,11 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                   DropdownButtonFormField<String>(
                     initialValue: status,
                     decoration: const InputDecoration(labelText: 'Statut de l\'abonnement'),
-                    items: const [
-                      DropdownMenuItem(value: 'active', child: Text('Valide (Actif ✓)')),
-                      DropdownMenuItem(value: 'pending', child: Text('En attente de paiement')),
-                      DropdownMenuItem(value: 'cancelled', child: Text('Annulé')),
+                    items: [
+                      if (canValidate || status == 'active')
+                        const DropdownMenuItem(value: 'active', child: Text('Valide (Actif ✓)')),
+                      const DropdownMenuItem(value: 'pending', child: Text('En attente de paiement / validation')),
+                      const DropdownMenuItem(value: 'cancelled', child: Text('Annulé')),
                     ],
                     onChanged: (v) => setDialog(() => status = v ?? 'active'),
                   ),
@@ -1677,19 +1732,41 @@ class _MemberDetailPageState extends ConsumerState<MemberDetailPage> {
                                       spacing: 6,
                                       runSpacing: 6,
                                       children: [
-                                        if (subscription.status != 'active')
-                                          FilledButton.tonalIcon(
-                                            style: FilledButton.styleFrom(
-                                              visualDensity: VisualDensity.compact,
-                                              backgroundColor: const Color(0xFFDCFCE7),
-                                              foregroundColor: const Color(0xFF15803D),
+                                        if (subscription.status != 'active') ...[
+                                          if (ref.watch(appRuntimeProvider).session?.canValidateRenewals ?? false)
+                                            FilledButton.tonalIcon(
+                                              style: FilledButton.styleFrom(
+                                                visualDensity: VisualDensity.compact,
+                                                backgroundColor: const Color(0xFFDCFCE7),
+                                                foregroundColor: const Color(0xFF15803D),
+                                              ),
+                                              onPressed: _busy
+                                                  ? null
+                                                  : () => _validateSubscriptionNow(member, subscription),
+                                              icon: const Icon(LucideIcons.circleCheck, size: 14),
+                                              label: const Text('Valider', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                            )
+                                          else
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFFEF3C7),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: const Color(0xFFFCD34D)),
+                                              ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(LucideIcons.clock, size: 12, color: Color(0xFFB45309)),
+                                                  SizedBox(width: 4),
+                                                  Text(
+                                                    'En attente validation',
+                                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                            onPressed: _busy
-                                                ? null
-                                                : () => _validateSubscriptionNow(member, subscription),
-                                            icon: const Icon(LucideIcons.circleCheck, size: 14),
-                                            label: const Text('Valider', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                          ),
+                                        ],
                                         if (subscription.status == 'pending')
                                           OutlinedButton.icon(
                                             style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),

@@ -101,6 +101,10 @@ class StaffSession {
       isOwner ||
       (permissions['can_manage_plans'] as bool? ?? (isSupervisor || isSecretaryOrCashier));
   bool get canAccessControl => isOwner || (permissions['can_access_control'] as bool? ?? true);
+  bool get canValidateRenewals =>
+      isOwner ||
+      isSupervisor ||
+      (permissions['can_validate_renewals'] as bool? ?? false);
   bool get active =>
       staff['active'] == true &&
       staff['deleted_at'] == null &&

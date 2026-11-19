@@ -37,6 +37,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
   bool _permReportsView = false;
   bool _permPlansManage = false;
   bool _permAccessControl = true;
+  bool _permValidateRenewals = false;
   bool _loading = true;
   bool _busy = false;
   bool _loadFailed = false;
@@ -54,6 +55,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
         _permReportsView = false;
         _permPlansManage = false;
         _permAccessControl = true;
+        _permValidateRenewals = false;
       } else if (job == 'secretaire' || job == 'secretaire_caissiere') {
         _role = 'reception';
         _permMembersAdd = true;
@@ -63,6 +65,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
         _permReportsView = true;
         _permPlansManage = true;
         _permAccessControl = true;
+        _permValidateRenewals = false;
       } else if (job == 'superviseur') {
         _role = 'supervisor';
         _permMembersAdd = true;
@@ -72,6 +75,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
         _permReportsView = true;
         _permPlansManage = true;
         _permAccessControl = true;
+        _permValidateRenewals = true;
       }
     });
   }
@@ -114,6 +118,7 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
           _permReportsView = p['can_view_reports'] as bool? ?? false;
           _permPlansManage = p['can_manage_plans'] as bool? ?? false;
           _permAccessControl = p['can_access_control'] as bool? ?? true;
+          _permValidateRenewals = p['can_validate_renewals'] as bool? ?? (_role == 'supervisor');
         } else {
           _applyJobPreset(_role == 'supervisor' ? 'superviseur' : 'caissier');
         }
@@ -181,9 +186,11 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
       'can_cashier': _permCashier,
       'can_view_payments': _permPaymentsView,
       'can_view_receipts': _permReceiptsView,
+      'can_reports_view': _permReportsView,
       'can_view_reports': _permReportsView,
       'can_manage_plans': _permPlansManage,
       'can_access_control': _permAccessControl,
+      'can_validate_renewals': _permValidateRenewals,
     };
     final command = CreateStaffCommand(
       requestId: draft?['request_id'] as String? ?? const Uuid().v4(),
@@ -418,6 +425,16 @@ class _CreateStaffPageState extends ConsumerState<CreateStaffPage> {
                                     title: Text(s.text('perm_access_control')),
                                     value: _permAccessControl,
                                     onChanged: _busy ? null : (v) => setState(() => _permAccessControl = v ?? true),
+                                  ),
+                                  CheckboxListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(s.text('perm_validate_renewals')),
+                                    subtitle: Text(
+                                      s.text('perm_validate_renewals_desc'),
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                    value: _permValidateRenewals,
+                                    onChanged: _busy ? null : (v) => setState(() => _permValidateRenewals = v ?? false),
                                   ),
                                 ],
                               ),

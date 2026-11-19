@@ -48,6 +48,8 @@ class StaffProfile {
   bool get canManagePlans =>
       permissions['can_manage_plans'] as bool? ?? (role == 'manager' || role == 'supervisor' || isSecretaryOrCashier);
   bool get canAccessControl => permissions['can_access_control'] as bool? ?? true;
+  bool get canValidateRenewals =>
+      permissions['can_validate_renewals'] as bool? ?? (role == 'manager' || role == 'supervisor');
 
   factory StaffProfile.fromJson(Json json) => StaffProfile(
     id: json['id'] as String,

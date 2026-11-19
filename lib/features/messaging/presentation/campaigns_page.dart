@@ -386,6 +386,7 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
   }
 
   Future<void> _sendCampaign() async {
+    if (_isSending) return;
     final s = AppStrings.of(context);
     final title = _titleController.text.trim();
     final subject = _subjectController.text.trim();
@@ -578,6 +579,91 @@ class _CampaignsPageState extends ConsumerState<CampaignsPage> with SingleTicker
       ),
     );
   }
+
+  Future<void> _sendWhatsAppCampaign(
+    List<Map<String, dynamic>> recipients,
+    String title,
+    String body,
+    AppStrings s,
+  ) async {
+    final runtime = ref.read(appRuntimeProvider);
+    final gymId = runtime.session?.gymId;
+    final notifService = ref.read(whatsAppNotificationServiceProvider);
+
+    // 1. Verifye si gym nan gen aksè abònman WhatsApp aktif (pa sispann, pa ekspire)
+    final access = await notifService.checkGymAccess(gymId: gymId);
+    if (!access.hasAccess) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ ${access.message}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 7),
+          ),
+        );
+        setState(() => _isSending = false);
+      }
+      return;
+    }
+
+    // 2. Verifye si sèvis WhatsApp la konekte sou aparèy la
+    final waClient = ref.read(whatsAppClientProvider);
+    final waState = await waClient.checkStatus();
+
+    if (!waState.isReady) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ WhatsApp pa konekte. Tanpri ale nan Panèl Admin > WhatsApp pou konekte li anvan.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() => _isSending = false);
+      }
+      return;
+    }
+
+    final gym = runtime.session?.gym ?? const <String, dynamic>{};
+    final gymName = gym['name'] as String? ?? 'SecurGYM';
+    final gymPhone = gym['phone'] as String? ?? '';
+    final footer = WhatsAppNotificationService.buildCampaignFooter(
+      gymName: gymName,
+      gymPhone: gymPhone,
+      lang: s.locale.languageCode,
+    );
+
+    // Bwat dyalòg pwogresyon an dirèk ak Pwoteksyon Anti-Ban (StatefulWidget pou evite paralèl loop)
+    if (!mounted) return;
+    final sentCount = await showDialog<int>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => _WhatsAppCampaignProgressDialog(
+        recipients: recipients,
+        title: title,
+        body: body,
+        footer: footer,
+        gymId: gymId,
+        gymName: gymName,
+        waClient: waClient,
+        lang: s.locale.languageCode,
+        speedMode: _speedMode,
+      ),
+    ) ?? 0;
+
+    // 3. Anrejistre kanpay la nan baz done Supabase
+    try {
+      if (gymId != null && sentCount > 0) {
+        await Supabase.instance.client.from('campaigns').insert({
+          'gym_id': gymId,
+          'title': title,
+          'subject': title,
+          'body_text': body,
+          'template_key': _templateKey,
+          'channels': ['whatsapp'],
+          'recipient_count': sentCount,
+          'status': 'sent',
+        });
+      }
     } catch (_) {}
 
     if (mounted) {
@@ -1523,6 +1609,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
   int _failedCount = 0;
   bool _isCancelled = false;
   bool _isPaused = false;
+  bool _hasStarted = false;
   String _currentRecipient = '';
   String _progressStatus = 'Preparasyon pou voye...';
   int _coolingSeconds = 0;
@@ -1530,7 +1617,12 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _startSending());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_hasStarted && mounted) {
+        _hasStarted = true;
+        _startSending();
+      }
+    });
   }
 
   Future<void> _startSending() async {
@@ -1640,7 +1732,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final total = widget.recipients.length;
-    final processed = _sentCount + _failedCount;
+    final processed = (_sentCount + _failedCount).clamp(0, total);
     final progress = total > 0 ? (processed / total) : 0.0;
 
     return AlertDialog(
@@ -1701,7 +1793,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Mesaj voye : $_sentCount / $total',
+                  'Mesaj voye : ${_sentCount.clamp(0, total)} / $total',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 14,
@@ -1710,7 +1802,7 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
                 ),
                 if (_failedCount > 0)
                   Text(
-                    '$_failedCount echwe',
+                    '${_failedCount.clamp(0, total)} echwe',
                     style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold),
                   ),
               ],
@@ -1775,3 +1867,4 @@ class _WhatsAppCampaignProgressDialogState extends State<_WhatsAppCampaignProgre
       ],
     );
   }
+}
